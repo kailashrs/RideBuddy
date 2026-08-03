@@ -1,13 +1,15 @@
-# RS 457 Companion
+# RideBuddy
 
-An independent Android companion app for the Aprilia RS 457. The project is a native Kotlin and Jetpack Compose Material 3 app built around the BLE protocol mapped from the Aprilia India OEM application.
+RideBuddy is a native Android companion app for supported motorcycles. The
+project is built with Kotlin and Jetpack Compose Material 3, with a
+model-aware Bluetooth transport layer and safety-gated vehicle integration.
 
 ## Current implementation
 
 - Material You app shell with **Live**, **History**, **Insights**, **Info**, and **Settings** destinations.
 - Guided first-run setup for permissions, bike association, authentication status, optional alerts, and navigation.
 - Adaptive bottom navigation / navigation rail layout.
-- Generic Android Companion Device association for the RS 457/Tuono 457 advertisement families that share the verified telemetry layout, with no watch or automotive profile impersonation. SR/MIA-family devices remain excluded until their distinct telemetry decoder is implemented and tested.
+- Android Companion Device association for supported motorcycle families with compatible telemetry layouts, with no watch or automotive profile impersonation. Unsupported variants remain excluded until a dedicated telemetry decoder is implemented and tested.
 - Companion presence callbacks and foreground GATT ownership for automatic nearby reconnection.
 - Google Maps share target, coordinate/link parser, address geocoding, and two-wheeler Navigation SDK route session. External shares require confirmation by default; automatic start is an explicit opt-in.
 - Runtime Google Navigation SDK API-key settings under **Settings → Navigation**.
@@ -20,7 +22,7 @@ An independent Android companion app for the Aprilia RS 457. The project is a na
 - Weekly History summaries, fuel summaries, hard acceleration/braking events, 0–60/0–100 records, parking launch, ride sharing, CSV/GPX export, and full-history CSV export.
 - Long-term Insights for 7, 30, and 90 days or all time, including totals, averages, records, fuel estimates, and period comparison.
 - Opt-in, rate-limited TFT bridge for maneuver, trip, road text, session, status, and clear packets.
-- Opt-in notification-listener bridge for OEM-supported social, mail, message, and incoming-call presentation on the TFT.
+- Opt-in notification-listener bridge for supported social, mail, message, and incoming-call presentation on the vehicle display.
 - Per-app notification controls and reactive priority arbitration: calls win, approaching turns immediately clear lower-priority alerts, each simultaneous alert expires independently, and navigation is restored afterward.
 - Call controls prefer the default phone app's standard `CallStyle` actions; an explicit `ANSWER_PHONE_CALLS` Telecom fallback is available for incompatible dialers.
 - Optional phone-side overspeed, high-RPM, hard-acceleration and hard-braking alerts, plus location-based severe-weather and supported route alerts that can briefly appear on the TFT without obscuring calls or imminent turns.
@@ -28,9 +30,21 @@ An independent Android companion app for the Aprilia RS 457. The project is a na
 - Dedicated protocol diagnostics screen, stationary TFT test, diagnostics sharing, and in-place ride-database migrations.
 - Unit tests for telemetry decoding, handshake lookup, API-key validation, aggregations, and TFT packet encoding.
 
-Bike-side writes are implemented from the statically recovered OEM protocol. Inferred TFT navigation and call-state output are off by default. The stationary TFT test is an optional parked diagnostic that waits for expected GATT completions and asks the rider to visually confirm the TFT response; it is not a substitute for broader live vehicle validation.
+Vehicle writes are implemented behind opt-in controls and are disabled by
+default until parked validation confirms compatibility. Navigation and
+call-state display output are also off by default. The stationary display test
+is an optional parked diagnostic that waits for expected GATT completions and
+asks the rider to visually confirm the response; it is not a substitute for
+broader live-vehicle validation.
 
-The recovered TFT protocol exposes fixed notification icons, not arbitrary notification or media text. Accordingly, message preview-length and media-card controls are intentionally not fabricated. Weather alerts use the Open-Meteo forecast endpoint only while the preference is enabled and a current riding location is available. Checks are limited to once every 30 minutes unless the motorcycle moves at least 10 km; no weather API key is required. Road-hazard alerts remain available for navigation providers that supply hazard events because turn-by-turn data alone does not expose a general hazard feed.
+The current vehicle-display integration exposes fixed notification icons, not
+arbitrary notification or media text. Accordingly, message preview-length and
+media-card controls are intentionally not fabricated. Weather alerts use the
+Open-Meteo forecast endpoint only while the preference is enabled and a current
+riding location is available. Checks are limited to once every 30 minutes
+unless the motorcycle moves at least 10 km; no weather API key is required.
+Road-hazard alerts remain available for navigation providers that supply hazard
+events because turn-by-turn data alone does not expose a general hazard feed.
 
 Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC BY 4.0. The public endpoint's applicable usage tier must be reviewed before commercial distribution.
 
@@ -82,25 +96,30 @@ build. To enable its optional release-signing check, configure
 three password/alias secrets shown above. CI then builds the release APK and
 rejects any Android Debug signer.
 
+The same workflow also supports **Run workflow** from GitHub Actions and
+version tags such as `v1.0.0`. These release runs require all four release
+secrets, upload the signed APK as a workflow artifact, and create a GitHub
+Release when triggered by a `v*` tag. The keystore is decoded only into the
+runner's temporary directory and is never committed to the repository.
+
 ## Navigation setup
 
 1. Create a Google Cloud project and enable Navigation SDK for Android.
 2. Create an Android-restricted API key for package `com.spaceboy.ridebuddy` and the signing certificate used for the build.
 3. In the app, open **Settings → Navigation** and paste the key.
-4. Share a Google Maps destination to RS 457 Companion, or paste a link/address into **Live → Navigate**.
+4. Share a Google Maps destination to RideBuddy, or paste a link/address into **Live → Navigate**.
 5. Optionally set Location to **Allow all the time** under **Settings → Navigation with screen off** for the most accurate guidance when the app is backgrounded. Foreground navigation remains available without this optional grant.
 
 ## Bike and call setup
 
 1. Open **Settings → Bike** and associate the motorcycle in Android's system companion-device picker.
 2. Enable notification access under **Settings → Alerts & notifications** for TFT alerts, caller presentation, and standard call actions.
-3. Enable **Legacy call compatibility** only if the installed phone app does not expose working answer/decline actions. This optional fallback uses the same deprecated Telecom controls observed in the OEM app and does not make RS 457 Companion the default dialer.
+3. Enable **Legacy call compatibility** only if the installed phone app does not expose working answer/decline actions. This optional fallback uses deprecated Telecom controls and does not make RideBuddy the default dialer.
 4. Before relying on **Experimental TFT navigation**, **Caller display**, or **TFT call controls**, consider running the stationary TFT test and confirming the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing a key after the SDK has been configured requires an app restart because Google permits `NavigationApi.setApiKey()` only once per process.
 
-## Protocol references
+## Project references
 
-- [BLE protocol map](docs/aprilia-rs457-ble-protocol.md)
-- [Stationary bike validation checklist](docs/hardware-validation.md)
+- [Stationary vehicle validation checklist](docs/hardware-validation.md)
 - [Material You product design](docs/app-ui-design.md)

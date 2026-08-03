@@ -3,6 +3,7 @@ name: Android CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -82,3 +83,97 @@ jobs:
               exit 1
             fi
           done
+
+  release:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate release secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret_name in RELEASE_KEYSTORE_BASE64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+            if [[ -z "${!secret_name:-}" ]]; then
+              echo "Missing required release secret: $secret_name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_keystore_path="$RUNNER_TEMP/ridebuddy-release.keystore"
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$release_keystore_path"
+          chmod 600 "$release_keystore_path"
+          echo "RELEASE_STORE_FILE=$release_keystore_path" >> "$GITHUB_ENV"
+
+      - name: Build signed release
+        run: ./gradlew testDebugUnitTest lintDebug assembleRelease --stacktrace
+
+      - name: Verify release signer and prepare artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -1)"
+          apksigner_path="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+          release_apks=(app/build/outputs/apk/release/*.apk)
+          if [[ ! -e "${release_apks[0]}" ]]; then
+            echo "No release APK was produced" >&2
+            exit 1
+          fi
+
+          for release_apk in "${release_apks[@]}"; do
+            signer_output="$("$apksigner_path" verify --print-certs "$release_apk")"
+            if grep -Fq "CN=Android Debug" <<< "$signer_output"; then
+              echo "Release APK is signed with an Android Debug certificate: $release_apk" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p release-artifacts
+          cp "${release_apks[0]}" "release-artifacts/RideBuddy-$GITHUB_REF_NAME-release.apk"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RideBuddy-${{ github.ref_name }}-release
+          path: release-artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "release-artifacts/RideBuddy-$GITHUB_REF_NAME-release.apk" \
+            --title "RideBuddy $GITHUB_REF_NAME" \
+            --generate-notes
