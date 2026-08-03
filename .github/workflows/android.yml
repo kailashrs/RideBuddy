@@ -1,0 +1,84 @@
+name: Android CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify debug build
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleBenchmark --stacktrace
+
+      - name: Prepare optional release signing
+        id: release_signing
+        shell: bash
+        run: |
+          if [[ -z "$RELEASE_KEYSTORE_BASE64" || -z "$RELEASE_STORE_PASSWORD" || -z "$RELEASE_KEY_ALIAS" || -z "$RELEASE_KEY_PASSWORD" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          release_keystore_path="$RUNNER_TEMP/ridebuddy-release.keystore"
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$release_keystore_path"
+          chmod 600 "$release_keystore_path"
+          echo "RELEASE_STORE_FILE=$release_keystore_path" >> "$GITHUB_ENV"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble signed release
+        if: steps.release_signing.outputs.configured == 'true'
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Reject a debug-signed release
+        if: steps.release_signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          latest_build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -1)"
+          apksigner_path="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+          release_apks=(app/build/outputs/apk/release/*.apk)
+          if [[ ! -e "${release_apks[0]}" ]]; then
+            echo "No release APK was produced" >&2
+            exit 1
+          fi
+
+          for release_apk in "${release_apks[@]}"; do
+            signer_output="$("$apksigner_path" verify --print-certs "$release_apk")"
+            if grep -Fq "CN=Android Debug" <<< "$signer_output"; then
+              echo "Release APK is signed with an Android Debug certificate: $release_apk" >&2
+              exit 1
+            fi
+          done

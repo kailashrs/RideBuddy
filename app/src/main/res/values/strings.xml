@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RideBuddy</string>
+    <string name="navigation_preparing_route">Preparing route…</string>
+    <string name="navigation_end">End</string>
+    <string name="navigation_arrived">You have arrived</string>
+    <string name="navigation_rerouting">Finding a better route…</string>
+    <string name="navigation_retry">Retry</string>
+</resources>

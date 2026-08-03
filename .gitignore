@@ -1,0 +1,21 @@
+.gradle/
+.gradle_home/
+.kotlin/
+.idea/
+*.iml
+local.properties
+.release-signing.properties
+*.jks
+*.keystore
+build/
+app/build/
+captures/
+Artifacts/*
+!Artifacts/README.md
+*.apk
+# One-off local refactor/preview helpers retained outside the product source set.
+fix_mainscreen*.py
+update_mainscreen*.py
+revert_animations.py
+preview.py
+.DS_Store
