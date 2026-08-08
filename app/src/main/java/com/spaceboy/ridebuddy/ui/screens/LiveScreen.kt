@@ -86,6 +86,8 @@ fun LiveScreen(
     scanState: BikeScanState,
     discoveredBikes: List<DiscoveredBike>,
     sharedDestination: String?,
+    autoStartSharedDestinations: Boolean,
+    isNavigationStarting: Boolean,
     connectionState: BikeConnectionState,
     telemetry: TelemetryFrame?,
     activeRide: ActiveRide?,
@@ -105,8 +107,21 @@ fun LiveScreen(
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
     var liveDetailLevel by rememberSaveable { mutableStateOf(LiveDetailLevel.Glance) }
-    var showSharedConfirmation by rememberSaveable(sharedDestination) { mutableStateOf(!sharedDestination.isNullOrBlank()) }
-    LaunchedEffect(sharedDestination) { if (!sharedDestination.isNullOrBlank()) destination = sharedDestination }
+    var showSharedConfirmation by rememberSaveable(sharedDestination, autoStartSharedDestinations) { 
+        mutableStateOf(!sharedDestination.isNullOrBlank() && !autoStartSharedDestinations) 
+    }
+    LaunchedEffect(sharedDestination, autoStartSharedDestinations) { 
+        if (!sharedDestination.isNullOrBlank()) {
+            destination = sharedDestination
+            if (autoStartSharedDestinations) {
+                showSharedConfirmation = false
+                onSharedDestinationHandled()
+                onStartNavigation(sharedDestination)
+            } else {
+                showSharedConfirmation = true
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -357,6 +372,18 @@ fun LiveScreen(
             }
         }
     }
+
+    if (isNavigationStarting) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+            Card {
+                Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                    Spacer(Modifier.width(16.dp))
+                    Text("Finding route...")
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -407,7 +434,12 @@ private fun ConnectionCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp), 
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

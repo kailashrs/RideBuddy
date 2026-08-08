@@ -263,7 +263,7 @@ Use a standard Material 3 settings flow:
 - Store it encrypted using Android Keystore-backed storage.
 - Never initialize the Navigation SDK until a configured key has been loaded.
 
-The current SDK supports runtime configuration with `NavigationApi.setApiKey(key)`. It must be called before obtaining a `Navigator`, and only once during an application process. Replacing or removing a key after SDK initialization therefore changes the status to Restart required; the new configuration takes effect on the next clean app launch.
+The current SDK supports runtime configuration, but requires an app restart if the active key is replaced. If the key is replaced or removed, change the status to "Restart required" and instruct the user to restart the app.
 
 If the key is absent or invalid:
 

@@ -312,6 +312,8 @@ private fun ScreenContent(
                 scanState = scanState,
                 discoveredBikes = discoveredBikes,
                 sharedDestination = uiState.sharedDestination,
+                autoStartSharedDestinations = settings.autoStartSharedDestinations,
+                isNavigationStarting = uiState.isNavigationStarting,
                 connectionState = connectionState,
                 telemetry = telemetry,
                 activeRide = activeRide,

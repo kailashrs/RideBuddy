@@ -4,31 +4,14 @@ RideBuddy is a native Android companion app for supported motorcycles. The
 project is built with Kotlin and Jetpack Compose Material 3, with a
 model-aware Bluetooth transport layer and safety-gated vehicle integration.
 
-## Current implementation
+## Features
 
-- Material You app shell with **Live**, **History**, **Insights**, **Info**, and **Settings** destinations.
-- Guided first-run setup for permissions, bike association, authentication status, optional alerts, and navigation.
-- Adaptive bottom navigation / navigation rail layout.
-- Android Companion Device association for supported motorcycle families with compatible telemetry layouts, with no watch or automotive profile impersonation. Unsupported variants remain excluded until a dedicated telemetry decoder is implemented and tested.
-- Companion presence callbacks and foreground GATT ownership for automatic nearby reconnection.
-- Google Maps share target, coordinate/link parser, address geocoding, and two-wheeler Navigation SDK route session. External shares require confirmation by default; automatic start is an explicit opt-in.
-- Runtime Google Navigation SDK API-key settings under **Settings → Navigation**.
-- API keys encrypted with an Android Keystore AES-GCM key; raw keys are never read back into the UI.
-- Google Navigation SDK 7.8.0 initialization through `NavigationApi.setApiKey()` before any Navigator is requested.
-- Full serialized BLE GATT transport with MTU negotiation, authentication, subscriptions, reconnect, heartbeat, identity reads, bike controls, and diagnostics.
-- Live speed, RPM, throttle, and consumption telemetry with automatic ride recording and local SQLite history.
-- Three-level live-details sheet with glance metrics, current-ride/connection detail, and rolling speed/RPM/throttle/consumption charts even before ride recording starts.
-- Configurable recording thresholds, named start/end areas, parking coordinates, compact route previews, and a real Google route map in ride details.
-- Weekly History summaries, fuel summaries, hard acceleration/braking events, 0–60/0–100 records, parking launch, ride sharing, CSV/GPX export, and full-history CSV export.
-- Long-term Insights for 7, 30, and 90 days or all time, including totals, averages, records, fuel estimates, and period comparison.
-- Opt-in, rate-limited TFT bridge for maneuver, trip, road text, session, status, and clear packets.
-- Opt-in notification-listener bridge for supported social, mail, message, and incoming-call presentation on the vehicle display.
-- Per-app notification controls and reactive priority arbitration: calls win, approaching turns immediately clear lower-priority alerts, each simultaneous alert expires independently, and navigation is restored afterward.
-- Call controls prefer the default phone app's standard `CallStyle` actions; an explicit `ANSWER_PHONE_CALLS` Telecom fallback is available for incompatible dialers.
-- Optional phone-side overspeed, high-RPM, hard-acceleration and hard-braking alerts, plus location-based severe-weather and supported route alerts that can briefly appear on the TFT without obscuring calls or imminent turns.
-- System/light/dark appearance modes, dynamic color, and high-contrast colors.
-- Dedicated protocol diagnostics screen, stationary TFT test, diagnostics sharing, and in-place ride-database migrations.
-- Unit tests for telemetry decoding, handshake lookup, API-key validation, aggregations, and TFT packet encoding.
+- **Material You UI**: Adaptive layouts, light/dark modes, and dynamic color. Features Live, History, Insights, Info, and Settings destinations.
+- **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and consumption metrics with automatic ride recording.
+- **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
+- **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities.
+- **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and standard phone app call controls directly to the motorcycle's display.
+- **Alerts & Priorities**: Handles competing phone notifications, imminent turns, and weather warnings without obscuring critical driving information.
 
 Vehicle writes are implemented behind opt-in controls and are disabled by
 default until parked validation confirms compatibility. Navigation and
@@ -38,11 +21,8 @@ asks the rider to visually confirm the response; it is not a substitute for
 broader live-vehicle validation.
 
 The current vehicle-display integration exposes fixed notification icons, not
-arbitrary notification or media text. Accordingly, message preview-length and
-media-card controls are intentionally not fabricated. Weather alerts use the
-Open-Meteo forecast endpoint only while the preference is enabled and a current
-riding location is available. Checks are limited to once every 30 minutes
-unless the motorcycle moves at least 10 km; no weather API key is required.
+arbitrary notification or media text. Weather alerts use the Open-Meteo
+forecast endpoint when a current riding location is available.
 Road-hazard alerts remain available for navigation providers that supply hazard
 events because turn-by-turn data alone does not expose a general hazard feed.
 
@@ -57,9 +37,7 @@ Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC B
 - compile SDK 36.1, target SDK 36, minimum SDK 31 (Android 12)
 - Google Navigation SDK 7.8.0
 
-Navigation SDK 7.8.0 recommends AGP 8.13.2 and Gradle 8.13 so its R8/D8
-consumer rules are processed by the supported shrinker version. The checked-in
-Gradle wrapper remains the authoritative build entry point.
+The checked-in Gradle wrapper remains the authoritative build entry point.
 
 ## Build
 
@@ -69,40 +47,13 @@ Open the project in Android Studio or run:
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleBenchmark
 ```
 
-The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
-The `benchmark` variant is an optimized, minified local build with a `.benchmark`
-application ID and `-benchmark` version suffix. It is debug-signed for local R8
-validation only and is not a release artifact.
+### Release builds
 
-### Signed release builds
+Release packaging deliberately fails without a signing key. Set these secrets in user-level Gradle properties or your CI environment (never commit them): `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. 
 
-Release packaging deliberately fails without a signing key, so the project cannot accidentally produce a distributable unsigned APK. Set these secrets in user-level Gradle properties or your CI environment (never commit them):
+Run `./gradlew assembleRelease` to build the release variant.
 
-```properties
-RELEASE_STORE_FILE=/absolute/path/to/release.keystore
-RELEASE_STORE_PASSWORD=...
-RELEASE_KEY_ALIAS=...
-RELEASE_KEY_PASSWORD=...
-```
-
-Then run `./gradlew assembleRelease` or `./gradlew bundleRelease`.
-
-For local R8/resource-shrinker validation without release credentials, run
-`./gradlew assembleBenchmark`. This produces a debug-signed, non-distributable
-package with the distinct application ID `com.spaceboy.ridebuddy.benchmark` and
-the version suffix `-benchmark`.
-
-CI always runs unit tests, lint, a debug build, and the optimized benchmark
-build. To enable its optional release-signing check, configure
-`RELEASE_KEYSTORE_BASE64` with the base64 contents of the keystore plus the
-three password/alias secrets shown above. CI then builds the release APK and
-rejects any Android Debug signer.
-
-The same workflow also supports **Run workflow** from GitHub Actions and
-version tags such as `v1.0.0`. These release runs require all four release
-secrets, upload the signed APK as a workflow artifact, and create a GitHub
-Release when triggered by a `v*` tag. The keystore is decoded only into the
-runner's temporary directory and is never committed to the repository.
+CI automatically runs tests, lint, and builds debug/benchmark APKs, failing release builds if credentials are not provided.
 
 ## Navigation setup
 
@@ -119,7 +70,7 @@ runner's temporary directory and is never committed to the repository.
 3. Enable **Legacy call compatibility** only if the installed phone app does not expose working answer/decline actions. This optional fallback uses deprecated Telecom controls and does not make RideBuddy the default dialer.
 4. Before relying on **Experimental TFT navigation**, **Caller display**, or **TFT call controls**, consider running the stationary TFT test and confirming the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
-The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing a key after the SDK has been configured requires an app restart because Google permits `NavigationApi.setApiKey()` only once per process.
+The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
 
 ## Project references
 

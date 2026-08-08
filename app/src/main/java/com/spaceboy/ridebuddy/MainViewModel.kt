@@ -101,6 +101,10 @@ class MainViewModel(
         mutableUiState.update { it.copy(isDiagnosticsOpen = false) }
     }
 
+    fun setNavigationStarting(starting: Boolean) {
+        mutableUiState.update { it.copy(isNavigationStarting = starting) }
+    }
+
     fun saveNavigationApiKey(value: String) {
         val apiKey = value.trim()
         val validationError = NavigationApiKeyPolicy.validate(apiKey)
@@ -327,6 +331,7 @@ data class MainUiState(
     val navigationKey: NavigationKeyUiState = NavigationKeyUiState(),
     val sharedDestination: String? = null,
     val transientMessage: String? = null,
+    val isNavigationStarting: Boolean = false,
 )
 
 data class NavigationKeyUiState(

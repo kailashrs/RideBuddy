@@ -423,9 +423,11 @@ class MainActivity : ComponentActivity() {
             viewModel.showMessage("Add a Google Navigation API key first")
             return
         }
+        viewModel.setNavigationStarting(true)
         lifecycleScope.launch {
             container.destinationParser.parse(rawDestination).fold(
                 onSuccess = { destination ->
+                    viewModel.setNavigationStarting(false)
                     viewModel.clearSharedDestination()
                     startActivity(
                         NavigationActivity.intent(
@@ -436,7 +438,10 @@ class MainActivity : ComponentActivity() {
                         ),
                     )
                 },
-                onFailure = { error -> viewModel.showMessage(error.message ?: "Could not read that destination") },
+                onFailure = { error ->
+                    viewModel.setNavigationStarting(false)
+                    viewModel.showMessage(error.message ?: "Could not read that destination")
+                },
             )
         }
     }
