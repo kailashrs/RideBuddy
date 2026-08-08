@@ -7,7 +7,6 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
-import android.bluetooth.BluetoothGattConnectionSettings
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
@@ -325,27 +324,14 @@ class AndroidBikeConnection(
             rssi = null,
         )
         val newGatt = try {
-            if (Build.VERSION.SDK_INT >= 37) {
-                device.connectGatt(
-                    BluetoothGattConnectionSettings.Builder()
-                        .setAutoConnectEnabled(false)
-                        .setAutomaticMtuEnabled(false)
-                        .setTransport(BluetoothDevice.TRANSPORT_LE)
-                        .build(),
-                    ContextCompat.getMainExecutor(appContext),
-                    callback,
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                device.connectGatt(
-                    appContext,
-                    false,
-                    callback,
-                    BluetoothDevice.TRANSPORT_LE,
-                    BluetoothDevice.PHY_LE_1M_MASK,
-                    mainHandler,
-                )
-            }
+            device.connectGatt(
+                appContext,
+                false,
+                callback,
+                BluetoothDevice.TRANSPORT_LE,
+                BluetoothDevice.PHY_LE_1M_MASK,
+                mainHandler,
+            )
         } catch (error: SecurityException) {
             log("GATT permission failure: ${error.javaClass.simpleName}")
             fail("Allow Nearby devices to connect to the motorcycle")

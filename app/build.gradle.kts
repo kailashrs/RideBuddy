@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -16,12 +17,13 @@ val releaseSigningConfigured = listOf(releaseStoreFile, releaseStorePassword, re
 
 android {
     namespace = "com.spaceboy.ridebuddy"
-    compileSdk = 37
+    compileSdk = 36
+    compileSdkMinor = 1
 
     defaultConfig {
         applicationId = "com.spaceboy.ridebuddy"
         minSdk = 31
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 100
         versionName = "1.0"
 
@@ -75,6 +77,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 
@@ -82,9 +90,9 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("androidx.core:core-ktx:1.19.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")

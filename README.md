@@ -50,14 +50,16 @@ Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC B
 
 ## Toolchain
 
-- Android Gradle Plugin 9.3.1
-- Gradle 9.6.1
+- Android Gradle Plugin 8.13.2
+- Gradle 8.13
 - Kotlin / Compose compiler 2.3.21
 - Jetpack Compose BOM 2026.06.01
-- compile/target SDK 37, minimum SDK 31 (Android 12)
+- compile SDK 36.1, target SDK 36, minimum SDK 31 (Android 12)
 - Google Navigation SDK 7.8.0
 
-AGP 9.3 requires Android Studio Quail 2 (2026.1.2) for full IDE support. The checked-in Gradle wrapper remains the authoritative build entry point.
+Navigation SDK 7.8.0 recommends AGP 8.13.2 and Gradle 8.13 so its R8/D8
+consumer rules are processed by the supported shrinker version. The checked-in
+Gradle wrapper remains the authoritative build entry point.
 
 ## Build
 
