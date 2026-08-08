@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.spaceboy.ridebuddy.ble.BikeScanState
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
@@ -97,6 +98,7 @@ fun LiveScreen(
     onConnectBike: (DiscoveredBike) -> Unit,
     onDisconnectBike: () -> Unit,
     onStartNavigation: (String) -> Unit,
+    onStopNavigation: () -> Unit,
     onSharedDestinationHandled: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
@@ -151,44 +153,142 @@ fun LiveScreen(
                 .padding(start = 16.dp)
                 .semantics { heading() },
         )
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = if (guidance.active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (guidance.active) {
-                    Text(guidance.instruction.ifBlank { "Guidance active" }, style = MaterialTheme.typography.headlineSmall)
-                    guidance.roadName.takeIf(String::isNotBlank)?.let {
-                        Text(it, style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Outlined.Directions,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = guidance.instruction.ifBlank { "Guidance active" },
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                            if (guidance.roadName.isNotBlank()) {
+                                Text(
+                                    text = guidance.roadName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
-                    Text(
-                        listOfNotNull(
-                            guidance.distanceToManeuverMetres?.let { "${it} m to maneuver" },
-                            guidance.distanceToDestinationMetres?.let { "${UnitFormatter.distance(it / 1_000.0, units, locale)} left" },
-                            guidance.timeToDestinationSeconds?.let { "${formatDuration(it * 1_000L)} remaining" },
-                        ).joinToString(" • "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    guidance.timeToDestinationSeconds?.let { seconds ->
-                        Text(
-                            "ETA ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(System.currentTimeMillis() + seconds * 1_000L))}",
-                            style = MaterialTheme.typography.labelLarge,
-                        )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        guidance.distanceToDestinationMetres?.let { metres ->
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ) {
+                                Text(
+                                    text = "${UnitFormatter.distance(metres / 1000.0, units, locale)} left",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                        guidance.timeToDestinationSeconds?.let { seconds ->
+                            val etaStr = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(System.currentTimeMillis() + seconds * 1000L))
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ) {
+                                Text(
+                                    text = "ETA $etaStr",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                        guidance.distanceToManeuverMetres?.let { m ->
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = "In ${m}m",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onStopNavigation,
+                            modifier = Modifier.weight(1f),
+                            shape = MaterialTheme.shapes.large,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(8.dp))
+                            Text("End Route", color = MaterialTheme.colorScheme.error)
+                        }
+                        Button(
+                            onClick = { onStartNavigation(destination.ifBlank { guidance.roadName }) },
+                            modifier = Modifier.weight(1f),
+                            shape = MaterialTheme.shapes.large,
+                        ) {
+                            Icon(Icons.Outlined.Directions, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Full Map")
+                        }
                     }
                 } else {
-                    OutlinedTextField(
+                    androidx.compose.material3.TextField(
                         value = destination,
                         onValueChange = { destination = it },
-                        label = { Text("Destination or Google Maps link") },
+                        placeholder = { Text("Destination or Google Maps link") },
                         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = if (destination.isNotBlank()) {
                             { IconButton(onClick = { destination = "" }) { Icon(Icons.Outlined.Close, contentDescription = "Clear") } }
                         } else null,
-                        minLines = 2,
+                        maxLines = 3,
                         modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        colors = androidx.compose.material3.TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        )
                     )
                     Button(
                         onClick = { onStartNavigation(destination) },
                         enabled = destination.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
                     ) {
                         Icon(Icons.Outlined.Directions, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -274,11 +374,40 @@ private fun ConnectionCard(
         else -> MaterialTheme.colorScheme.outline
     }
 
+    if (connected) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(statusColor, shape = CircleShape),
+                )
+                Text(
+                    (state as BikeConnectionState.Connected).deviceName,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            TextButton(onClick = onDisconnectBike) {
+                Text("Disconnect")
+            }
+        }
+        return
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -290,7 +419,6 @@ private fun ConnectionCard(
                 )
                 Text(
                     text = when (state) {
-                        is BikeConnectionState.Connected -> "Connected"
                         is BikeConnectionState.Connecting -> "Connecting"
                         is BikeConnectionState.Authenticating -> "Authenticating"
                         is BikeConnectionState.Failed -> "Connection Failed"
@@ -310,18 +438,15 @@ private fun ConnectionCard(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = when (state) {
-                    is BikeConnectionState.Connected -> state.deviceName
                     is BikeConnectionState.Connecting -> "Connecting…"
                     is BikeConnectionState.Authenticating -> "Authenticating…"
                     is BikeConnectionState.Failed -> "Connection failed"
                     else -> if (scanState is BikeScanState.Scanning) "Looking for your bike" else "Bike not connected"
                 },
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
             )
             Text(
                 text = when (state) {
-                    is BikeConnectionState.Connected -> "Secure connection active"
                     is BikeConnectionState.Failed -> state.message
                     else -> "Keep the bike switched on and nearby"
                 },
@@ -332,12 +457,6 @@ private fun ConnectionCard(
             Spacer(Modifier.height(16.dp))
             if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating || scanState is BikeScanState.Scanning) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            } else if (connected) {
-                OutlinedButton(onClick = onDisconnectBike) {
-                    Icon(Icons.Outlined.Stop, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Disconnect")
-                }
             } else {
                 Button(onClick = onFindBike) {
                     Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null)
@@ -361,7 +480,7 @@ private fun TelemetryCard(
     val rpmFraction = (frame.engineRpm / 10500f).coerceIn(0f, 1f)
 
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -371,47 +490,49 @@ private fun TelemetryCard(
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             displayedSpeed.toString(),
-                            style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontSize = 72.sp,
+                                lineHeight = 80.sp
+                            ),
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             UnitFormatter.speedUnit(units),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp),
+                            modifier = Modifier.padding(bottom = 12.dp),
                         )
                     }
                 }
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MaterialTheme.shapes.small,
                     color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Text(
                         text = "LIVE",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("RPM", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${frame.engineRpm} rpm", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text("RPM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${frame.engineRpm} rpm", style = MaterialTheme.typography.labelMedium)
                 }
                 LinearProgressIndicator(
                     progress = { rpmFraction },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(8.dp),
+                        .height(16.dp),
                     color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
                 )
             }
 
@@ -513,17 +634,45 @@ private fun LiveChart(title: String, values: List<Double>, unit: String) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(values.lastOrNull()?.let { "Latest %.1f %s".format(it, unit) } ?: "Waiting for samples", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Canvas(Modifier.fillMaxWidth().height(100.dp).semantics { contentDescription = "$title chart with ${values.size} samples" }) {
+            Canvas(Modifier.fillMaxWidth().height(100.dp).padding(top = 8.dp).semantics { contentDescription = "$title chart with ${values.size} samples" }) {
                 if (values.size < 2) return@Canvas
                 val minimum = values.minOrNull() ?: return@Canvas
                 val maximum = values.maxOrNull() ?: return@Canvas
                 val range = (maximum - minimum).takeIf { it > 0.0 } ?: 1.0
                 val dx = size.width / (values.size - 1)
-                values.zipWithNext().forEachIndexed { index, pair ->
-                    val y1 = size.height - ((pair.first - minimum) / range * size.height).toFloat()
-                    val y2 = size.height - ((pair.second - minimum) / range * size.height).toFloat()
-                    drawLine(color, Offset(index * dx, y1), Offset((index + 1) * dx, y2), strokeWidth = 3f)
+                
+                val path = androidx.compose.ui.graphics.Path()
+                var previousX = 0f
+                var previousY = size.height - ((values.first() - minimum) / range * size.height).toFloat()
+                path.moveTo(previousX, previousY)
+                
+                for (i in 1 until values.size) {
+                    val x = i * dx
+                    val y = size.height - ((values[i] - minimum) / range * size.height).toFloat()
+                    val controlX1 = previousX + (x - previousX) / 2f
+                    val controlX2 = previousX + (x - previousX) / 2f
+                    path.cubicTo(controlX1, previousY, controlX2, y, x, y)
+                    previousX = x
+                    previousY = y
                 }
+                
+                drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                
+                // Add subtle gradient fill under the line
+                val fillPath = androidx.compose.ui.graphics.Path().apply {
+                    addPath(path)
+                    lineTo(size.width, size.height)
+                    lineTo(0f, size.height)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(color.copy(alpha = 0.3f), Color.Transparent),
+                        startY = 0f,
+                        endY = size.height
+                    )
+                )
             }
         }
     }
@@ -547,7 +696,7 @@ private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<Ride
 @Composable
 private fun Metric(label: String, value: String) {
     Column {
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(value, style = MaterialTheme.typography.titleLarge)
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

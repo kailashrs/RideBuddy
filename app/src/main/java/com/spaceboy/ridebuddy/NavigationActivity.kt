@@ -6,45 +6,78 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Bundle
-import android.text.TextUtils
-import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
-import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.NavigationUpdatesOptions
 import com.google.android.libraries.navigation.NavigationView
 import com.google.android.libraries.navigation.Navigator
 import com.google.android.libraries.navigation.RoutingOptions
-import com.google.android.libraries.navigation.Waypoint
 import com.google.android.libraries.navigation.SpeedAlertOptions
 import com.google.android.libraries.navigation.SpeedingListener
-import com.spaceboy.ridebuddy.service.NavInfoReceivingService
+import com.google.android.libraries.navigation.Waypoint
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
+import com.spaceboy.ridebuddy.service.NavInfoReceivingService
+import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
 
 class NavigationActivity : ComponentActivity() {
     private lateinit var navigationView: NavigationView
-    private lateinit var statusView: TextView
-    private lateinit var retryButton: Button
+    private var statusTextState = mutableStateOf("")
+    private var retryVisibleState = mutableStateOf(false)
     private var navigator: Navigator? = null
     private var guidanceStarted = false
     private var navigationEndedByUser = false
+
     private val arrivalListener = Navigator.ArrivalListener { event ->
         (application as Rs457Application).container.tftNavigationBridge.arrived()
-        if (event.isFinalDestination) runOnUiThread { statusView.setText(R.string.navigation_arrived) }
+        if (event.isFinalDestination) runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
     }
     private val reroutingListener = Navigator.ReroutingListener {
         (application as Rs457Application).container.apply {
@@ -54,7 +87,7 @@ class NavigationActivity : ComponentActivity() {
                 tftPriorityCoordinator.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")
             }
         }
-        runOnUiThread { statusView.setText(R.string.navigation_rerouting) }
+        runOnUiThread { statusTextState.value = getString(R.string.navigation_rerouting) }
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -67,107 +100,102 @@ class NavigationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         guidanceStarted = savedInstanceState?.getBoolean(KeyGuidanceStarted, false) == true
+        statusTextState.value = getString(R.string.navigation_preparing_route)
         navigationView = NavigationView(this).also { it.onCreate(savedInstanceState) }
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() = endNavigationAndFinish()
+                override fun handleOnBackPressed() = finish()
             },
         )
-        val isDark =
-            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val cardBgColor = if (isDark) 0xF2271E1D.toInt() else 0xF2FCEAE7.toInt()
-        val cardTextColor = if (isDark) 0xFFF0DEDC.toInt() else 0xFF231A19.toInt()
-        val cardShape = android.graphics.drawable.GradientDrawable().apply {
-            setColor(cardBgColor)
-            cornerRadius = 16.dp().toFloat()
-        }
-        statusView = TextView(this).apply {
-            text = getString(R.string.navigation_preparing_route)
-            textSize = 15f
-            setPadding(16.dp(), 10.dp(), 16.dp(), 10.dp())
-            background = cardShape
-            setTextColor(cardTextColor)
-            elevation = 4.dp().toFloat()
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        val closeButton = Button(this).apply {
-            text = getString(R.string.navigation_end)
-            contentDescription = "End navigation"
-            setOnClickListener { endNavigationAndFinish() }
-        }
-        retryButton = Button(this).apply {
-            setText(R.string.navigation_retry)
-            visibility = View.GONE
-            setOnClickListener {
-                if (hasRequiredLocationPermissions()) {
-                    navigator?.let(::calculateRoute) ?: initializeNavigation()
-                } else {
-                    requestLocationOrInitialize()
+
+        val container = (application as Rs457Application).container
+
+        val composeOverlay = ComposeView(this).apply {
+            setContent {
+                val settings by container.appSettings.settings.collectAsStateWithLifecycle()
+
+                Rs457Theme(
+                    themeMode = settings.themeMode,
+                    dynamicColor = settings.dynamicColor,
+                    highContrast = settings.highContrast,
+                ) {
+                    // Retry Overlay Dialog
+                    if (retryVisibleState.value) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            ElevatedCard(
+                                modifier = Modifier.padding(32.dp),
+                                shape = RoundedCornerShape(28.dp),
+                                colors = CardDefaults.elevatedCardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                ),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                ) {
+                                    Text(
+                                        text = statusTextState.value,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (hasRequiredLocationPermissions()) {
+                                                navigator?.let(::calculateRoute) ?: initializeNavigation()
+                                            } else {
+                                                requestLocationOrInitialize()
+                                            }
+                                        },
+                                    ) {
+                                        Icon(Icons.Outlined.Refresh, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(getString(R.string.navigation_retry))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        val topControls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                statusView,
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = 8.dp()
-                },
-            )
-            addView(
-                closeButton,
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            )
-        }
+
         val root = FrameLayout(this).apply {
             addView(
                 navigationView,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             )
             addView(
-                topControls,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply {
-                        gravity = Gravity.TOP
-                    })
-            addView(
-                retryButton,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply {
-                        gravity = Gravity.CENTER
-                    })
+                composeOverlay,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
         }
+
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val safeInsets = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
-            (topControls.layoutParams as FrameLayout.LayoutParams).apply {
-                topMargin = safeInsets.top + 8.dp()
-                leftMargin = safeInsets.left + 12.dp()
-                rightMargin = safeInsets.right + 12.dp()
-                topControls.layoutParams = this
-            }
+            navigationView.setPadding(safeInsets.left, safeInsets.top, safeInsets.right, safeInsets.bottom)
             insets
         }
+
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
         requestLocationOrInitialize()
+
         lifecycleScope.launch {
             (application as Rs457Application).container.bikeConnection.controls.collect { event ->
                 when (event) {
                     BikeControlEvent.ExitNavigation -> endNavigationAndFinish()
                     BikeControlEvent.SkipManeuver -> {
                         val currentNavigator = navigator
-                        if ((currentNavigator?.timeAndDistanceList?.size
-                                ?: 0) > 1
-                        ) currentNavigator?.continueToNextDestination()
-                        else navigationView.showRouteOverview()
+                        if ((currentNavigator?.timeAndDistanceList?.size ?: 0) > 1) {
+                            currentNavigator?.continueToNextDestination()
+                        } else {
+                            navigationView.showRouteOverview()
+                        }
                     }
-
                     is BikeControlEvent.CallAction -> Unit
                 }
             }
@@ -198,8 +226,6 @@ class NavigationActivity : ComponentActivity() {
                 val settings = (application as Rs457Application).container.appSettings.settings.value
                 navigationView.setTrafficPromptsEnabled(settings.hazardAlerts)
                 navigationView.setTrafficIncidentCardsEnabled(settings.hazardAlerts)
-                // A Navigator can survive after its previous Activity leaves. Stop that route and
-                // unregister its feed before applying the newly confirmed destination.
                 if (readyNavigator.isGuidanceRunning) {
                     readyNavigator.stopGuidance()
                     readyNavigator.unregisterServiceForNavUpdates()
@@ -267,8 +293,8 @@ class NavigationActivity : ComponentActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (status == Navigator.RouteStatus.OK) {
-                    retryButton.visibility = View.GONE
-                    statusView.text = intent.getStringExtra(ExtraTitle) ?: "Navigation active"
+                    retryVisibleState.value = false
+                    statusTextState.value = intent.getStringExtra(ExtraTitle) ?: "Navigation active"
                     navigator.startGuidance()
                     guidanceStarted = true
                 } else showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
@@ -277,8 +303,8 @@ class NavigationActivity : ComponentActivity() {
     }
 
     private fun showError(message: String) {
-        statusView.text = message
-        retryButton.visibility = View.VISIBLE
+        statusTextState.value = message
+        retryVisibleState.value = true
     }
 
     private fun endNavigationAndFinish() {
@@ -338,8 +364,6 @@ class NavigationActivity : ComponentActivity() {
         super.onTrimMemory(level)
         navigationView.onTrimMemory(level)
     }
-
-    private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
 
     companion object {
         private const val ExtraLatitude = "latitude"

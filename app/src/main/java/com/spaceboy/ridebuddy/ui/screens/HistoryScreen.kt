@@ -55,7 +55,6 @@ fun HistoryScreen(
             Text(
                 "Your rides will appear here",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 20.dp),
             )
             Text(
@@ -86,7 +85,6 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
             Text(
                 DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ride.startedAtMillis)),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
             )
             ride.startArea?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (ride.routePreview.size > 1) RoutePreview(ride)
@@ -120,7 +118,7 @@ private fun WeeklySummary(rides: List<Ride>, units: DistanceUnits) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("This week", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("This week", style = MaterialTheme.typography.titleLarge)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RideValue("Distance", UnitFormatter.distance(week.sumOf(Ride::distanceKilometres), units, locale))
                 RideValue("Rides", week.size.toString())
@@ -140,32 +138,61 @@ private fun RoutePreview(ride: Ride) {
     val points = ride.routePreview
     val color = MaterialTheme.colorScheme.primary
     val outline = MaterialTheme.colorScheme.outlineVariant
+    val surfaceColor = MaterialTheme.colorScheme.surface
     val cachedPath = remember(points) { Path() }
-    Canvas(Modifier.fillMaxWidth().height(90.dp).semantics { contentDescription = "Route preview from ${ride.startArea ?: "start"} to ${ride.endArea ?: "parking location"}" }) {
+    Canvas(Modifier.fillMaxWidth().height(100.dp).padding(vertical = 8.dp).semantics { contentDescription = "Route preview from ${ride.startArea ?: "start"} to ${ride.endArea ?: "parking location"}" }) {
         val minLat = points.minOf { it.latitude }
         val maxLat = points.maxOf { it.latitude }
         val minLon = points.minOf { it.longitude }
         val maxLon = points.maxOf { it.longitude }
         val latRange = (maxLat - minLat).takeIf { it > 0.0 } ?: 1.0
         val lonRange = (maxLon - minLon).takeIf { it > 0.0 } ?: 1.0
+        
+        // Draw grid
         repeat(4) { index ->
             val y = size.height * index / 3f
             drawLine(outline, Offset(0f, y), Offset(size.width, y), 1f)
         }
+        
+        if (points.size < 2) return@Canvas
+        
         cachedPath.reset()
-        points.forEachIndexed { index, point ->
+        
+        // Calculate all points first
+        val mappedPoints = points.map { point ->
             val x = ((point.longitude - minLon) / lonRange * size.width).toFloat()
             val y = (size.height - (point.latitude - minLat) / latRange * size.height).toFloat()
-            if (index == 0) cachedPath.moveTo(x, y) else cachedPath.lineTo(x, y)
+            Offset(x, y)
         }
+        
+        // Draw path using bezier curves
+        var previous = mappedPoints.first()
+        cachedPath.moveTo(previous.x, previous.y)
+        
+        for (i in 1 until mappedPoints.size) {
+            val current = mappedPoints[i]
+            val controlX = previous.x + (current.x - previous.x) / 2f
+            cachedPath.cubicTo(controlX, previous.y, controlX, current.y, current.x, current.y)
+            previous = current
+        }
+        
         drawPath(cachedPath, color, style = Stroke(5f))
+        
+        // Draw start point
+        val startPoint = mappedPoints.first()
+        drawCircle(color, radius = 6f, center = startPoint)
+        
+        // Draw end point
+        val endPoint = mappedPoints.last()
+        drawCircle(surfaceColor, radius = 6f, center = endPoint)
+        drawCircle(color, radius = 6f, center = endPoint, style = Stroke(3f))
     }
 }
 
 @Composable
 private fun RideValue(label: String, value: String) {
     Column {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(value, style = MaterialTheme.typography.titleMedium)
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

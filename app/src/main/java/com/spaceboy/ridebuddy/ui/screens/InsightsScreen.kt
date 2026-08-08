@@ -12,6 +12,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.LocalGasStation
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Eco
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.material.icons.outlined.SportsMotorsports
+import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -22,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -92,7 +104,6 @@ fun InsightsScreen(
                 Text(
                     UnitFormatter.distance(insights.totalDistanceKilometres, units, locale),
                     style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
                 )
                 insights.distanceChangePercent?.let {
                     Text(
@@ -108,17 +119,17 @@ fun InsightsScreen(
 
         MetricGrid(
             listOf(
-                "Rides" to insights.rideCount.toString(),
-                "Ride time" to formatDuration(insights.totalDurationMillis),
-                "Fuel estimate" to UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale),
-                "Avg ride" to UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale),
-                "Avg duration" to formatDuration(insights.averageRideDurationMillis),
-                "Avg speed" to UnitFormatter.speed(insights.averageSpeedKph, units, locale),
-                "Avg RPM" to "%.0f".format(locale, insights.averageRpm),
-                "Avg throttle" to "%.0f%%".format(locale, insights.averageThrottlePercent),
-                "Mileage" to UnitFormatter.consumption(insights.averageConsumptionLPer100Km, units, locale),
-                "Longest ride" to UnitFormatter.distance(insights.longestRideKilometres, units, locale),
-                "Top speed" to UnitFormatter.speed(insights.highestSpeedKph, units, locale),
+                Triple("Rides", insights.rideCount.toString(), Icons.Outlined.Route),
+                Triple("Ride time", formatDuration(insights.totalDurationMillis), Icons.Outlined.Timer),
+                Triple("Fuel estimate", UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale), Icons.Outlined.LocalGasStation),
+                Triple("Avg ride", UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale), Icons.Outlined.Timeline),
+                Triple("Avg duration", formatDuration(insights.averageRideDurationMillis), Icons.Outlined.Timer),
+                Triple("Avg speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
+                Triple("Avg RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
+                Triple("Avg throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
+                Triple("Mileage", UnitFormatter.consumption(insights.averageConsumptionLPer100Km, units, locale), Icons.Outlined.Eco),
+                Triple("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
+                Triple("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
             ),
         )
         if (insights.bestZeroToSixtyMillis != null || insights.bestZeroToHundredMillis != null) {
@@ -132,8 +143,8 @@ fun InsightsScreen(
             )
             MetricGrid(
                 listOfNotNull(
-                    insights.bestZeroToSixtyMillis?.let { "Best 0–60" to "%.1f s".format(locale, it / 1_000.0) },
-                    insights.bestZeroToHundredMillis?.let { "Best 0–100" to "%.1f s".format(locale, it / 1_000.0) },
+                    insights.bestZeroToSixtyMillis?.let { Triple("Best 0–60", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                    insights.bestZeroToHundredMillis?.let { Triple("Best 0–100", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
                 ),
             )
         }
@@ -158,7 +169,7 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Recent distance trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Recent distance trend", style = MaterialTheme.typography.titleMedium)
             Text(
                 if (hasData) "Last ${values.size} rides" else "No ride data recorded in this period",
                 style = MaterialTheme.typography.bodySmall,
@@ -174,13 +185,41 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
                             contentDescription = "Distance chart for the last ${values.size} rides"
                         },
                 ) {
+                    if (values.size < 2) return@Canvas
                     val maximum = values.maxOrNull()?.takeIf { it > 0.0 } ?: return@Canvas
-                    val gap = 4f
-                    val width = (size.width - gap * (values.size - 1).coerceAtLeast(0)) / values.size.coerceAtLeast(1)
-                    values.forEachIndexed { index, value ->
-                        val top = size.height - (value / maximum * size.height).toFloat()
-                        drawRect(color, topLeft = Offset(index * (width + gap), top), size = Size(width, size.height - top))
+                    val dx = size.width / (values.size - 1)
+                    
+                    val path = androidx.compose.ui.graphics.Path()
+                    var previousX = 0f
+                    var previousY = size.height - (values.first() / maximum * size.height).toFloat()
+                    path.moveTo(previousX, previousY)
+                    
+                    for (i in 1 until values.size) {
+                        val x = i * dx
+                        val y = size.height - (values[i] / maximum * size.height).toFloat()
+                        val controlX1 = previousX + (x - previousX) / 2f
+                        val controlX2 = previousX + (x - previousX) / 2f
+                        path.cubicTo(controlX1, previousY, controlX2, y, x, y)
+                        previousX = x
+                        previousY = y
                     }
+                    
+                    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                    
+                    val fillPath = androidx.compose.ui.graphics.Path().apply {
+                        addPath(path)
+                        lineTo(size.width, size.height)
+                        lineTo(0f, size.height)
+                        close()
+                    }
+                    drawPath(
+                        path = fillPath,
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(color.copy(alpha = 0.4f), androidx.compose.ui.graphics.Color.Transparent),
+                            startY = 0f,
+                            endY = size.height
+                        )
+                    )
                 }
             }
         }
@@ -188,14 +227,15 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
 }
 
 @Composable
-private fun MetricGrid(metrics: List<Pair<String, String>>) {
+private fun MetricGrid(metrics: List<Triple<String, String, ImageVector>>) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         metrics.chunked(2).forEach { row ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { (label, value) ->
+                row.forEach { (label, value, icon) ->
                     OutlinedCard(modifier = Modifier.weight(1f)) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            androidx.compose.material3.Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                            Text(value, style = MaterialTheme.typography.titleLarge)
                             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

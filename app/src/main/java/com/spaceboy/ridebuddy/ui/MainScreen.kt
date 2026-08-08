@@ -120,6 +120,7 @@ data class MainScreenActions(
     val onConnectBike: (DiscoveredBike) -> Unit,
     val onDisconnectBike: () -> Unit,
     val onStartNavigation: (String) -> Unit,
+    val onStopNavigation: () -> Unit,
     val onSharedDestinationHandled: () -> Unit,
     val onInsightPeriodSelected: (InsightPeriod) -> Unit,
     val onClearRideHistory: () -> Unit,
@@ -323,6 +324,7 @@ private fun ScreenContent(
                 onConnectBike = onConnectBike,
                 onDisconnectBike = onDisconnectBike,
                 onStartNavigation = onStartNavigation,
+                onStopNavigation = onStopNavigation,
                 onSharedDestinationHandled = onSharedDestinationHandled,
             )
             TopLevelDestination.History -> HistoryScreen(modifier, rides, settings.distanceUnits, onRideSelected)

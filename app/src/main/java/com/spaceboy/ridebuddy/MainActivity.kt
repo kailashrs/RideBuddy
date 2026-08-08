@@ -38,6 +38,8 @@ import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
+import com.google.android.libraries.navigation.NavigationApi
+import com.google.android.libraries.navigation.Navigator
 
 class MainActivity : ComponentActivity() {
     private var notificationAccessEnabled by mutableStateOf(false)
@@ -225,6 +227,7 @@ class MainActivity : ComponentActivity() {
                         onConnectBike = ::connectBike,
                         onDisconnectBike = { BikeConnectionService.disconnect(this@MainActivity) },
                         onStartNavigation = ::startNavigation,
+                        onStopNavigation = ::stopNavigation,
                         onSharedDestinationHandled = viewModel::clearSharedDestination,
                         onInsightPeriodSelected = viewModel::selectInsightPeriod,
                         onClearRideHistory = viewModel::clearRideHistory,
@@ -436,6 +439,21 @@ class MainActivity : ComponentActivity() {
                 onFailure = { error -> viewModel.showMessage(error.message ?: "Could not read that destination") },
             )
         }
+    }
+
+    private fun stopNavigation() {
+        NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
+            override fun onNavigatorReady(navigator: Navigator) {
+                navigator.stopGuidance()
+                navigator.unregisterServiceForNavUpdates()
+                navigator.cleanup()
+                (application as Rs457Application).container.apply {
+                    navigationFeed.clear()
+                    tftNavigationBridge.stop()
+                }
+            }
+            override fun onError(errorCode: Int) {}
+        })
     }
 
     private fun exportDiagnostics() {
