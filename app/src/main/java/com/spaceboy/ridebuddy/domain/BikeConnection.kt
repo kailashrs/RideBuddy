@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.domain
 
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import java.util.UUID
@@ -45,7 +46,7 @@ interface BikeConnection {
     val diagnostics: StateFlow<BleDiagnostics>
     val controls: SharedFlow<BikeControlEvent>
 
-    fun connect(deviceAddress: String, deviceName: String)
+    fun connect(target: BikeConnectionTarget)
     fun disconnect()
     fun notifyStartFailed(message: String = "Unable to start connection service") {}
     fun write(characteristic: UUID, payload: ByteArray): Boolean

@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.core.tft
 
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
@@ -159,7 +160,7 @@ private class RecordingConnection(
     override val diagnostics: StateFlow<BleDiagnostics> = MutableStateFlow(BleDiagnostics(authenticated = true))
     override val controls: SharedFlow<BikeControlEvent> = MutableSharedFlow()
 
-    override fun connect(deviceAddress: String, deviceName: String) = Unit
+    override fun connect(target: BikeConnectionTarget) = Unit
     override fun disconnect() = Unit
     override fun write(characteristic: UUID, payload: ByteArray) = true
 

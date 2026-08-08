@@ -189,7 +189,7 @@ class MainViewModel(
 
     fun connectToBike(bike: DiscoveredBike) {
         bikeScanner.stop()
-        bikeConnection.connect(bike.address, bike.name)
+        bikeConnection.connect(bike.connectionTarget())
     }
 
     fun stopBikeScan() = bikeScanner.stop()

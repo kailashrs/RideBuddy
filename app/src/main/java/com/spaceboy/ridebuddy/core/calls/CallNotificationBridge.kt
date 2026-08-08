@@ -47,12 +47,13 @@ class CallNotificationBridge(
     context: Context,
     private val bikeConnection: BikeConnection,
     private val appSettings: AppSettingsRepository,
-    private val scope: CoroutineScope,
+    scope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
     private val telecomManager = appContext.getSystemService(TelecomManager::class.java)
     private val mutableState = MutableStateFlow(CallIntegrationState())
     val state: StateFlow<CallIntegrationState> = mutableState.asStateFlow()
+
     private data class ActiveCallState(
         val notificationKey: String? = null,
         val answerIntent: PendingIntent? = null,
@@ -208,13 +209,13 @@ class CallNotificationBridge(
     private fun legacyTelecomAvailable(): Boolean = canUseLegacyCallFallback(
         enabled = appSettings.settings.value.legacyCallControls,
         permissionGranted = ContextCompat.checkSelfPermission(appContext, Manifest.permission.ANSWER_PHONE_CALLS) ==
-            PackageManager.PERMISSION_GRANTED,
+                PackageManager.PERMISSION_GRANTED,
     )
 
     private fun Notification.hasCallStyleExtras(): Boolean =
         extras.containsKey(Notification.EXTRA_ANSWER_INTENT) ||
-            extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
-            extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
+                extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
+                extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
 
     private fun Notification.extractCallIntents(): CallIntents {
         val extrasIntents = CallIntents(
@@ -228,6 +229,7 @@ class CallNotificationBridge(
         fun find(vararg words: String): PendingIntent? = availableActions.firstOrNull { action ->
             words.any { word -> action.title?.toString()?.contains(word, ignoreCase = true) == true }
         }?.actionIntent
+
         val answer = find("answer", "accept", "pick up")
         val decline = find("decline", "reject")
         val hangUp = find("hang up", "end call", "disconnect")
@@ -249,6 +251,7 @@ class CallNotificationBridge(
         val decline: PendingIntent? = null,
         val hangUp: PendingIntent? = null,
     )
+
     private data class CallWriteRequest(val generation: Long, val writes: List<BikeWrite>)
 
     private companion object {

@@ -50,10 +50,11 @@ class AndroidBikeScanner(context: Context) {
                 if (!advertisedName.isApriliaBikeName()) {
                     return
                 }
+                val bluetoothAddress = BluetoothAddress.parse(result.device.address) ?: return
 
                 val bike = DiscoveredBike(
                     name = advertisedName,
-                    address = result.device.address,
+                    bluetoothAddress = bluetoothAddress,
                     rssi = result.rssi,
                     serviceUuids = result.scanRecord?.serviceUuids.orEmpty().map { it.uuid.toString() },
                     manufacturerDataHex = result.scanRecord?.manufacturerSpecificData?.let { data ->
@@ -61,6 +62,7 @@ class AndroidBikeScanner(context: Context) {
                             for (index in 0 until data.size) add(data.valueAt(index).toHex())
                         }.joinToString()
                     },
+                    bluetoothDevice = result.device,
                 )
                 val current = mutableBikes.value.associateBy(DiscoveredBike::address).toMutableMap()
                 current[bike.address] = bike
@@ -106,13 +108,23 @@ class AndroidBikeScanner(context: Context) {
 
 data class DiscoveredBike(
     val name: String,
-    val address: String,
+    val bluetoothAddress: BluetoothAddress,
     val rssi: Int,
     val serviceUuids: List<String> = emptyList(),
     val manufacturerDataHex: String? = null,
+    val bluetoothDevice: android.bluetooth.BluetoothDevice? = null,
 ) {
+    val address: String
+        get() = bluetoothAddress.toString()
+
     val addressSuffix: String
         get() = address.takeLast(5)
+
+    fun connectionTarget(): BikeConnectionTarget = BikeConnectionTarget(
+        address = bluetoothAddress,
+        deviceName = name,
+        device = bluetoothDevice,
+    )
 }
 
 

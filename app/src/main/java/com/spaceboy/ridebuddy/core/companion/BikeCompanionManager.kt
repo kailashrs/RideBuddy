@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,10 +26,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 data class AssociatedBike(
-    val address: String,
+    val bluetoothAddress: BluetoothAddress,
     val name: String,
     val associationId: Int? = null,
-)
+) {
+    val address: String
+        get() = bluetoothAddress.toString()
+}
 
 data class BikeAssociationState(
     val supported: Boolean,
@@ -79,7 +83,7 @@ class BikeCompanionManager(context: Context) {
             .setSingleDevice(false)
             .build()
         val callback = object : CompanionDeviceManager.Callback() {
-            @Deprecated("Used by Android 8-12L")
+            @Deprecated("Used by Android 8-12L", ReplaceWith("launchApproval(intentSender)"))
             override fun onDeviceFound(intentSender: IntentSender) = launchApproval(intentSender)
 
             override fun onAssociationPending(intentSender: IntentSender) = launchApproval(intentSender)
@@ -135,12 +139,12 @@ class BikeCompanionManager(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val associations = companionManager.myAssociations
                 val selected = associations.firstOrNull { association ->
-                    association.deviceMacAddress?.toString().equals(stored?.address, ignoreCase = true)
+                    association.bluetoothAddress() == stored?.bluetoothAddress
                 } ?: associations.singleOrNull()
                 selected?.let { association ->
-                    val address = association.deviceMacAddress?.toString() ?: return@let null
+                    val address = association.bluetoothAddress() ?: return@let null
                     AssociatedBike(
-                        address = address,
+                        bluetoothAddress = address,
                         name = association.displayName?.toString()?.takeIf(String::isNotBlank)
                             ?: stored?.name
                             ?: DefaultBikeName,
@@ -149,9 +153,11 @@ class BikeCompanionManager(context: Context) {
                 }
             } else {
                 @Suppress("DEPRECATION")
-                val address = companionManager.associations.firstOrNull { it.equals(stored?.address, ignoreCase = true) }
-                    ?: companionManager.associations.singleOrNull()
-                address?.let { AssociatedBike(it, stored?.name ?: DefaultBikeName) }
+                val address =
+                    companionManager.associations.firstOrNull { it.equals(stored?.address, ignoreCase = true) }
+                        ?: companionManager.associations.singleOrNull()
+                address?.let(BluetoothAddress::parse)
+                    ?.let { AssociatedBike(it, stored?.name ?: DefaultBikeName) }
             }
         }.getOrNull()
         if (refreshed != null) deviceStore.write(refreshed) else deviceStore.clear()
@@ -221,15 +227,17 @@ class BikeCompanionManager(context: Context) {
     }
 
     fun rememberLegacyBike(bike: DiscoveredBike) {
-        val associated = AssociatedBike(bike.address, bike.name)
+        val associated = AssociatedBike(bike.bluetoothAddress, bike.name)
         deviceStore.write(associated)
         mutableState.update { it.copy(bike = associated) }
     }
 
+    @SuppressLint("MissingPermission")
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun accept(associationInfo: AssociationInfo): DiscoveredBike? {
-        val address = associationInfo.deviceMacAddress?.toString() ?: return null
         val scanResult = if (Build.VERSION.SDK_INT >= 34) associationInfo.associatedDevice?.bleDevice else null
+        val exactDevice = scanResult?.device
+        val address = associationInfo.bluetoothAddress() ?: return null
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
@@ -243,15 +251,22 @@ class BikeCompanionManager(context: Context) {
             )
         }
         ensurePresenceObservation()
-        return DiscoveredBike(name, address, scanResult?.rssi ?: 0)
+        return DiscoveredBike(
+            name = name,
+            bluetoothAddress = address,
+            rssi = scanResult?.rssi ?: 0,
+            serviceUuids = scanResult?.scanRecord?.serviceUuids.orEmpty().map { it.uuid.toString() },
+            bluetoothDevice = exactDevice,
+        )
     }
 
     @SuppressLint("MissingPermission")
-    private fun accept(device: BluetoothDevice, advertisedName: String?, rssi: Int): DiscoveredBike {
+    private fun accept(device: BluetoothDevice, advertisedName: String?, rssi: Int): DiscoveredBike? {
+        val address = BluetoothAddress.parse(device.address) ?: return null
         val name = advertisedName?.takeIf(String::isNotBlank)
             ?: runCatching { device.name }.getOrNull()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
-        val bike = AssociatedBike(device.address, name)
+        val bike = AssociatedBike(address, name)
         deviceStore.write(bike)
         mutableState.update {
             it.copy(
@@ -261,7 +276,22 @@ class BikeCompanionManager(context: Context) {
             )
         }
         ensurePresenceObservation()
-        return DiscoveredBike(name, device.address, rssi)
+        return DiscoveredBike(
+            name = name,
+            bluetoothAddress = address,
+            rssi = rssi,
+            bluetoothDevice = device,
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun AssociationInfo.bluetoothAddress(): BluetoothAddress? {
+        BluetoothAddress.fromBytes(deviceMacAddress?.toByteArray())?.let { return it }
+        if (Build.VERSION.SDK_INT >= 34) {
+            return associatedDevice?.bleDevice?.device?.address?.let(BluetoothAddress::parse)
+        }
+        return null
     }
 
     private fun fail(message: String, onFailure: (String) -> Unit) {
@@ -274,18 +304,21 @@ class BikeCompanionManager(context: Context) {
     }
 }
 
-class AssociatedBikeStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(Name, Context.MODE_PRIVATE)
+class AssociatedBikeStore(context: Context, preferencesName: String = Name) {
+    private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
     fun read(): AssociatedBike? {
-        val address = preferences.getString(KeyAddress, null)?.takeIf(String::isNotBlank) ?: return null
+        if (!preferences.contains(KeyAddressValue)) return null
+        val packedAddress = runCatching { preferences.getLong(KeyAddressValue, InvalidAddressValue) }.getOrNull()
+            ?: return null
+        val address = BluetoothAddress.fromLong(packedAddress) ?: return null
         val id = preferences.getInt(KeyAssociationId, MissingAssociationId).takeUnless { it == MissingAssociationId }
         return AssociatedBike(address, preferences.getString(KeyName, null) ?: "Motorcycle", id)
     }
 
     fun write(bike: AssociatedBike) {
         preferences.edit {
-            putString(KeyAddress, bike.address)
+            putLong(KeyAddressValue, bike.bluetoothAddress.toLong())
             putString(KeyName, bike.name)
             putInt(KeyAssociationId, bike.associationId ?: MissingAssociationId)
         }
@@ -295,9 +328,10 @@ class AssociatedBikeStore(context: Context) {
 
     private companion object {
         const val Name = "associated_bike"
-        const val KeyAddress = "address"
+        const val KeyAddressValue = "address_value"
         const val KeyName = "name"
         const val KeyAssociationId = "association_id"
         const val MissingAssociationId = -1
+        const val InvalidAddressValue = -1L
     }
 }

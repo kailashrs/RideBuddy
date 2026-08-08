@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ble
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -10,6 +11,7 @@ import android.bluetooth.BluetoothGattConnectionSettings
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -47,6 +49,7 @@ import java.time.LocalTime
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.milliseconds
 
 private fun requestedWriteType(
     characteristic: BluetoothGattCharacteristic,
@@ -60,6 +63,7 @@ private fun requestedWriteType(
             supportsNoResponse -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             else -> null
         }
+
         BikeWriteMode.NoResponsePreferred -> when {
             supportsNoResponse -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             supportsDefault -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -89,7 +93,7 @@ class AndroidBikeConnection(
     private val characteristics = mutableMapOf<UUID, BluetoothGattCharacteristic>()
     private var activeOperation: GattOperation? = null
     private var gatt: BluetoothGatt? = null
-    private var deviceAddress: String? = null
+    private var connectionTarget: BikeConnectionTarget? = null
     private var deviceName: String? = null
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
@@ -110,7 +114,7 @@ class AndroidBikeConnection(
     private val mutableDiagnostics = MutableStateFlow(BleDiagnostics())
     private val mutableControls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)
     private val sampledTelemetry = mutableTelemetry
-        .sample(TelemetrySampleIntervalMillis)
+        .sample(TelemetrySampleIntervalMillis.milliseconds)
         .stateIn(telemetryScope, SharingStarted.Eagerly, null)
 
     init {
@@ -127,17 +131,17 @@ class AndroidBikeConnection(
     override val diagnostics: StateFlow<BleDiagnostics> = mutableDiagnostics.asStateFlow()
     override val controls: SharedFlow<BikeControlEvent> = mutableControls
 
-    override fun connect(deviceAddress: String, deviceName: String) {
+    override fun connect(target: BikeConnectionTarget) {
         mainHandler.post {
-            if (deviceName.hasUnsupportedTelemetryLayout()) {
+            if (target.deviceName.hasUnsupportedTelemetryLayout()) {
                 fail("This motorcycle model uses an unsupported telemetry format")
                 return@post
             }
             connectionGeneration++
             intentionalDisconnect = true
             disconnectInternal(closeOnly = false)
-            this.deviceAddress = deviceAddress
-            this.deviceName = deviceName
+            connectionTarget = target
+            deviceName = target.deviceName
             reconnectAttempt = 0
             mainHandler.removeCallbacksAndMessages(ReconnectToken)
             connectGatt()
@@ -192,7 +196,7 @@ class AndroidBikeConnection(
             )
         }
         return try {
-            withTimeoutOrNull(AwaitedWriteTimeoutMillis) { completion.await() }
+            withTimeoutOrNull(AwaitedWriteTimeoutMillis.milliseconds) { completion.await() }
                 ?: cancelAwaitedWrite(requestId, completion)
         } catch (cancellation: CancellationException) {
             withContext(NonCancellable) { cancelAwaitedWrite(requestId, completion) }
@@ -218,9 +222,11 @@ class AndroidBikeConnection(
                         mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
                         scheduleReconnect()
                     }
+
                     operationQueue.removeAll { operation ->
                         (operation as? GattOperation.Write)?.requestId == requestId
                     } -> completion.complete(false)
+
                     else -> {
                         log("Timed-out write was no longer queued")
                         completion.complete(false)
@@ -267,12 +273,47 @@ class AndroidBikeConnection(
     }
 
     private fun connectGatt() {
-        val address = deviceAddress ?: return
-        val adapter = bluetoothManager.adapter
-        val device = runCatching { adapter.getRemoteDevice(address) }.getOrElse {
-            fail("Invalid bike address")
+        val target = connectionTarget ?: return
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            fail("Allow Nearby devices to connect to the motorcycle")
             return
         }
+
+        val adapter = bluetoothManager.adapter ?: run {
+            fail("Bluetooth is unavailable on this phone")
+            return
+        }
+        val bluetoothEnabled = try {
+            adapter.isEnabled
+        } catch (error: SecurityException) {
+            log("Bluetooth state check failed: ${error.javaClass.simpleName}")
+            fail("Allow Nearby devices to connect to the motorcycle")
+            return
+        }
+        if (!bluetoothEnabled) {
+            fail("Turn on Bluetooth to connect to the motorcycle")
+            return
+        }
+
+        val device = try {
+            target.device ?: adapter.getRemoteDevice(target.address.toByteArray())
+        } catch (error: SecurityException) {
+            log("Bluetooth device access failed: ${error.javaClass.simpleName}")
+            fail("Allow Nearby devices to connect to the motorcycle")
+            return
+        } catch (error: IllegalArgumentException) {
+            log("Bluetooth address rejected: ${error.message.orEmpty()}")
+            fail("The saved motorcycle address is invalid")
+            return
+        } catch (error: RuntimeException) {
+            log("Bluetooth device resolution failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
+            fail("Android could not resolve the paired motorcycle")
+            return
+        }
+
+        val address = target.address.toString()
         mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
         log("Connecting to ${deviceName.orEmpty()} (${address.takeLast(5)})")
         val requestedGeneration = connectionGeneration
@@ -283,26 +324,36 @@ class AndroidBikeConnection(
             servicesDiscovered = 0,
             rssi = null,
         )
-        val newGatt = if (Build.VERSION.SDK_INT >= 37) {
-            device.connectGatt(
-                BluetoothGattConnectionSettings.Builder()
-                    .setAutoConnectEnabled(false)
-                    .setAutomaticMtuEnabled(false)
-                    .setTransport(BluetoothDevice.TRANSPORT_LE)
-                    .build(),
-                ContextCompat.getMainExecutor(appContext),
-                callback,
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            device.connectGatt(
-                appContext,
-                false,
-                callback,
-                BluetoothDevice.TRANSPORT_LE,
-                BluetoothDevice.PHY_LE_1M_MASK,
-                mainHandler,
-            )
+        val newGatt = try {
+            if (Build.VERSION.SDK_INT >= 37) {
+                device.connectGatt(
+                    BluetoothGattConnectionSettings.Builder()
+                        .setAutoConnectEnabled(false)
+                        .setAutomaticMtuEnabled(false)
+                        .setTransport(BluetoothDevice.TRANSPORT_LE)
+                        .build(),
+                    ContextCompat.getMainExecutor(appContext),
+                    callback,
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                device.connectGatt(
+                    appContext,
+                    false,
+                    callback,
+                    BluetoothDevice.TRANSPORT_LE,
+                    BluetoothDevice.PHY_LE_1M_MASK,
+                    mainHandler,
+                )
+            }
+        } catch (error: SecurityException) {
+            log("GATT permission failure: ${error.javaClass.simpleName}")
+            fail("Allow Nearby devices to connect to the motorcycle")
+            return
+        } catch (error: RuntimeException) {
+            log("GATT start failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
+            fail("Android could not start the Bluetooth connection")
+            return
         }
         if (newGatt == null) {
             log("Could not create a GATT connection")
@@ -345,6 +396,7 @@ class AndroidBikeConnection(
                         log("GATT connected")
                         if (!gatt.requestMtu(247)) discoverServices(gatt)
                     }
+
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         log("GATT disconnected, status $status")
                         disconnectInternal(closeOnly = true)
@@ -378,14 +430,18 @@ class AndroidBikeConnection(
                     servicesDiscovered = gatt.services.size,
                     serviceSnapshot = gatt.services.flatMap { service ->
                         service.characteristics.map { characteristic ->
-                            "${service.uuid.shortName()}/${characteristic.uuid.shortName()} props=0x${characteristic.properties.toString(16)}"
+                            "${service.uuid.shortName()}/${characteristic.uuid.shortName()} props=0x${
+                                characteristic.properties.toString(
+                                    16
+                                )
+                            }"
                         }
                     },
                 )
                 val challenge = characteristics[BleCharacteristics.ProtectionChallenge]
                 val response = characteristics[BleCharacteristics.ProtectionResponse]
                 if (challenge == null || response == null) {
-                    fail("Motorcycle authentication service is missing")
+                    fail("Selected Bluetooth endpoint does not expose the motorcycle companion service")
                     return@post
                 }
                 mutableConnectionState.value = BikeConnectionState.Authenticating(deviceName ?: "Motorcycle")
@@ -440,7 +496,7 @@ class AndroidBikeConnection(
                 if (!isCurrent(gatt)) return@post
                 val completed = completeOperation(status, "write ${characteristic.uuid.shortName()}") { operation ->
                     operation is GattOperation.Write && operation.awaitsCallback &&
-                        operation.characteristic.uuid == characteristic.uuid
+                            operation.characteristic.uuid == characteristic.uuid
                 }
                 (completed as? GattOperation.Write)?.let(::onWriteCompleted)
             }
@@ -472,8 +528,8 @@ class AndroidBikeConnection(
             val frameLine = "${uuid.shortName()} ${value.toHex(" ")}"
             mutableDiagnostics.update { diagnostics ->
                 diagnostics.copy(
-                notificationsReceived = diagnostics.notificationsReceived + 1,
-                lastFrameAtMillis = now,
+                    notificationsReceived = diagnostics.notificationsReceived + 1,
+                    lastFrameAtMillis = now,
                     recentFrames = (listOf(frameLine) + diagnostics.recentFrames).take(MaxFrameEntries),
                 )
             }
@@ -488,9 +544,12 @@ class AndroidBikeConnection(
                         else enqueue(GattOperation.Write(target, response))
                     }
                 }
+
                 BleCharacteristics.Telemetry -> {
                     telemetryTimestamps.addLast(now)
-                    while (telemetryTimestamps.firstOrNull()?.let { now - it > TelemetryWindowMillis } == true) telemetryTimestamps.removeFirst()
+                    while (telemetryTimestamps.firstOrNull()
+                            ?.let { now - it > TelemetryWindowMillis } == true
+                    ) telemetryTimestamps.removeFirst()
                     mutableDiagnostics.update { diagnostics ->
                         diagnostics.copy(telemetryHz = telemetryTimestamps.size / (TelemetryWindowMillis / 1_000.0))
                     }
@@ -510,6 +569,7 @@ class AndroidBikeConnection(
                         rawTelemetryChannel.trySend(reading)
                     }
                 }
+
                 BleCharacteristics.Vin -> updateIdentity(vin = value.decodeVin())
                 BleCharacteristics.ClusterSoftwareVersion -> updateIdentity(version = value.cleanText())
                 BleCharacteristics.NavigationControl -> {
@@ -519,6 +579,7 @@ class AndroidBikeConnection(
                         else -> null
                     }?.let(mutableControls::tryEmit)
                 }
+
                 BleCharacteristics.CallControl -> value.firstOrNull()?.let {
                     mutableControls.tryEmit(BikeControlEvent.CallAction(it.toInt() and 0xFF))
                 }
@@ -598,15 +659,17 @@ class AndroidBikeConnection(
             // WRITE_TYPE_NO_RESPONSE. The successful API return means the stack
             // accepted this write, so advance the serialized queue immediately.
             (completeOperation(BluetoothGatt.GATT_SUCCESS, operation.label) { active -> active === operation }
-                as? GattOperation.Write)?.let(::onWriteCompleted)
+                    as? GattOperation.Write)?.let(::onWriteCompleted)
         }
     }
 
     private fun subscribe(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
         if (!gatt.setCharacteristicNotification(characteristic, true)) return false
-        val descriptor = characteristic.getDescriptor(BleCharacteristics.ClientCharacteristicConfiguration) ?: return false
+        val descriptor =
+            characteristic.getDescriptor(BleCharacteristics.ClientCharacteristicConfiguration) ?: return false
         val indication = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
-        val value = if (indication) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        val value =
+            if (indication) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
         } else {
@@ -697,7 +760,17 @@ class AndroidBikeConnection(
                 val time = LocalTime.now()
                 write(
                     BleCharacteristics.MobileHeartbeat,
-                    byteArrayOf(0x50, 'L'.code.toByte(), 'I'.code.toByte(), 'V'.code.toByte(), 'E'.code.toByte(), time.hour.toByte(), time.minute.toByte(), 0xF1.toByte(), 0xF0.toByte()),
+                    byteArrayOf(
+                        0x50,
+                        'L'.code.toByte(),
+                        'I'.code.toByte(),
+                        'V'.code.toByte(),
+                        'E'.code.toByte(),
+                        time.hour.toByte(),
+                        time.minute.toByte(),
+                        0xF1.toByte(),
+                        0xF0.toByte()
+                    ),
                 )
                 mainHandler.postDelayed(this, HeartbeatIntervalMillis)
             }
@@ -735,7 +808,11 @@ class AndroidBikeConnection(
         reconnectAttempt++
         mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
         log("Reconnecting in ${delay / 1_000}s")
-        mainHandler.postAtTime({ if (!intentionalDisconnect) connectGatt() }, ReconnectToken, android.os.SystemClock.uptimeMillis() + delay)
+        mainHandler.postAtTime(
+            { if (!intentionalDisconnect) connectGatt() },
+            ReconnectToken,
+            android.os.SystemClock.uptimeMillis() + delay
+        )
     }
 
     private fun disconnectInternal(closeOnly: Boolean) {
@@ -766,14 +843,16 @@ class AndroidBikeConnection(
     private fun updateIdentity(vin: String? = null, version: String? = null) {
         mutableIdentity.value = mutableIdentity.value.copy(
             vin = vin?.takeIf(String::isNotBlank) ?: mutableIdentity.value.vin,
-            clusterSoftwareVersion = version?.takeIf(String::isNotBlank) ?: mutableIdentity.value.clusterSoftwareVersion,
+            clusterSoftwareVersion = version?.takeIf(String::isNotBlank)
+                ?: mutableIdentity.value.clusterSoftwareVersion,
         )
     }
 
     private fun fail(message: String) {
         disconnectInternal(closeOnly = true)
         mutableConnectionState.value = BikeConnectionState.Failed(message)
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
+        mutableDiagnostics.value =
+            mutableDiagnostics.value.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
         log(message)
     }
 
@@ -791,6 +870,7 @@ class AndroidBikeConnection(
         size >= 3 -> copyOfRange(1, size - 1).cleanText()
         else -> cleanText()
     }
+
     private fun UUID.shortName(): String = toString().takeLast(4)
 
     private sealed interface GattOperation {
@@ -798,14 +878,18 @@ class AndroidBikeConnection(
         val attempt: Int
         val awaitsCallback: Boolean get() = true
         fun retry(): GattOperation
-        data class Subscribe(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) : GattOperation {
+        data class Subscribe(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
+            GattOperation {
             override val label = "subscription"
             override fun retry() = copy(attempt = attempt + 1)
         }
-        data class Read(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) : GattOperation {
+
+        data class Read(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
+            GattOperation {
             override val label = "read"
             override fun retry() = copy(attempt = attempt + 1)
         }
+
         data class Write(
             val characteristic: BluetoothGattCharacteristic,
             val value: ByteArray,
@@ -817,6 +901,7 @@ class AndroidBikeConnection(
             override val label = "write"
             override val awaitsCallback: Boolean
                 get() = requestedWriteType(characteristic, mode) == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+
             override fun retry() = copy(attempt = attempt + 1)
         }
     }

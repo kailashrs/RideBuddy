@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.times
 
 class RideRecorder(
     private val bikeConnection: BikeConnection,
@@ -107,7 +109,7 @@ class RideRecorder(
         if (shouldStopRide(frame.speedKilometresPerHour, settings.rideStopSpeedKph)) {
             if (stopJob == null) {
                 stopJob = scope.launch(recordingDispatcher) {
-                    delay(settings.rideStopDelaySeconds.coerceIn(10, 600) * 1_000L)
+                    delay(((settings.rideStopDelaySeconds.coerceIn(10, 600) * 1_000L)).milliseconds)
                     val lastSpeed = mutableActiveRide.value?.lastSpeedKph ?: settings.rideStartSpeedKph
                     if (shouldStopRide(lastSpeed, settings.rideStopSpeedKph)) finishRide()
                 }

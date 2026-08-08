@@ -8,11 +8,12 @@ import com.spaceboy.ridebuddy.domain.BikeWrite
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Runs a bounded, stationary-only sample across every inferred navigation output. */
 class StationaryTftValidator(
     private val connection: BikeConnection,
-    private val pauseBetweenWrites: suspend () -> Unit = { delay(200) },
+    private val pauseBetweenWrites: suspend () -> Unit = { delay(200.milliseconds) },
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     suspend fun run(nowMillis: Long = System.currentTimeMillis()): StationaryTftTestResult {
@@ -29,11 +30,16 @@ class StationaryTftValidator(
             add(
                 Frame(
                     BleCharacteristics.NavigationTrip,
-                    TftPacketEncoder.trip(nowMillis + 10 * 60_000L, destinationDistanceMetres = 2_000, maneuverDistanceMetres = 120),
+                    TftPacketEncoder.trip(
+                        nowMillis + 10 * 60_000L,
+                        destinationDistanceMetres = 2_000,
+                        maneuverDistanceMetres = 120
+                    ),
                     BikeWriteMode.NoResponsePreferred,
                 ),
             )
-            TftPacketEncoder.displayTextRows("STATIONARY TFT TEST").forEach { add(Frame(BleCharacteristics.NavigationText, it)) }
+            TftPacketEncoder.displayTextRows("STATIONARY TFT TEST")
+                .forEach { add(Frame(BleCharacteristics.NavigationText, it)) }
             add(
                 Frame(
                     BleCharacteristics.NavigationSpeedLimit,

@@ -5,6 +5,7 @@ import android.companion.DevicePresenceEvent
 import android.os.Build
 import androidx.annotation.RequiresApi
 import com.spaceboy.ridebuddy.Rs457Application
+import com.spaceboy.ridebuddy.ble.BluetoothAddress
 
 /** System-bound presence receiver. It deliberately does not masquerade as a wearable profile. */
 class BikeCompanionDeviceService : CompanionDeviceService() {
@@ -31,13 +32,14 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
 
             DevicePresenceEvent.EVENT_BLE_DISAPPEARED,
             DevicePresenceEvent.EVENT_BT_DISCONNECTED,
-            -> BikeConnectionService.deviceAbsent(this, bike.address)
+            -> BikeConnectionService.deviceAbsent(this, bike.bluetoothAddress)
         }
     }
 
     private fun reconnect(address: String) {
+        val bluetoothAddress = BluetoothAddress.parse(address) ?: return
         val bike = container.bikeCompanionManager.associatedBike()?.takeIf {
-            it.address.equals(address, ignoreCase = true)
+            it.bluetoothAddress == bluetoothAddress
         } ?: return
         BikeConnectionService.reconnect(this, bike)
     }

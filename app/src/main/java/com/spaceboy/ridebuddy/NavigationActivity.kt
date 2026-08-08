@@ -74,7 +74,8 @@ class NavigationActivity : ComponentActivity() {
                 override fun handleOnBackPressed() = endNavigationAndFinish()
             },
         )
-        val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val isDark =
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val cardBgColor = if (isDark) 0xF2271E1D.toInt() else 0xF2FCEAE7.toInt()
         val cardTextColor = if (isDark) 0xFFF0DEDC.toInt() else 0xFF231A19.toInt()
         val cardShape = android.graphics.drawable.GradientDrawable().apply {
@@ -117,16 +118,28 @@ class NavigationActivity : ComponentActivity() {
                     marginEnd = 8.dp()
                 },
             )
-            addView(closeButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(
+                closeButton,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
         }
         val root = FrameLayout(this).apply {
-            addView(navigationView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(topControls, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                gravity = Gravity.TOP
-            })
-            addView(retryButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                gravity = Gravity.CENTER
-            })
+            addView(
+                navigationView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+            addView(
+                topControls,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply {
+                        gravity = Gravity.TOP
+                    })
+            addView(
+                retryButton,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply {
+                        gravity = Gravity.CENTER
+                    })
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val safeInsets = insets.getInsets(
@@ -149,9 +162,12 @@ class NavigationActivity : ComponentActivity() {
                     BikeControlEvent.ExitNavigation -> endNavigationAndFinish()
                     BikeControlEvent.SkipManeuver -> {
                         val currentNavigator = navigator
-                        if ((currentNavigator?.timeAndDistanceList?.size ?: 0) > 1) currentNavigator?.continueToNextDestination()
+                        if ((currentNavigator?.timeAndDistanceList?.size
+                                ?: 0) > 1
+                        ) currentNavigator?.continueToNextDestination()
                         else navigationView.showRouteOverview()
                     }
+
                     is BikeControlEvent.CallAction -> Unit
                 }
             }
@@ -178,7 +194,7 @@ class NavigationActivity : ComponentActivity() {
                     return
                 }
                 navigator = readyNavigator
-                navigationView.setNavigationUiEnabled(true)
+                navigationView.isNavigationUiEnabled = true
                 val settings = (application as Rs457Application).container.appSettings.settings.value
                 navigationView.setTrafficPromptsEnabled(settings.hazardAlerts)
                 navigationView.setTrafficIncidentCardsEnabled(settings.hazardAlerts)
@@ -202,7 +218,8 @@ class NavigationActivity : ComponentActivity() {
                 }.getOrDefault(false)
                 if (!navUpdatesRegistered) {
                     tftBridge.stop()
-                    Toast.makeText(this@NavigationActivity, "TFT turn updates are unavailable", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@NavigationActivity, "TFT turn updates are unavailable", Toast.LENGTH_LONG)
+                        .show()
                 }
                 readyNavigator.addArrivalListener(arrivalListener)
                 readyNavigator.addReroutingListener(reroutingListener)

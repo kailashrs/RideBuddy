@@ -4,8 +4,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.Manifest
@@ -16,6 +18,8 @@ import androidx.core.app.ServiceCompat
 import com.spaceboy.ridebuddy.MainActivity
 import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.Rs457Application
+import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
+import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.companion.AssociatedBikeStore
@@ -72,9 +76,9 @@ class BikeConnectionService : Service() {
                 return START_NOT_STICKY
             }
             ActionDeviceAbsent -> {
-                val address = intent.getStringExtra(ExtraAddress)
+                val address = intent.bluetoothAddressExtra()
                 val remembered = AssociatedBikeStore(this).read()
-                if (remembered != null && remembered.address.equals(address, ignoreCase = true)) {
+                if (remembered != null && remembered.bluetoothAddress == address) {
                     container.bikeConnection.disconnect()
                     stopSelf()
                 }
@@ -82,22 +86,29 @@ class BikeConnectionService : Service() {
             }
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
             ActionConnect -> {
-                val address = intent.getStringExtra(ExtraAddress)
+                val address = intent.bluetoothAddressExtra()
                 val name = intent.getStringExtra(ExtraName)
-                if (!address.isNullOrBlank() && !name.isNullOrBlank()) {
+                if (address != null && !name.isNullOrBlank()) {
                     enableLocationTrackingIfAllowed(
                         launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false),
                     )
                     val currentState = container.bikeConnection.connectionState.value
                     val remembered = AssociatedBikeStore(this).read()
-                    if (remembered?.address.equals(address, ignoreCase = true) &&
+                    if (remembered?.bluetoothAddress == address &&
                         (currentState is BikeConnectionState.Connecting ||
                             currentState is BikeConnectionState.Authenticating ||
                             currentState is BikeConnectionState.Connected)
                     ) return START_NOT_STICKY
                     rememberBike(address, name)
-                    container.bikeConnection.connect(address, name)
+                    container.bikeConnection.connect(
+                        BikeConnectionTarget(
+                            address = address,
+                            deviceName = name,
+                            device = intent.bluetoothDeviceExtra(),
+                        ),
+                    )
                 } else {
+                    container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -162,9 +173,19 @@ class BikeConnectionService : Service() {
         }
     }
 
-    private fun rememberBike(address: String, name: String) {
+    private fun rememberBike(address: BluetoothAddress, name: String) {
         val current = AssociatedBikeStore(this).read()
         AssociatedBikeStore(this).write(AssociatedBike(address, name, current?.associationId))
+    }
+
+    private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
+        BluetoothAddress.fromBytes(getByteArrayExtra(ExtraAddressBytes))
+
+    @Suppress("DEPRECATION")
+    private fun Intent.bluetoothDeviceExtra(): BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33) {
+        getParcelableExtra(ExtraDevice, BluetoothDevice::class.java)
+    } else {
+        getParcelableExtra(ExtraDevice)
     }
 
     private fun createChannel() {
@@ -219,18 +240,21 @@ class BikeConnectionService : Service() {
         private const val ActionDisconnect = "disconnect"
         private const val ActionDeviceAbsent = "device_absent"
         private const val ActionEnableLocation = "enable_location"
-        private const val ExtraAddress = "address"
+        private const val ExtraAddressBytes = "address_bytes"
+        private const val ExtraDevice = "device"
         private const val ExtraName = "name"
         private const val ExtraVisibleActivityLaunch = "visible_activity_launch"
 
         fun connect(context: Context, bike: DiscoveredBike): Boolean {
+            val intent = Intent(context, BikeConnectionService::class.java)
+                .setAction(ActionConnect)
+                .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
+                .putExtra(ExtraName, bike.name)
+                .putExtra(ExtraVisibleActivityLaunch, true)
+            bike.bluetoothDevice?.let { intent.putExtra(ExtraDevice, it) }
             val started = ContextCompatBridge.startForegroundService(
                 context,
-                Intent(context, BikeConnectionService::class.java)
-                    .setAction(ActionConnect)
-                    .putExtra(ExtraAddress, bike.address)
-                    .putExtra(ExtraName, bike.name)
-                    .putExtra(ExtraVisibleActivityLaunch, true),
+                intent,
             )
             if (!started) {
                 (context.applicationContext as? Rs457Application)?.container?.bikeConnection?.notifyStartFailed(
@@ -256,7 +280,7 @@ class BikeConnectionService : Service() {
                 context,
                 Intent(context, BikeConnectionService::class.java)
                     .setAction(ActionConnect)
-                    .putExtra(ExtraAddress, bike.address)
+                    .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
                     .putExtra(ExtraName, bike.name)
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
@@ -268,14 +292,17 @@ class BikeConnectionService : Service() {
             return started
         }
 
-        fun deviceAbsent(context: Context, address: String): Boolean {
+        fun deviceAbsent(context: Context, address: BluetoothAddress): Boolean {
             return ContextCompatBridge.startForegroundService(
                 context,
                 Intent(context, BikeConnectionService::class.java)
                     .setAction(ActionDeviceAbsent)
-                    .putExtra(ExtraAddress, address),
+                    .putExtra(ExtraAddressBytes, address.toByteArray()),
             )
         }
+
+        fun deviceAbsent(context: Context, address: String): Boolean =
+            BluetoothAddress.parse(address)?.let { deviceAbsent(context, it) } ?: false
 
         fun enableLocation(context: Context): Boolean {
             return ContextCompatBridge.startService(

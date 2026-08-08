@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val ImminentTurnMetres = 500
 
@@ -58,7 +59,7 @@ class TftPriorityCoordinator(
 
     fun notificationPresented(eventId: Int, onExpire: () -> Unit) {
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            delay(AlertDurationMillis)
+            delay(AlertDurationMillis.milliseconds)
             expireAlert(notificationKey(eventId))
         }
         var accepted = false
@@ -107,7 +108,7 @@ class TftPriorityCoordinator(
         }
 
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            delay(AlertDurationMillis)
+            delay(AlertDurationMillis.milliseconds)
             expireAlert(TextAlertKey)
         }
         synchronized(activeAlerts) {

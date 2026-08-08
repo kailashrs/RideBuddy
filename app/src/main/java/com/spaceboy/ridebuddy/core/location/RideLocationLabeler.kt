@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
+import kotlin.time.Duration.Companion.milliseconds
 
 class RideLocationLabeler(context: Context) {
     private val geocoder = Geocoder(context.applicationContext, Locale.getDefault())
@@ -18,7 +19,7 @@ class RideLocationLabeler(context: Context) {
     suspend fun label(latitude: Double?, longitude: Double?): String? {
         if (latitude == null || longitude == null) return null
         val address = try {
-            withTimeoutOrNull(GeocoderTimeoutMillis) {
+            withTimeoutOrNull(GeocoderTimeoutMillis.milliseconds) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     suspendCancellableCoroutine { continuation ->
                         geocoder.getFromLocation(latitude, longitude, 1) { results ->

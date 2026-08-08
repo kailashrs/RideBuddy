@@ -19,6 +19,7 @@ object InsightsCalculator {
                 }.timeInMillis
                 Pair(todayStart, todayStart - MillisPerDay)
             }
+
             InsightPeriod.AllTime -> Pair(Long.MIN_VALUE, null)
             else -> {
                 val window = (period.days ?: 0) * MillisPerDay
@@ -34,7 +35,7 @@ object InsightsCalculator {
         val weightedSeconds = current.sumOf { it.durationMillis / 1_000.0 }.takeIf { it > 0.0 }
         val distanceChange = previousStart?.let { prevStart ->
             val previousDistance = rides
-                .filter { it.startedAtMillis >= prevStart && it.startedAtMillis < currentStart }
+                .filter { it.startedAtMillis in prevStart..<currentStart }
                 .sumOf(Ride::distanceKilometres)
             previousDistance.takeIf { it > 0.0 }?.let { previous ->
                 ((current.sumOf(Ride::distanceKilometres) - previous) / previous) * 100.0
@@ -48,9 +49,12 @@ object InsightsCalculator {
             estimatedFuelLitres = current.sumOf(Ride::estimatedFuelLitres),
             averageRideDistanceKilometres = current.map(Ride::distanceKilometres).average(),
             averageRideDurationMillis = totalDuration / current.size,
-            averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.durationMillis / 1_000.0 } / seconds } ?: 0.0,
-            averageRpm = weightedSeconds?.let { seconds -> current.sumOf { it.averageRpm * it.durationMillis / 1_000.0 } / seconds } ?: 0.0,
-            averageThrottlePercent = weightedSeconds?.let { seconds -> current.sumOf { it.averageThrottlePercent * it.durationMillis / 1_000.0 } / seconds } ?: 0.0,
+            averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.durationMillis / 1_000.0 } / seconds }
+                ?: 0.0,
+            averageRpm = weightedSeconds?.let { seconds -> current.sumOf { it.averageRpm * it.durationMillis / 1_000.0 } / seconds }
+                ?: 0.0,
+            averageThrottlePercent = weightedSeconds?.let { seconds -> current.sumOf { it.averageThrottlePercent * it.durationMillis / 1_000.0 } / seconds }
+                ?: 0.0,
             averageConsumptionLPer100Km = current.sumOf { it.averageConsumptionLPer100Km * it.distanceKilometres }
                 .div(current.sumOf(Ride::distanceKilometres).takeIf { it > 0.0 } ?: 1.0),
             longestRideKilometres = current.maxOf(Ride::distanceKilometres),

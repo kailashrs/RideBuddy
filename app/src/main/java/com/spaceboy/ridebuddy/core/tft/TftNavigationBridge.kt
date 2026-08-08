@@ -16,6 +16,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 class TftNavigationBridge(
     private val connection: BikeConnection,
@@ -59,6 +60,7 @@ class TftNavigationBridge(
                                     sessionGeneration = sessionGeneration,
                                 )
                             }
+
                             else -> null
                         }
                     } ?: break
@@ -66,7 +68,7 @@ class TftNavigationBridge(
                     val accepted = runCatching { writeBatch(batch) }.getOrDefault(false)
                     if (!accepted) {
                         restore(batch)
-                        delay(FailedWriteRetryMillis)
+                        delay(FailedWriteRetryMillis.milliseconds)
                         wakeWorker.trySend(Unit)
                         break
                     }
@@ -92,8 +94,14 @@ class TftNavigationBridge(
             if (!acceptingUpdates || !settings.settings.value.tftNavigationOutputEnabled) return
             lastInfo = info
             if (!sessionActive) {
-                controlFrames += Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionGuidanceStarted))
-                controlFrames += Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(StatusNavigationActive))
+                controlFrames += Frame(
+                    BleCharacteristics.NavigationSession,
+                    TftPacketEncoder.session(SessionGuidanceStarted)
+                )
+                controlFrames += Frame(
+                    BleCharacteristics.NavigationStatus,
+                    TftPacketEncoder.status(StatusNavigationActive)
+                )
                 sessionActive = true
             }
             sessionGeneration
@@ -196,7 +204,10 @@ class TftNavigationBridge(
                 controlBatches.addLast(
                     WriteBatch(
                         frames = listOf(
-                            Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionGuidanceStarted)),
+                            Frame(
+                                BleCharacteristics.NavigationSession,
+                                TftPacketEncoder.session(SessionGuidanceStarted)
+                            ),
                             Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(StatusNavigationActive)),
                         ),
                         priority = true,
@@ -308,7 +319,7 @@ class TftNavigationBridge(
      */
     private fun refreshTransportAvailability() {
         val ready = connection.connectionState.value is BikeConnectionState.Connected &&
-            connection.diagnostics.value.authenticated
+                connection.diagnostics.value.authenticated
         val recovery = synchronized(queueLock) {
             when {
                 ready && !transportReady -> {
@@ -318,6 +329,7 @@ class TftNavigationBridge(
                     latestData.clear()
                     ConnectionRecovery(lastInfo, textAlertMessage)
                 }
+
                 !ready && transportReady -> {
                     transportReady = false
                     sessionActive = false
@@ -325,6 +337,7 @@ class TftNavigationBridge(
                     latestData.clear()
                     null
                 }
+
                 else -> null
             }
         }
@@ -350,7 +363,7 @@ class TftNavigationBridge(
         repeat(passes) {
             for (frame in batch.frames) {
                 if (!isCurrent(batch)) return true
-                if (!firstWrite) delay(MinimumWriteIntervalMillis)
+                if (!firstWrite) delay(MinimumWriteIntervalMillis.milliseconds)
                 firstWrite = false
                 if (!connection.writeAndAwait(frame.toBikeWrite())) return false
             }
@@ -364,9 +377,9 @@ class TftNavigationBridge(
 
     private fun isCurrentLocked(batch: WriteBatch): Boolean =
         (batch.alertGeneration == null ||
-            (textAlertActive && batch.alertGeneration == textAlertGeneration)) &&
-            (batch.sessionGeneration == null ||
-                (sessionActive && batch.sessionGeneration == sessionGeneration))
+                (textAlertActive && batch.alertGeneration == textAlertGeneration)) &&
+                (batch.sessionGeneration == null ||
+                        (sessionActive && batch.sessionGeneration == sessionGeneration))
 
     private fun Frame.toBikeWrite(): BikeWrite = BikeWrite(
         characteristic = characteristic,
@@ -392,6 +405,7 @@ class TftNavigationBridge(
         val alertGeneration: Long? = null,
         val sessionGeneration: Long? = null,
     )
+
     private data class ConnectionRecovery(val lastInfo: NavInfo?, val textAlertMessage: String?)
     private data class TextAlertDismissal(
         val queuedShutdown: Boolean = false,

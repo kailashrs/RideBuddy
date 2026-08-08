@@ -13,6 +13,7 @@ import java.net.URI
 import java.net.URL
 import java.util.Locale
 import kotlin.coroutines.resume
+import kotlin.time.Duration.Companion.milliseconds
 
 data class NavigationDestination(val latitude: Double, val longitude: Double, val title: String)
 
@@ -72,7 +73,7 @@ class DestinationParser(context: Context) {
     private suspend fun geocode(value: String): Result<NavigationDestination> {
         val query = extractQuery(value)
         val geocoder = Geocoder(appContext, Locale.getDefault())
-        val address = withTimeoutOrNull(TimeoutMillis.toLong()) {
+        val address = withTimeoutOrNull(TimeoutMillis.toLong().milliseconds) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 suspendCancellableCoroutine { continuation ->
                     geocoder.getFromLocationName(query, 1) { results ->
