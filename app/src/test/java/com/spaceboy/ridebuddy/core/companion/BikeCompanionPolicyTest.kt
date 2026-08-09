@@ -1,0 +1,60 @@
+package com.spaceboy.ridebuddy.core.companion
+
+import com.spaceboy.ridebuddy.ble.BluetoothAddress
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class BikeCompanionPolicyTest {
+    private val storedBike = AssociatedBike(
+        bluetoothAddress = requireNotNull(BluetoothAddress.parse("AA:BB:CC:DD:EE:FF")),
+        name = "Motorcycle",
+        associationId = 42,
+    )
+
+    @Test
+    fun transientRefreshFailurePreservesStoredAssociation() {
+        assertEquals(storedBike, preservedAssociationAfterRefreshFailure(null, storedBike))
+    }
+
+    @Test
+    fun localAssociationClearsOnlyAfterRequiredSystemDisassociationSucceeds() {
+        assertFalse(
+            canClearLocalAssociation(
+                hasStoredAssociation = true,
+                companionSupported = true,
+                managerAvailable = true,
+                disassociationSucceeded = false,
+            ),
+        )
+        assertTrue(
+            canClearLocalAssociation(
+                hasStoredAssociation = true,
+                companionSupported = true,
+                managerAvailable = true,
+                disassociationSucceeded = true,
+            ),
+        )
+        assertFalse(
+            canClearLocalAssociation(
+                hasStoredAssociation = true,
+                companionSupported = true,
+                managerAvailable = false,
+                disassociationSucceeded = false,
+            ),
+        )
+    }
+
+    @Test
+    fun unsupportedPhonesMayForgetAStoreOnlyLegacyBike() {
+        assertTrue(
+            canClearLocalAssociation(
+                hasStoredAssociation = true,
+                companionSupported = false,
+                managerAvailable = false,
+                disassociationSucceeded = false,
+            ),
+        )
+    }
+}

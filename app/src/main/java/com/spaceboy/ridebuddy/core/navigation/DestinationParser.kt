@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.core.navigation
 
 import android.content.Context
+import android.location.Address
 import android.location.Geocoder
 import android.os.Build
 import kotlinx.coroutines.CancellationException
@@ -22,28 +23,15 @@ class DestinationParser(context: Context) {
 
     suspend fun parse(rawValue: String): Result<NavigationDestination> = try {
         val value = rawValue.trim()
-        val destination = coordinateFrom(value) ?: run {
+        val destination = directNavigationDestination(value) ?: run {
             val expanded = if (isGoogleShortLink(value)) expand(value) else value
-            coordinateFrom(expanded) ?: geocode(expanded).getOrThrow()
+            directNavigationDestination(expanded) ?: geocode(expanded).getOrThrow()
         }
         Result.success(destination)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (error: Exception) {
         Result.failure(error)
-    }
-
-    private fun coordinateFrom(value: String): NavigationDestination? {
-        CoordinatePatterns.forEach { pattern ->
-            pattern.find(value)?.let { match ->
-                val latitude = match.groupValues[1].toDoubleOrNull() ?: return@let
-                val longitude = match.groupValues[2].toDoubleOrNull() ?: return@let
-                if (latitude in -90.0..90.0 && longitude in -180.0..180.0) {
-                    return NavigationDestination(latitude, longitude, "Shared destination")
-                }
-            }
-        }
-        return null
     }
 
     private fun isGoogleShortLink(value: String): Boolean = runCatching {
@@ -57,7 +45,7 @@ class DestinationParser(context: Context) {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = TimeoutMillis
             connection.readTimeout = TimeoutMillis
-            connection.setRequestProperty("User-Agent", "RS457Companion/1")
+            connection.setRequestProperty("User-Agent", "RideBuddy/1")
             val location = try {
                 connection.connect()
                 connection.getHeaderField("Location")
@@ -71,14 +59,20 @@ class DestinationParser(context: Context) {
     }
 
     private suspend fun geocode(value: String): Result<NavigationDestination> {
-        val query = extractQuery(value)
+        val query = extractNavigationQuery(value)
         val geocoder = Geocoder(appContext, Locale.getDefault())
         val address = withTimeoutOrNull(TimeoutMillis.toLong().milliseconds) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 suspendCancellableCoroutine { continuation ->
-                    geocoder.getFromLocationName(query, 1) { results ->
-                        if (continuation.isActive) continuation.resume(results.firstOrNull())
-                    }
+                    geocoder.getFromLocationName(query, 1, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<Address>) {
+                            if (continuation.isActive) continuation.resume(addresses.firstOrNull())
+                        }
+
+                        override fun onError(errorMessage: String?) {
+                            if (continuation.isActive) continuation.resume(null)
+                        }
+                    })
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -95,23 +89,40 @@ class DestinationParser(context: Context) {
         )
     }
 
-    private fun extractQuery(value: String): String = runCatching {
-        val uri = URI(value)
-        val rawQuery = uri.rawQuery.orEmpty().split('&').associate {
-            val parts = it.split('=', limit = 2)
-            parts.first() to java.net.URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
-        }
-        rawQuery["destination"] ?: rawQuery["query"] ?: rawQuery["q"] ?: value
-    }.getOrDefault(value)
-
     private companion object {
-        val CoordinatePatterns = listOf(
-            Regex("@(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
-            Regex("(?:[?&](?:q|query|destination)=|geo:)(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
-            Regex("^\\s*(-?\\d{1,2}(?:\\.\\d+)?)\\s*,\\s*(-?\\d{1,3}(?:\\.\\d+)?)\\s*$"),
-        )
         val ShortLinkHosts = setOf("maps.app.goo.gl", "goo.gl")
         const val MaxRedirects = 5
         const val TimeoutMillis = 8_000
     }
 }
+
+internal fun directNavigationDestination(value: String): NavigationDestination? =
+    coordinateFromText(value) ?: coordinateFromText(extractNavigationQuery(value))
+
+private fun coordinateFromText(value: String): NavigationDestination? {
+    CoordinatePatterns.forEach { pattern ->
+        pattern.find(value)?.let { match ->
+            val latitude = match.groupValues[1].toDoubleOrNull() ?: return@let
+            val longitude = match.groupValues[2].toDoubleOrNull() ?: return@let
+            if (latitude in -90.0..90.0 && longitude in -180.0..180.0) {
+                return NavigationDestination(latitude, longitude, "Shared destination")
+            }
+        }
+    }
+    return null
+}
+
+private fun extractNavigationQuery(value: String): String = runCatching {
+    val uri = URI(value)
+    val rawQuery = uri.rawQuery.orEmpty().split('&').associate {
+        val parts = it.split('=', limit = 2)
+        parts.first() to java.net.URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
+    }
+    rawQuery["destination"] ?: rawQuery["query"] ?: rawQuery["q"] ?: value
+}.getOrDefault(value)
+
+private val CoordinatePatterns = listOf(
+    Regex("@(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
+    Regex("(?:[?&](?:q|query|destination)=|geo:)(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
+    Regex("^\\s*(-?\\d{1,2}(?:\\.\\d+)?)\\s*,\\s*(-?\\d{1,3}(?:\\.\\d+)?)\\s*$"),
+)

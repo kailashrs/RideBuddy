@@ -18,8 +18,8 @@ class RideRepositoryMigrationTest {
 
     @Before
     fun createVersionOneDatabase() {
-        context.deleteDatabase(DatabaseName)
-        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(DatabaseName), null).use { database ->
+        context.deleteDatabase(TestDatabaseName)
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(TestDatabaseName), null).use { database ->
             database.execSQL(
                 """CREATE TABLE rides (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,12 +47,12 @@ class RideRepositoryMigrationTest {
 
     @After
     fun removeDatabase() {
-        context.deleteDatabase(DatabaseName)
+        context.deleteDatabase(TestDatabaseName)
     }
 
     @Test
     fun versionOneUpgradePreservesRidesAndCreatesSamplesTable() = runBlocking {
-        val repository = RideRepository(context)
+        val repository = RideRepository(context, databaseName = TestDatabaseName)
 
         repository.refresh()
 
@@ -63,6 +63,6 @@ class RideRepositoryMigrationTest {
     }
 
     private companion object {
-        const val DatabaseName = "rides.db"
+        const val TestDatabaseName = "rides-migration-test.db"
     }
 }

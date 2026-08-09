@@ -135,7 +135,7 @@ class BikeCompanionManager(context: Context) {
     fun refresh() {
         val companionManager = manager ?: return
         val stored = deviceStore.read()
-        val refreshed = runCatching {
+        val refreshResult = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val associations = companionManager.myAssociations
                 val selected = associations.firstOrNull { association ->
@@ -159,13 +159,26 @@ class BikeCompanionManager(context: Context) {
                 address?.let(BluetoothAddress::parse)
                     ?.let { AssociatedBike(it, stored?.name ?: DefaultBikeName) }
             }
-        }.getOrNull()
+        }
+        if (refreshResult.isFailure) {
+            mutableState.update { state ->
+                state.copy(
+                    bike = preservedAssociationAfterRefreshFailure(state.bike, stored),
+                    associationInProgress = false,
+                    errorMessage = refreshResult.exceptionOrNull()?.message?.takeIf(String::isNotBlank)
+                        ?: "Could not refresh the motorcycle association",
+                )
+            }
+            return
+        }
+        val refreshed = refreshResult.getOrNull()
         if (refreshed != null) deviceStore.write(refreshed) else deviceStore.clear()
         mutableState.update { state ->
             state.copy(
                 bike = refreshed,
                 observingPresence = refreshed != null && state.observingPresence,
                 associationInProgress = false,
+                errorMessage = null,
             )
         }
     }
@@ -194,11 +207,12 @@ class BikeCompanionManager(context: Context) {
         }
     }
 
-    fun forget() {
+    fun forget(): Boolean {
         val companionManager = manager
-        val bike = state.value.bike
+        val bike = state.value.bike ?: deviceStore.read()
+        var disassociationSucceeded = companionManager != null
         if (companionManager != null && bike != null) {
-            runCatching {
+            val observationStopped = runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && bike.associationId != null) {
                     companionManager.stopObservingDevicePresence(
                         ObservingDevicePresenceRequest.Builder().setAssociationId(bike.associationId).build(),
@@ -207,8 +221,8 @@ class BikeCompanionManager(context: Context) {
                     @Suppress("DEPRECATION")
                     companionManager.stopObservingDevicePresence(bike.address)
                 }
-            }
-            runCatching {
+            }.isSuccess
+            val disassociation = runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && bike.associationId != null) {
                     companionManager.disassociate(bike.associationId)
                 } else {
@@ -216,9 +230,44 @@ class BikeCompanionManager(context: Context) {
                     companionManager.disassociate(bike.address)
                 }
             }
+            disassociationSucceeded = disassociation.isSuccess
+            if (!disassociationSucceeded) {
+                val error = disassociation.exceptionOrNull()?.message?.takeIf(String::isNotBlank)
+                    ?: "Could not remove the motorcycle association"
+                if (observationStopped) {
+                    mutableState.update { state -> state.copy(observingPresence = false) }
+                    ensurePresenceObservation()
+                }
+                preserveAssociationAfterForgetFailure(bike, error)
+            }
+        }
+        if (!canClearLocalAssociation(
+                hasStoredAssociation = bike != null,
+                companionSupported = supported,
+                managerAvailable = companionManager != null,
+                disassociationSucceeded = disassociationSucceeded,
+            )
+        ) {
+            if (companionManager == null && bike != null) {
+                preserveAssociationAfterForgetFailure(
+                    bike,
+                    "Companion device service is unavailable; try again",
+                )
+            }
+            return false
         }
         deviceStore.clear()
         mutableState.value = BikeAssociationState(supported = supported)
+        return true
+    }
+
+    private fun preserveAssociationAfterForgetFailure(bike: AssociatedBike, message: String) {
+        mutableState.update { state ->
+            state.copy(
+                bike = bike,
+                errorMessage = message,
+            )
+        }
     }
 
     fun associatedBike(associationId: Int? = null): AssociatedBike? {
@@ -303,6 +352,20 @@ class BikeCompanionManager(context: Context) {
         const val DefaultBikeName = "Motorcycle"
     }
 }
+
+internal fun preservedAssociationAfterRefreshFailure(
+    current: AssociatedBike?,
+    stored: AssociatedBike?,
+): AssociatedBike? = current ?: stored
+
+internal fun canClearLocalAssociation(
+    hasStoredAssociation: Boolean,
+    companionSupported: Boolean,
+    managerAvailable: Boolean,
+    disassociationSucceeded: Boolean,
+): Boolean = !hasStoredAssociation ||
+        (!companionSupported && !managerAvailable) ||
+        (managerAvailable && disassociationSucceeded)
 
 class AssociatedBikeStore(context: Context, preferencesName: String = Name) {
     private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)

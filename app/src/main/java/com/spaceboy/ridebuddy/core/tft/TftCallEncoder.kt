@@ -1,8 +1,13 @@
 package com.spaceboy.ridebuddy.core.tft
 
+import java.text.Normalizer
+
 object TftCallEncoder {
     fun callerName(value: String): ByteArray {
-        val cleaned = value.filter { it.isLetterOrDigit() || it == ' ' }.ifBlank { "Unknown Number" }
+        val cleaned = Normalizer.normalize(value, Normalizer.Form.NFD)
+            .filter { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == ' ' }
+            .trim()
+            .ifBlank { "Unknown Number" }
         val ascii = cleaned.toByteArray(Charsets.US_ASCII)
         val packet = ByteArray(20)
         packet[0] = 10
@@ -11,7 +16,7 @@ object TftCallEncoder {
     }
 
     fun callerNumber(value: String): ByteArray {
-        val ascii = value.filter { it.isDigit() || it == '+' }.toByteArray(Charsets.US_ASCII)
+        val ascii = value.filter { it in '0'..'9' || it == '+' }.toByteArray(Charsets.US_ASCII)
         val packet = ByteArray(20)
         System.arraycopy(ascii, 0, packet, 0, kotlin.math.min(ascii.size, 20))
         return packet

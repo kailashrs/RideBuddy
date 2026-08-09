@@ -1,7 +1,10 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +76,16 @@ fun NavigationSettingsScreen(
     var apiKey by remember { mutableStateOf("") }
     var showApiKey by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+
+    DisposableEffect(activity) {
+        val window = activity?.window
+        val wasSecure = (window?.attributes?.flags?.and(WindowManager.LayoutParams.FLAG_SECURE) ?: 0) != 0
+        if (!wasSecure) window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose {
+            if (!wasSecure) window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
 
     LaunchedEffect(state.maskedKey) {
         if (state.isConfigured) apiKey = ""
@@ -141,7 +155,10 @@ fun NavigationSettingsScreen(
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
-                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                    IconButton(
+                        onClick = { showApiKey = !showApiKey },
+                        enabled = !state.isSaving,
+                    ) {
                         Icon(
                             imageVector = if (showApiKey) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                             contentDescription = if (showApiKey) "Hide API key" else "Show API key",
@@ -158,10 +175,18 @@ fun NavigationSettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    apiKey = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty().trim()
-                }) { Text("Paste") }
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = clipboard.primaryClip
+                        apiKey = if (clip != null && clip.itemCount > 0) {
+                            clip.getItemAt(0).coerceToText(context).toString().trim()
+                        } else {
+                            ""
+                        }
+                    },
+                    enabled = !state.isSaving,
+                ) { Text("Paste") }
                 Button(
                     onClick = { onSave(apiKey) },
                     enabled = apiKey.isNotBlank() && !state.isSaving,
@@ -178,13 +203,14 @@ fun NavigationSettingsScreen(
             }
             if (state.isConfigured) {
                 Row(modifier = Modifier.align(Alignment.End)) {
-                    TextButton(onClick = onTest) { Text("Test setup") }
+                    TextButton(onClick = onTest, enabled = !state.isSaving) { Text("Test setup") }
                     TextButton(
                         onClick = {
                             apiKey = ""
                             showApiKey = false
                             onRemove()
                         },
+                        enabled = !state.isSaving,
                     ) { Text("Remove key") }
                 }
             }
@@ -218,6 +244,12 @@ fun NavigationSettingsScreen(
             }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

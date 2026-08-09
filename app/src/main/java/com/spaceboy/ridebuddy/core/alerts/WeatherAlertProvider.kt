@@ -52,8 +52,8 @@ class WeatherAlertProvider(
 
     fun start() {
         scope.launch {
-            combine(locationTracker.location, settings.settings) { location, preferences ->
-                location.takeIf { preferences.weatherAlerts }
+            combine(locationTracker.location, settings.settings) { _, preferences ->
+                locationTracker.freshLocation().takeIf { preferences.weatherAlerts }
             }.collect { location ->
                 location ?: return@collect
                 val now = System.currentTimeMillis()

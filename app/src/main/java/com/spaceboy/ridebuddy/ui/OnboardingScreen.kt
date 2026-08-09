@@ -103,11 +103,15 @@ fun OnboardingScreen(
                     icon = if (bikeAssociated && authenticated) Icons.Outlined.CheckCircle else Icons.Outlined.Bluetooth,
                     title = if (bikeAssociated) "Confirm your motorcycle" else "Associate your motorcycle",
                     body = if (bikeAssociated) {
-                        "Your motorcycle (${associatedBikeLabel ?: "Aprilia 457"}) is saved. RideBuddy will automatically connect whenever you switch on the ignition."
+                        "Your motorcycle (${associatedBikeLabel ?: "saved motorcycle"}) is saved. RideBuddy will automatically connect whenever you switch on the ignition."
                     } else {
                         "Pair your motorcycle using Android's device manager. This allows RideBuddy to automatically reconnect whenever your bike is turned on."
                     },
-                    actions = if (bikeAssociated) emptyList() else listOf("Choose motorcycle" to onConnectBike),
+                    actions = when {
+                        !bikeAssociated -> listOf("Choose motorcycle" to onConnectBike)
+                        !authenticated -> listOf("Reconnect motorcycle" to onConnectBike)
+                        else -> emptyList()
+                    },
                     status = connectionState.onboardingLabel(),
                 )
                 4 -> OnboardingPage(

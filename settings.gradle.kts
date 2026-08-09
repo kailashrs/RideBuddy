@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RS457Companion"
+rootProject.name = "RideBuddy"
 include(":app")

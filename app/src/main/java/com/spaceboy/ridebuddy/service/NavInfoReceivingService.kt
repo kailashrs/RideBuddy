@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.service
 
+import com.spaceboy.ridebuddy.appContainer
+
 import android.app.Service
 import android.content.Intent
 import android.os.Handler
@@ -8,7 +10,6 @@ import android.os.Looper
 import android.os.Message
 import android.os.Messenger
 import com.google.android.libraries.mapsplatform.turnbyturn.TurnByTurnManager
-import com.spaceboy.ridebuddy.Rs457Application
 
 class NavInfoReceivingService : Service() {
     private val manager = TurnByTurnManager.createInstance()
@@ -16,7 +17,7 @@ class NavInfoReceivingService : Service() {
         override fun handleMessage(message: Message) {
             if (message.what == TurnByTurnManager.MSG_NAV_INFO) {
                 val info = manager.readNavInfoFromBundle(message.data)
-                (application as Rs457Application).container.navigationFeed.accept(info)
+                appContainer.navigationFeed.accept(info)
             } else super.handleMessage(message)
         }
     })

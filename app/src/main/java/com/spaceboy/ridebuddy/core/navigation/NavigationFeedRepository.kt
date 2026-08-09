@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.core.navigation
 
 import com.google.android.libraries.mapsplatform.turnbyturn.model.NavInfo
+import com.google.android.libraries.mapsplatform.turnbyturn.model.NavState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,16 +21,33 @@ data class GuidanceState(
 class NavigationFeedRepository {
     private val mutableGuidance = MutableStateFlow(GuidanceState())
     val guidance: StateFlow<GuidanceState> = mutableGuidance.asStateFlow()
-    var onNavInfo: ((NavInfo) -> Unit)? = null
+    internal var onNavInfo: ((NavInfo) -> Unit)? = null
+    internal var acceptTerminalNavInfo: (() -> Boolean)? = null
 
     fun accept(info: NavInfo) {
-        val current = info.currentStep ?: run {
+        if (info.navState == NavState.REROUTING) {
+            mutableGuidance.value = mutableGuidance.value.asRerouting(
+                distanceToDestinationMetres = info.distanceToFinalDestinationMeters,
+                timeToDestinationSeconds = info.timeToFinalDestinationSeconds,
+            )
+            onNavInfo?.invoke(info)
+            return
+        }
+        if (info.navState != NavState.ENROUTE) {
+            if (acceptTerminalNavInfo?.invoke() == false) return
             clear()
+            onNavInfo?.invoke(info)
+            return
+        }
+
+        val current = info.currentStep ?: run {
+            mutableGuidance.value = GuidanceState(active = true, instruction = "Guidance active")
+            onNavInfo?.invoke(info)
             return
         }
         val next = info.remainingSteps.firstOrNull()
         mutableGuidance.value = GuidanceState(
-            active = info.navState == NavStateEnroute || info.navState == NavStateRerouting,
+            active = true,
             instruction = current.fullInstructionText.orEmpty(),
             roadName = current.fullRoadName.orEmpty(),
             distanceToManeuverMetres = info.distanceToCurrentStepMeters,
@@ -45,9 +63,26 @@ class NavigationFeedRepository {
     fun clear() {
         mutableGuidance.value = GuidanceState()
     }
-
-    private companion object {
-        const val NavStateEnroute = 1
-        const val NavStateRerouting = 2
-    }
 }
+
+internal enum class NavigationFeedOutputAction {
+    Guidance,
+    Rerouting,
+    Stop,
+}
+
+internal fun navigationFeedOutputAction(navState: Int): NavigationFeedOutputAction = when (navState) {
+    NavState.ENROUTE -> NavigationFeedOutputAction.Guidance
+    NavState.REROUTING -> NavigationFeedOutputAction.Rerouting
+    else -> NavigationFeedOutputAction.Stop
+}
+
+internal fun GuidanceState.asRerouting(
+    distanceToDestinationMetres: Int?,
+    timeToDestinationSeconds: Int?,
+): GuidanceState = copy(
+    active = true,
+    instruction = "Rerouting…",
+    distanceToDestinationMetres = distanceToDestinationMetres ?: this.distanceToDestinationMetres,
+    timeToDestinationSeconds = timeToDestinationSeconds ?: this.timeToDestinationSeconds,
+)

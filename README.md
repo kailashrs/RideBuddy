@@ -2,7 +2,7 @@
 
 RideBuddy is a native Android companion app for supported motorcycles. The
 project is built with Kotlin and Jetpack Compose Material 3, with a
-model-aware Bluetooth transport layer and safety-gated vehicle integration.
+vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 
 ## Features
 
@@ -45,15 +45,29 @@ Open the project in Android Studio or run:
 
 ```bash
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleBenchmark
+./gradlew :app:compileDebugAndroidTestKotlin
 ```
+
+CI also runs the instrumentation suite on the checked-in `pixel2api35` Gradle
+managed device. Run `./gradlew pixel2api35DebugAndroidTest` locally when an
+Android emulator and hardware acceleration are available.
 
 ### Release builds
 
-Release packaging deliberately fails without a signing key. Set these secrets in user-level Gradle properties or your CI environment (never commit them): `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. 
+Local release packaging uses signing values from user-level Gradle properties
+or the environment (never commit them): `RELEASE_STORE_FILE`,
+`RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and `RELEASE_KEY_PASSWORD`.
+Without all four values, any produced release APK is not a distributable signed
+release.
 
 Run `./gradlew assembleRelease` to build the release variant.
 
-CI automatically runs tests, lint, and builds debug/benchmark APKs, failing release builds if credentials are not provided.
+GitHub release jobs require `RELEASE_KEYSTORE_BASE64`, `RELEASE_STORE_PASSWORD`,
+`RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`, and `RELEASE_CERT_SHA256` (the
+expected release-certificate SHA-256 digest).
+They reject a mismatched signer, sanitize ref names used in artifact filenames,
+and require a `v…` tag to match the app's `versionName` exactly. Ordinary CI
+verification never receives release secrets or builds a signed release.
 
 ## Navigation setup
 
@@ -65,10 +79,10 @@ CI automatically runs tests, lint, and builds debug/benchmark APKs, failing rele
 
 ## Bike and call setup
 
-1. Open **Settings → Bike** and associate the motorcycle in Android's system companion-device picker.
+1. Open **Settings → Motorcycle Connection** and associate the motorcycle in Android's system companion-device picker.
 2. Enable notification access under **Settings → Alerts & notifications** for TFT alerts, caller presentation, and standard call actions.
 3. Enable **Legacy call compatibility** only if the installed phone app does not expose working answer/decline actions. This optional fallback uses deprecated Telecom controls and does not make RideBuddy the default dialer.
-4. Before relying on **Experimental TFT navigation**, **Caller display**, or **TFT call controls**, consider running the stationary TFT test and confirming the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
+4. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
 

@@ -7,6 +7,8 @@ import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
+import com.spaceboy.ridebuddy.core.navigation.NavigationFeedOutputAction
+import com.spaceboy.ridebuddy.core.navigation.navigationFeedOutputAction
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.core.tft.TftNavigationBridge
 import com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator
@@ -23,11 +25,15 @@ import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class AppContainer(context: Context) {
+    /** Process-scoped: survives Activity destruction because RideBuddy relies on
+     *  foreground services that keep the application process alive. Coroutines
+     *  launched here are bound to the process, not to any individual Activity. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val bikeScanner = AndroidBikeScanner(context)
     val bleCaptureRecorder = BleCaptureRecorder()
@@ -49,7 +55,12 @@ class AppContainer(context: Context) {
     val navigationSdkGateway = GoogleNavigationSdkGateway()
     val destinationParser = DestinationParser(context)
     val navigationFeed = NavigationFeedRepository()
+    internal val navigationStartStopGuard = NavigationStartStopGuard()
     val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings, applicationScope)
+    internal val navigationGuidanceLifecycle = NavigationGuidanceLifecycle(
+        clearNavigationFeed = navigationFeed::clear,
+        finishTftArrival = tftNavigationBridge::arrivedAndStop,
+    )
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     val callNotificationBridge = CallNotificationBridge(context, bikeConnection, appSettings, applicationScope)
     val tftPriorityCoordinator = TftPriorityCoordinator(navigationFeed, callNotificationBridge, tftNavigationBridge, applicationScope)
@@ -72,9 +83,28 @@ class AppContainer(context: Context) {
                 .collect(bleCaptureRecorder::setEnabled)
         }
         navigationApiKeyStore.load()?.let(navigationSdkGateway::configureIfNeeded)
-        navigationFeed.onNavInfo = tftNavigationBridge::accept
+        navigationFeed.acceptTerminalNavInfo = navigationGuidanceLifecycle::acceptAndMarkTerminalFeed
+        navigationFeed.onNavInfo = { info ->
+            when (navigationFeedOutputAction(info.navState)) {
+                NavigationFeedOutputAction.Guidance -> tftNavigationBridge.accept(info)
+                NavigationFeedOutputAction.Rerouting -> tftNavigationBridge.rerouting()
+                NavigationFeedOutputAction.Stop -> tftNavigationBridge.stop()
+            }
+        }
         rideRecorder.start()
         ridingAlertMonitor.start()
         weatherAlertProvider.start()
     }
+
+    /** Cancels the process-scoped coroutine scope so integration tests can
+     *  start from a clean slate. Not called in production — the scope is
+     *  intentionally process-lifetime. */
+    internal fun releaseForTesting() {
+        applicationScope.cancel()
+    }
 }
+
+/** Convenience for reaching the [AppContainer] from any [Context] without
+ *  the repetitive `(application as RideBuddyApplication).container` cast. */
+val Context.appContainer: AppContainer
+    get() = (applicationContext as RideBuddyApplication).container

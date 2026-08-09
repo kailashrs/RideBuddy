@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 data class CallIntegrationState(
@@ -40,8 +42,20 @@ internal fun shouldPublishCallState(callerDisplay: Boolean, tftCallControls: Boo
 
 internal fun shouldPublishCallerIdentity(callerDisplay: Boolean): Boolean = callerDisplay
 
+internal fun shouldClearPublishedCall(
+    published: Boolean,
+    callerDisplay: Boolean,
+    tftCallControls: Boolean,
+): Boolean = published && !shouldPublishCallState(callerDisplay, tftCallControls)
+
 internal fun canUseLegacyCallFallback(enabled: Boolean, permissionGranted: Boolean): Boolean =
     enabled && permissionGranted
+
+internal fun Notification.isRideBuddyCallNotification(): Boolean =
+    category == Notification.CATEGORY_CALL ||
+            extras.containsKey(Notification.EXTRA_ANSWER_INTENT) ||
+            extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
+            extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
 
 class CallNotificationBridge(
     context: Context,
@@ -62,12 +76,23 @@ class CallNotificationBridge(
         val callerName: String? = null,
         val callerNumber: String? = null,
         val ringing: Boolean = false,
+        val providerPackage: String? = null,
     )
+
+    private data class CallFeatureSettings(
+        val callerDisplay: Boolean,
+        val tftCallControls: Boolean,
+    ) {
+        val enabled: Boolean
+            get() = shouldPublishCallState(callerDisplay, tftCallControls)
+    }
 
     private val activeCall = MutableStateFlow(ActiveCallState())
     private val pendingCallWrites = Channel<CallWriteRequest>(Channel.CONFLATED)
     private val callLock = Any()
     private var nextCallWriteGeneration = 0L
+    private var publishedCallActive = false
+    private var featureSettings = appSettings.settings.value.callFeatureSettings()
 
     init {
         scope.launch {
@@ -88,8 +113,16 @@ class CallNotificationBridge(
             }
         }
         scope.launch {
+            appSettings.settings
+                .map { settings -> settings.callFeatureSettings() }
+                .distinctUntilChanged()
+                .collect { settings -> synchronized(callLock) { applyFeatureSettingsLocked(settings) } }
+        }
+        scope.launch {
             for (request in pendingCallWrites) {
                 for (write in request.writes) {
+                    val currentGeneration = synchronized(callLock) { nextCallWriteGeneration }
+                    if (request.generation != currentGeneration) break
                     if (bikeConnection.writeAndAwait(write)) continue
                     Log.w(LogTag, "Call packet rejected for ${write.characteristic}")
                     break
@@ -101,9 +134,8 @@ class CallNotificationBridge(
     /** Returns true when this is a call notification and should not be handled as a normal app alert. */
     fun onNotificationPosted(sbn: StatusBarNotification): Boolean {
         val notification = sbn.notification
-        if (notification.category != Notification.CATEGORY_CALL && !notification.hasCallStyleExtras()) return false
+        if (!notification.isRideBuddyCallNotification()) return false
         val settings = appSettings.settings.value
-        if (!shouldPublishCallState(settings.callerDisplay, settings.tftCallControls)) return true
         val intents = notification.extractCallIntents()
 
         val caller = notification.extras.person(Notification.EXTRA_CALL_PERSON)
@@ -122,6 +154,7 @@ class CallNotificationBridge(
             ) == Notification.CallStyle.CALL_TYPE_INCOMING
         } else false
         synchronized(callLock) {
+            applyFeatureSettingsLocked(settings.callFeatureSettings())
             activeCall.value = ActiveCallState(
                 notificationKey = sbn.key,
                 answerIntent = intents.answer,
@@ -130,14 +163,10 @@ class CallNotificationBridge(
                 callerName = name,
                 callerNumber = number.takeIf(String::isNotBlank),
                 ringing = callStyleIncoming || intents.answer != null,
-            )
-            publishActiveCallLocked()
-            mutableState.value = CallIntegrationState(
-                active = true,
-                actionsAvailable = intents.answer != null || intents.decline != null || intents.hangUp != null,
-                legacyFallbackAvailable = legacyTelecomAvailable(),
                 providerPackage = sbn.packageName,
             )
+            if (featureSettings.enabled) publishActiveCallLocked(featureSettings)
+            else mutableState.value = CallIntegrationState()
         }
         return true
     }
@@ -145,14 +174,21 @@ class CallNotificationBridge(
     fun onNotificationRemoved(sbn: StatusBarNotification): Boolean {
         synchronized(callLock) {
             val call = activeCall.value
-            if (sbn.key != call.notificationKey) return sbn.notification.category == Notification.CATEGORY_CALL
-            val settings = appSettings.settings.value
-            if (shouldPublishCallState(settings.callerDisplay, settings.tftCallControls)) {
-                enqueueCallWrites(listOf(BikeWrite(BleCharacteristics.CallState, TftCallEncoder.ended())))
-            }
-            activeCall.value = ActiveCallState()
-            mutableState.value = CallIntegrationState()
+            if (sbn.key != call.notificationKey) return sbn.notification.isRideBuddyCallNotification()
+            clearActiveCallLocked()
             return true
+        }
+    }
+
+    /** Reconciles removals Android could not deliver while the notification listener was offline. */
+    fun reconcileActiveNotifications(notifications: Collection<StatusBarNotification>) {
+        val activeCallKeys = notifications.asSequence()
+            .filter { notification -> notification.notification.isRideBuddyCallNotification() }
+            .map { notification -> notification.key }
+            .toSet()
+        synchronized(callLock) {
+            val activeKey = activeCall.value.notificationKey ?: return
+            if (activeKey !in activeCallKeys) clearActiveCallLocked()
         }
     }
 
@@ -162,15 +198,27 @@ class CallNotificationBridge(
     }
 
     private fun publishActiveCall() {
-        synchronized(callLock) { publishActiveCallLocked() }
+        synchronized(callLock) {
+            applyFeatureSettingsLocked(appSettings.settings.value.callFeatureSettings())
+            if (featureSettings.enabled) publishActiveCallLocked(featureSettings)
+        }
     }
 
-    private fun publishActiveCallLocked() {
-        val settings = appSettings.settings.value
-        if (!shouldPublishCallState(settings.callerDisplay, settings.tftCallControls)) return
+    private fun publishActiveCallLocked(settings: CallFeatureSettings) {
+        if (!settings.enabled) return
         val call = activeCall.value
-        val name = call.callerName ?: return
-        val writes = buildList {
+        if (call.callerName == null) return
+        enqueueCallWrites(activeCallWrites(call, settings))
+        publishedCallActive = true
+        mutableState.value = call.integrationState()
+    }
+
+    private fun activeCallWrites(call: ActiveCallState, settings: CallFeatureSettings): List<BikeWrite> {
+        val name = call.callerName ?: return emptyList()
+        return buildList {
+            // Each conflated request is self-contained. Resetting first prevents caller identity
+            // from a superseded request surviving a rapid settings or notification transition.
+            add(endedWrite())
             if (shouldPublishCallerIdentity(settings.callerDisplay)) {
                 add(BikeWrite(BleCharacteristics.CallerName, TftCallEncoder.callerName(name)))
                 call.callerNumber?.let { number ->
@@ -184,13 +232,54 @@ class CallNotificationBridge(
                 ),
             )
         }
+    }
+
+    private fun applyFeatureSettingsLocked(settings: CallFeatureSettings) {
+        if (settings == featureSettings) return
+        featureSettings = settings
+        val call = activeCall.value
+        if (!settings.enabled) {
+            if (shouldClearPublishedCall(
+                    published = publishedCallActive,
+                    callerDisplay = settings.callerDisplay,
+                    tftCallControls = settings.tftCallControls,
+                )
+            ) {
+                enqueueCallWrites(listOf(endedWrite()))
+            }
+            publishedCallActive = false
+            mutableState.value = CallIntegrationState()
+            return
+        }
+        if (call.callerName == null) return
+
+        val writes = activeCallWrites(call, settings)
         enqueueCallWrites(writes)
+        publishedCallActive = true
+        mutableState.value = call.integrationState()
+    }
+
+    private fun clearActiveCallLocked() {
+        if (publishedCallActive) enqueueCallWrites(listOf(endedWrite()))
+        publishedCallActive = false
+        activeCall.value = ActiveCallState()
+        mutableState.value = CallIntegrationState()
     }
 
     private fun enqueueCallWrites(writes: List<BikeWrite>) {
+        if (writes.isEmpty()) return
         nextCallWriteGeneration++
         pendingCallWrites.trySend(CallWriteRequest(nextCallWriteGeneration, writes))
     }
+
+    private fun endedWrite(): BikeWrite = BikeWrite(BleCharacteristics.CallState, TftCallEncoder.ended())
+
+    private fun ActiveCallState.integrationState(): CallIntegrationState = CallIntegrationState(
+        active = true,
+        actionsAvailable = answerIntent != null || declineIntent != null || hangUpIntent != null,
+        legacyFallbackAvailable = legacyTelecomAvailable(),
+        providerPackage = providerPackage,
+    )
 
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
@@ -212,10 +301,8 @@ class CallNotificationBridge(
                 PackageManager.PERMISSION_GRANTED,
     )
 
-    private fun Notification.hasCallStyleExtras(): Boolean =
-        extras.containsKey(Notification.EXTRA_ANSWER_INTENT) ||
-                extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
-                extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
+    private fun com.spaceboy.ridebuddy.data.AppSettings.callFeatureSettings(): CallFeatureSettings =
+        CallFeatureSettings(callerDisplay, tftCallControls)
 
     private fun Notification.extractCallIntents(): CallIntents {
         val extrasIntents = CallIntents(

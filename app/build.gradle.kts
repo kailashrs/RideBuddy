@@ -23,9 +23,11 @@ android {
     defaultConfig {
         applicationId = "com.spaceboy.ridebuddy"
         minSdk = 31
+        // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
+        //noinspection OldTargetApi
         targetSdk = 36
         versionCode = 100
-        versionName = "1.0"
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -75,6 +77,25 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    lint {
+        // Gradle 8.13 is intentionally paired with AGP 8.13.2 and Navigation SDK 7.8.0.
+        disable += "AndroidGradlePluginVersion"
+        sarifReport = true
+    }
+
+    testOptions {
+        animationsDisabled = true
+        managedDevices {
+            localDevices {
+                create("pixel2api35") {
+                    device = "Pixel 2"
+                    apiLevel = 35
+                    systemImageSource = "aosp-atd"
+                }
+            }
+        }
+    }
 }
 
 kotlin {
@@ -90,8 +111,12 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    // These AndroidX versions are the set validated with the pinned Navigation SDK toolchain.
+    //noinspection GradleDependency
     implementation("androidx.core:core-ktx:1.18.0")
+    //noinspection GradleDependency
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    //noinspection GradleDependency
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")

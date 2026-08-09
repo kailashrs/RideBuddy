@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,10 +44,13 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import kotlinx.coroutines.delay
 
 private data class InfoRowItem(
     val label: String,
@@ -54,12 +63,25 @@ fun InfoScreen(
     modifier: Modifier = Modifier,
     navigationConfigured: Boolean,
     connectionState: BikeConnectionState,
+    latestTelemetryReceivedAtElapsedRealtime: Long?,
     identity: BikeIdentity,
     diagnostics: BleDiagnostics,
     deviceAddress: String?,
     notificationAccessEnabled: Boolean,
     onReconnect: () -> Unit,
 ) {
+    val connected = connectionState is BikeConnectionState.Connected
+    var currentElapsedRealtime by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(connected) {
+        while (connected) {
+            currentElapsedRealtime = SystemClock.elapsedRealtime()
+            delay(TelemetryFreshnessCheckMillis)
+        }
+    }
+    val telemetryFresh = connected && latestTelemetryReceivedAtElapsedRealtime?.let { lastTelemetry ->
+        isTelemetryFresh(lastTelemetry, currentElapsedRealtime)
+    } == true
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -103,7 +125,13 @@ fun InfoScreen(
         InfoSection(
             title = "Live Link Status",
             rows = listOf(
-                InfoRowItem("Telemetry", if (diagnostics.lastFrameAtMillis != null) "Connected & Active" else "Searching…", Icons.Outlined.Sensors),
+                InfoRowItem(
+                    "Telemetry",
+                    stringResource(
+                        if (telemetryFresh) R.string.telemetry_receiving else R.string.telemetry_waiting,
+                    ),
+                    Icons.Outlined.Sensors,
+                ),
                 InfoRowItem("Navigation", if (navigationConfigured) "Configured" else "Not configured", Icons.Outlined.Navigation),
                 InfoRowItem("Authentication", if (diagnostics.authenticated) "Verified" else "Not verified", Icons.Outlined.VerifiedUser),
                 InfoRowItem("Signal strength", diagnostics.rssi?.let { "$it dBm" } ?: "—", Icons.Outlined.CellTower),
@@ -135,6 +163,12 @@ fun InfoScreen(
         }
     }
 }
+
+private const val TelemetryFreshnessCheckMillis = 1_000L
+internal const val TelemetryFreshnessWindowMillis = 5_000L
+
+internal fun isTelemetryFresh(receivedAtElapsedRealtime: Long, nowElapsedRealtime: Long): Boolean =
+    nowElapsedRealtime - receivedAtElapsedRealtime in 0..TelemetryFreshnessWindowMillis
 
 @Composable
 private fun InfoSection(title: String, rows: List<InfoRowItem>) {

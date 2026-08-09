@@ -36,9 +36,7 @@
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        tools:node="remove" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage"
         tools:node="remove" />
     <queries>
         <package android:name="com.google.android.apps.messaging" />
@@ -54,7 +52,7 @@
     </queries>
 
     <application
-        android:name=".Rs457Application"
+        android:name=".RideBuddyApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -99,17 +97,20 @@
         <service
             android:name=".service.BikeNotificationListenerService"
             android:exported="false"
-            android:label="RideBuddy TFT alerts"
+            android:label="@string/notification_listener_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
 
+        <!-- singleTask keeps one MainActivity at the task root. onNewIntent receives
+             ACTION_SEND share intents after the initial creation. Back-navigation from
+             NavigationActivity (a separate task) returns to this instance naturally. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

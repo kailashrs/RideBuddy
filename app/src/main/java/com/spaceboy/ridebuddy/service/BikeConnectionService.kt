@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.service
 
+import com.spaceboy.ridebuddy.appContainer
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,7 +19,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.spaceboy.ridebuddy.MainActivity
 import com.spaceboy.ridebuddy.R
-import com.spaceboy.ridebuddy.Rs457Application
 import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
@@ -34,26 +35,33 @@ import kotlinx.coroutines.launch
 
 class BikeConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val container get() = (application as Rs457Application).container
+    private val container get() = appContainer
     private var stateJob: Job? = null
     private var receivedStartCommand = false
     private var locationTracking = false
     private var locationPermissionMissing = false
+    private var foregroundPromotionSucceeded = false
+    private var foregroundPromotionFailed = false
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        runCatching {
+        val foregroundFailure = runCatching {
             ServiceCompat.startForeground(
                 this,
                 NotificationId,
                 notification("Preparing bike connection"),
                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
             )
-        }.onFailure {
+        }.exceptionOrNull()
+        if (foregroundFailure != null) {
+            foregroundPromotionFailed = true
+            Log.e("BikeConnectionService", "Unable to promote bike connection service", foregroundFailure)
+            container.bikeConnection.notifyStartFailed("Unable to keep the bike connection active")
             stopSelf()
             return
         }
+        foregroundPromotionSucceeded = true
         stateJob = scope.launch {
             container.bikeConnection.connectionState.collectLatest { state ->
                 runCatching {
@@ -68,6 +76,10 @@ class BikeConnectionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!foregroundPromotionSucceeded) {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
         receivedStartCommand = true
         when (intent?.action) {
             ActionDisconnect -> {
@@ -80,6 +92,10 @@ class BikeConnectionService : Service() {
                 val remembered = AssociatedBikeStore(this).read()
                 if (remembered != null && remembered.bluetoothAddress == address) {
                     container.bikeConnection.disconnect()
+                    stopSelf()
+                } else if (container.bikeConnection.connectionState.value is BikeConnectionState.Disconnected) {
+                    // A stale presence event can start a fresh service after the association has
+                    // changed. There is no active connection to own in that case.
                     stopSelf()
                 }
                 return START_NOT_STICKY
@@ -130,7 +146,9 @@ class BikeConnectionService : Service() {
         stateJob?.cancel()
         scope.cancel()
         if (locationTracking) container.rideLocationTracker.stop()
-        if (container.bikeConnection.connectionState.value !is BikeConnectionState.Disconnected) {
+        if (!foregroundPromotionFailed &&
+            container.bikeConnection.connectionState.value !is BikeConnectionState.Disconnected
+        ) {
             container.bikeConnection.disconnect()
         }
         super.onDestroy()
@@ -257,7 +275,7 @@ class BikeConnectionService : Service() {
                 intent,
             )
             if (!started) {
-                (context.applicationContext as? Rs457Application)?.container?.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection?.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -265,10 +283,14 @@ class BikeConnectionService : Service() {
         }
 
         fun disconnect(context: Context): Boolean {
-            return ContextCompatBridge.startForegroundService(
+            val started = ContextCompatBridge.startForegroundService(
                 context,
                 Intent(context, BikeConnectionService::class.java).setAction(ActionDisconnect),
             )
+            if (!started) {
+                context.appContainer.bikeConnection?.disconnect()
+            }
+            return started
         }
 
         fun reconnect(
@@ -285,7 +307,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
             if (!started) {
-                (context.applicationContext as? Rs457Application)?.container?.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection?.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -293,12 +315,16 @@ class BikeConnectionService : Service() {
         }
 
         fun deviceAbsent(context: Context, address: BluetoothAddress): Boolean {
-            return ContextCompatBridge.startForegroundService(
+            val started = ContextCompatBridge.startForegroundService(
                 context,
                 Intent(context, BikeConnectionService::class.java)
                     .setAction(ActionDeviceAbsent)
                     .putExtra(ExtraAddressBytes, address.toByteArray()),
             )
+            if (!started && AssociatedBikeStore(context).read()?.bluetoothAddress == address) {
+                context.appContainer.bikeConnection?.disconnect()
+            }
+            return started
         }
 
         fun deviceAbsent(context: Context, address: String): Boolean =

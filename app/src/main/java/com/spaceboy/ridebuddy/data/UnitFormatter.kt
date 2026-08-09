@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.data
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 object UnitFormatter {
     fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String {
@@ -36,12 +37,35 @@ object UnitFormatter {
 
     fun chartSpeed(kph: Double, units: DistanceUnits): Double = if (units == DistanceUnits.Metric) kph else kph * KmToMiles
     fun fuel(litres: Double, units: DistanceUnits, locale: Locale): String =
-        if (units == DistanceUnits.Metric) "%.1f L".format(locale, litres) else "%.1f gal".format(locale, litres * LitresToUsGallons)
+        if (units == DistanceUnits.Metric) "%.1f L".format(locale, litres)
+        else "%.1f gal".format(locale, litres * gallonsPerLitre(locale))
+
+    fun maneuverDistance(metres: Int, units: DistanceUnits, locale: Locale): String {
+        val safeMetres = metres.coerceAtLeast(0)
+        return if (units == DistanceUnits.Metric) {
+            if (safeMetres < MetresPerKilometre) "$safeMetres m"
+            else "%.1f km".format(locale, safeMetres / MetresPerKilometre.toDouble())
+        } else {
+            val miles = safeMetres / MetresPerMile
+            if (miles < MinimumDisplayedMiles) {
+                "%d ft".format(locale, (safeMetres * FeetPerMetre).roundToInt())
+            } else "%.1f mi".format(locale, miles)
+        }
+    }
+
     fun distanceUnit(units: DistanceUnits) = if (units == DistanceUnits.Metric) "km" else "mi"
     fun speedUnit(units: DistanceUnits) = if (units == DistanceUnits.Metric) "km/h" else "mph"
 
     private const val KmToMiles = 0.621371192
     private const val LitresToUsGallons = 0.264172052
+    private const val LitresToImperialGallons = 0.219969157
+    private const val MetresPerKilometre = 1_000
+    private const val MetresPerMile = 1_609.344
+    private const val FeetPerMetre = 3.280839895
+    private const val MinimumDisplayedMiles = 0.1
+
+    private fun gallonsPerLitre(locale: Locale): Double =
+        if (locale.country.equals("US", ignoreCase = true)) LitresToUsGallons else LitresToImperialGallons
 
     fun formatDateTime(millis: Long): String =
         DateFormat.getDateTimeInstance().format(Date(millis))

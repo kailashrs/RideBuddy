@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.ble
 
 import android.bluetooth.BluetoothGattCharacteristic
+import com.spaceboy.ridebuddy.domain.BikeWriteMode
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -35,5 +36,62 @@ class GattOperationTest {
 
         assertSame(payload, retry.value)
         assertEquals(1, retry.attempt)
+    }
+
+    @Test
+    fun retryRetainsNoResponseWriteMode() {
+        val characteristic = BluetoothGattCharacteristic(
+            UUID.randomUUID(),
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE,
+        )
+
+        val retry = GattOperation.Write(
+            characteristic = characteristic,
+            value = byteArrayOf(0x01),
+            mode = BikeWriteMode.NoResponsePreferred,
+        ).retry()
+
+        assertEquals(BikeWriteMode.NoResponsePreferred, retry.mode)
+        assertEquals(1, retry.attempt)
+    }
+
+    @Test
+    fun acceptedNoResponseWriteWaitsForItsFrameworkCallback() {
+        val characteristic = BluetoothGattCharacteristic(
+            UUID.randomUUID(),
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE,
+        )
+        val operation = GattOperation.Write(
+            characteristic = characteristic,
+            value = byteArrayOf(0x01),
+            mode = BikeWriteMode.NoResponsePreferred,
+        )
+
+        assertEquals(BikeWriteMode.NoResponsePreferred, operation.mode)
+        assertEquals(GattStartAction.AwaitCallback, gattStartAction(started = true))
+    }
+
+    @Test
+    fun acceptedOperationTimeoutResetsGattInsteadOfRetryingCurrentSession() {
+        assertEquals(
+            GattFailureAction.ResetGattAndReconnect,
+            gattFailureAction(
+                source = GattFailureSource.CallbackTimeout,
+                attempt = 0,
+                maxRetries = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun synchronousAndStatusFailuresUseTheSameBoundedRetryPolicy() {
+        listOf(GattFailureSource.SynchronousStart, GattFailureSource.StatusCallback).forEach { source ->
+            assertEquals(GattFailureAction.RetryCurrentGatt, gattFailureAction(source, 0, maxRetries = 2))
+            assertEquals(GattFailureAction.RetryCurrentGatt, gattFailureAction(source, 1, maxRetries = 2))
+            assertEquals(GattFailureAction.CompleteFailure, gattFailureAction(source, 2, maxRetries = 2))
+        }
+        assertEquals(GattStartAction.HandleSynchronousFailure, gattStartAction(started = false))
     }
 }

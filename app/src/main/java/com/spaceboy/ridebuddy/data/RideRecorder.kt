@@ -11,9 +11,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.getAndUpdate
@@ -37,20 +41,25 @@ class RideRecorder(
     private val liveWindow = mutableListOf<RideSample>()
     private val mutableLiveSamples = MutableStateFlow<List<RideSample>>(emptyList())
     val liveSamples: StateFlow<List<RideSample>> = mutableLiveSamples.asStateFlow()
-    private val recordingDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val mutableLiveSampleEvents = MutableSharedFlow<RideSample>(
+        extraBufferCapacity = LiveSampleEventBufferCapacity,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val liveSampleEvents: SharedFlow<RideSample> = mutableLiveSampleEvents.asSharedFlow()
     private var lastLiveFrame: TelemetryFrame? = null
     private var lastLiveAtElapsedRealtime: Long? = null
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
+    private var stopCandidate: StopCandidate? = null
 
     fun start() {
         scope.launch { refreshHistory() }
-        scope.launch(recordingDispatcher) {
+        scope.launch(RecordingDispatcher) {
             bikeConnection.rawTelemetry.collect(::record)
         }
-        scope.launch(recordingDispatcher) {
+        scope.launch(RecordingDispatcher) {
             bikeConnection.connectionState.collect { state ->
                 if (state !is BikeConnectionState.Connected) {
-                    if (mutableActiveRide.value != null) finishRide()
+                    if (mutableActiveRide.value != null) finishRide(stopCandidate)
                     lastLiveFrame = null
                     lastLiveAtElapsedRealtime = null
                     synchronized(samplesLock) { liveWindow.clear() }
@@ -74,6 +83,7 @@ class RideRecorder(
         val liveSample = sample(frame, now, liveAcceleration.coerceIn(-20.0, 20.0))
         lastLiveFrame = frame
         lastLiveAtElapsedRealtime = nowElapsedRealtime
+        mutableLiveSampleEvents.tryEmit(liveSample)
 
         val snapshotLive = synchronized(samplesLock) {
             liveWindow += liveSample
@@ -92,8 +102,9 @@ class RideRecorder(
             if (frame.speedKilometresPerHour >= settingsRepository.settings.value.rideStartSpeedKph) {
                 synchronized(samplesLock) {
                     samples.clear()
-                    appendStoredSampleLocked(liveSample)
+                    liveWindow.performancePreRoll(now).forEach(::appendStoredSampleLocked)
                 }
+                stopCandidate = null
                 mutableActiveRide.value = ActiveRide.started(now, nowElapsedRealtime, frame)
             }
             return
@@ -108,24 +119,35 @@ class RideRecorder(
         val settings = settingsRepository.settings.value
         if (shouldStopRide(frame.speedKilometresPerHour, settings.rideStopSpeedKph)) {
             if (stopJob == null) {
-                stopJob = scope.launch(recordingDispatcher) {
+                stopCandidate = StopCandidate(
+                    endedAtMillis = now,
+                    activeRide = updated,
+                    samples = synchronized(samplesLock) { samples.toList() },
+                )
+                stopJob = scope.launch(RecordingDispatcher) {
                     delay(((settings.rideStopDelaySeconds.coerceIn(10, 600) * 1_000L)).milliseconds)
                     val lastSpeed = mutableActiveRide.value?.lastSpeedKph ?: settings.rideStartSpeedKph
-                    if (shouldStopRide(lastSpeed, settings.rideStopSpeedKph)) finishRide()
+                    val confirmedStop = stopCandidate
+                    if (confirmedStop != null && shouldStopRide(lastSpeed, settings.rideStopSpeedKph)) {
+                        finishRide(confirmedStop)
+                    }
                 }
             }
         } else {
             stopJob?.cancel()
             stopJob = null
+            stopCandidate = null
         }
     }
 
-    private fun finishRide() {
+    private fun finishRide(confirmedStop: StopCandidate? = null) {
         stopJob?.cancel()
         stopJob = null
-        val active = mutableActiveRide.getAndUpdate { null } ?: return
+        stopCandidate = null
+        val latestActive = mutableActiveRide.getAndUpdate { null } ?: return
+        val active = confirmedStop?.activeRide ?: latestActive
         val completedSamples = synchronized(samplesLock) {
-            val list = samples.toList()
+            val list = confirmedStop?.samples ?: samples.toList()
             samples.clear()
             list
         }
@@ -135,7 +157,9 @@ class RideRecorder(
         val route = completedSamples.routePreview()
         val zeroToSixty = completedSamples.accelerationTime(60.0)
         val zeroToHundred = completedSamples.accelerationTime(100.0)
-        val completedRide = active.toRide(System.currentTimeMillis()).copy(
+        val completedRide = active.toRide(
+            completedRideEndMillis(confirmedStop?.endedAtMillis, System.currentTimeMillis()),
+        ).copy(
             startLatitude = start?.latitude,
             startLongitude = start?.longitude,
             endLatitude = end?.latitude,
@@ -183,7 +207,7 @@ class RideRecorder(
     }
 
     private fun sample(frame: TelemetryFrame, now: Long, acceleration: Double): RideSample {
-        val location = locationTracker.location.value
+        val location = locationTracker.freshLocation()
         return RideSample(
             timestampMillis = now,
             speedKph = frame.speedKilometresPerHour,
@@ -211,10 +235,18 @@ class RideRecorder(
         const val MaxLiveSamples = 600
         const val MaxStoredSamples = 36_000
         const val MaxAccelerationSampleGapMillis = 2_500L
+        private const val LiveSampleEventBufferCapacity = 256
         private const val LiveSampleEmitIntervalMillis = 250L
         private const val LogTag = "RideRecorder"
+        private val RecordingDispatcher = Dispatchers.Default.limitedParallelism(1)
     }
 }
+
+private data class StopCandidate(
+    val endedAtMillis: Long,
+    val activeRide: ActiveRide,
+    val samples: List<RideSample>,
+)
 
 internal fun shouldStopRide(speedKph: Double, stopSpeedKph: Double): Boolean = speedKph <= stopSpeedKph
 
@@ -223,6 +255,20 @@ internal fun distanceDeltaKilometres(lastSpeedKph: Double, currentSpeedKph: Doub
     else ((lastSpeedKph + currentSpeedKph) / 2.0) * elapsedMillis / 3_600_000.0
 
 internal const val MaxDistanceIntegrationGapMillis = 2_500L
+
+internal fun completedRideEndMillis(confirmedStopAtMillis: Long?, completionTimeMillis: Long): Long =
+    confirmedStopAtMillis ?: completionTimeMillis
+
+internal fun fuelDeltaLitres(
+    distanceKilometres: Double,
+    previousConsumptionLPer100Km: Double,
+    currentConsumptionLPer100Km: Double,
+): Double {
+    if (!distanceKilometres.isFinite() || distanceKilometres <= 0.0) return 0.0
+    val previous = previousConsumptionLPer100Km.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+    val current = currentConsumptionLPer100Km.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+    return distanceKilometres * ((previous + current) / 2.0) / 100.0
+}
 
 internal fun List<RideSample>.accelerationTime(targetKph: Double): Long? {
     if (size < 2) return null
@@ -254,6 +300,15 @@ private const val MaxPerformanceSampleGapMillis = 2_500L
 private const val MinimumPerformanceMillis = 500L
 private const val MaximumPerformanceMillis = 60_000L
 
+internal fun List<RideSample>.performancePreRoll(
+    nowMillis: Long,
+    maximumAgeMillis: Long = MaximumPerformancePreRollMillis,
+): List<RideSample> = takeLastWhile { sample ->
+    nowMillis - sample.timestampMillis in 0..maximumAgeMillis
+}
+
+private const val MaximumPerformancePreRollMillis = 10_000L
+
 private fun List<RideSample>.routePreview(maxPoints: Int = 32): List<RoutePoint> {
     val points = mapNotNull { sample ->
         val latitude = sample.latitude ?: return@mapNotNull null
@@ -276,24 +331,35 @@ data class ActiveRide(
     val rpmSum: Double,
     val maximumRpm: Long,
     val throttleSum: Double,
-    val consumptionSum: Double,
+    val lastConsumptionLPer100Km: Double,
+    val estimatedFuelLitres: Double,
 ) {
-    fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long, distanceDelta: Double): ActiveRide = copy(
-        lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
-        lastSpeedKph = frame.speedKilometresPerHour,
-        distanceKilometres = distanceKilometres + distanceDelta,
-        sampleCount = sampleCount + 1,
-        speedSum = speedSum + frame.speedKilometresPerHour,
-        maximumSpeedKph = maxOf(maximumSpeedKph, frame.speedKilometresPerHour),
-        rpmSum = rpmSum + frame.engineRpm,
-        maximumRpm = maxOf(maximumRpm, frame.engineRpm),
-        throttleSum = throttleSum + frame.throttlePercent,
-        consumptionSum = consumptionSum + frame.instantaneousConsumptionLitresPer100Km,
-    )
+    fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long, distanceDelta: Double): ActiveRide {
+        val currentConsumption = frame.instantaneousConsumptionLitresPer100Km
+        return copy(
+            lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
+            lastSpeedKph = frame.speedKilometresPerHour,
+            distanceKilometres = distanceKilometres + distanceDelta,
+            sampleCount = sampleCount + 1,
+            speedSum = speedSum + frame.speedKilometresPerHour,
+            maximumSpeedKph = maxOf(maximumSpeedKph, frame.speedKilometresPerHour),
+            rpmSum = rpmSum + frame.engineRpm,
+            maximumRpm = maxOf(maximumRpm, frame.engineRpm),
+            throttleSum = throttleSum + frame.throttlePercent,
+            lastConsumptionLPer100Km = currentConsumption,
+            estimatedFuelLitres = estimatedFuelLitres + fuelDeltaLitres(
+                distanceDelta,
+                lastConsumptionLPer100Km,
+                currentConsumption,
+            ),
+        )
+    }
 
     fun toRide(endedAtMillis: Long): Ride {
         val divisor = sampleCount.coerceAtLeast(1).toDouble()
-        val averageConsumption = consumptionSum / divisor
+        val averageConsumption = if (distanceKilometres > 0.0) {
+            estimatedFuelLitres * 100.0 / distanceKilometres
+        } else 0.0
         return Ride(
             id = 0,
             startedAtMillis = startedAtMillis,
@@ -305,7 +371,7 @@ data class ActiveRide(
             maximumRpm = maximumRpm,
             averageThrottlePercent = throttleSum / divisor,
             averageConsumptionLPer100Km = averageConsumption,
-            estimatedFuelLitres = distanceKilometres * averageConsumption / 100.0,
+            estimatedFuelLitres = estimatedFuelLitres,
         )
     }
 
@@ -321,7 +387,8 @@ data class ActiveRide(
             rpmSum = frame.engineRpm.toDouble(),
             maximumRpm = frame.engineRpm,
             throttleSum = frame.throttlePercent.toDouble(),
-            consumptionSum = frame.instantaneousConsumptionLitresPer100Km,
+            lastConsumptionLPer100Km = frame.instantaneousConsumptionLitresPer100Km,
+            estimatedFuelLitres = 0.0,
         )
     }
 }

@@ -6,6 +6,21 @@ import org.junit.Test
 
 class LineChartGeometryTest {
     @Test
+    fun singleSampleIsPlacedAtTheHorizontalCenter() {
+        val points = lineChartPoints(
+            values = listOf(7.0),
+            width = 100f,
+            height = 100f,
+            scalePolicy = LineChartScalePolicy.AutoRange,
+            clampNegativeValues = false,
+        )
+
+        assertEquals(1, points.size)
+        assertEquals(50f, points.single().x, 0.001f)
+        assertEquals(50f, points.single().y, 0.001f)
+    }
+
+    @Test
     fun zeroBasedScaleKeepsValuesRelativeToZero() {
         val points = lineChartPoints(
             values = listOf(40.0, 50.0),

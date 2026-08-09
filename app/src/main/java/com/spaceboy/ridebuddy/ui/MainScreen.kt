@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 import com.spaceboy.ridebuddy.MainUiState
@@ -64,7 +65,7 @@ import com.spaceboy.ridebuddy.ui.screens.HistoryScreen
 import com.spaceboy.ridebuddy.ui.screens.InfoScreen
 import com.spaceboy.ridebuddy.ui.screens.InsightsScreen
 import com.spaceboy.ridebuddy.ui.screens.LiveScreen
-import com.spaceboy.ridebuddy.ui.screens.MoreScreen
+import com.spaceboy.ridebuddy.ui.screens.SettingsScreen
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
 import com.spaceboy.ridebuddy.ui.screens.NavigationSettingsScreen
 import com.spaceboy.ridebuddy.ui.screens.DiagnosticsScreen
@@ -90,6 +91,7 @@ data class MainScreenState(
     val discoveredBikes: List<DiscoveredBike>,
     val connectionState: BikeConnectionState,
     val telemetry: TelemetryFrame?,
+    val latestTelemetryReceivedAtElapsedRealtime: Long?,
     val identity: BikeIdentity,
     val diagnostics: BleDiagnostics,
     val bleCapture: BleCaptureState,
@@ -120,6 +122,7 @@ data class MainScreenActions(
     val onConnectBike: (DiscoveredBike) -> Unit,
     val onDisconnectBike: () -> Unit,
     val onStartNavigation: (String) -> Unit,
+    val onOpenActiveNavigation: () -> Unit,
     val onStopNavigation: () -> Unit,
     val onSharedDestinationHandled: () -> Unit,
     val onInsightPeriodSelected: (InsightPeriod) -> Unit,
@@ -227,6 +230,7 @@ fun MainScreen(
                         destinations.forEach { item ->
                             val selected = item.destination == uiState.selectedDestination
                             NavigationRailItem(
+                                modifier = Modifier.testTag("top-level-${item.destination.name}"),
                                 selected = selected,
                                 onClick = { onDestinationSelected(item.destination) },
                                 icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
@@ -251,6 +255,7 @@ fun MainScreen(
                             destinations.forEach { item ->
                                 val selected = item.destination == uiState.selectedDestination
                                 NavigationBarItem(
+                                    modifier = Modifier.testTag("top-level-${item.destination.name}"),
                                     selected = selected,
                                     onClick = { onDestinationSelected(item.destination) },
                                     icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
@@ -326,6 +331,7 @@ private fun ScreenContent(
                 onConnectBike = onConnectBike,
                 onDisconnectBike = onDisconnectBike,
                 onStartNavigation = onStartNavigation,
+                onOpenActiveNavigation = onOpenActiveNavigation,
                 onStopNavigation = onStopNavigation,
                 onSharedDestinationHandled = onSharedDestinationHandled,
             )
@@ -342,13 +348,14 @@ private fun ScreenContent(
                 modifier = modifier,
                 navigationConfigured = uiState.navigationKey.isConfigured,
                 connectionState = connectionState,
+                latestTelemetryReceivedAtElapsedRealtime = latestTelemetryReceivedAtElapsedRealtime,
                 identity = identity,
                 diagnostics = diagnostics,
                 deviceAddress = bikeAssociation.bike?.address,
                 notificationAccessEnabled = notificationAccessEnabled,
                 onReconnect = onFindBike,
             )
-            TopLevelDestination.More -> MoreScreen(
+            TopLevelDestination.More -> SettingsScreen(
                 modifier = modifier,
                 navigationKey = uiState.navigationKey,
                 onOpenNavigationSettings = onOpenNavigationSettings,

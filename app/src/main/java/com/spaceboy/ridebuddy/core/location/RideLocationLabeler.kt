@@ -22,9 +22,15 @@ class RideLocationLabeler(context: Context) {
             withTimeoutOrNull(GeocoderTimeoutMillis.milliseconds) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     suspendCancellableCoroutine { continuation ->
-                        geocoder.getFromLocation(latitude, longitude, 1) { results ->
-                            if (continuation.isActive) continuation.resume(results.firstOrNull())
-                        }
+                        geocoder.getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
+                            override fun onGeocode(addresses: MutableList<Address>) {
+                                if (continuation.isActive) continuation.resume(addresses.firstOrNull())
+                            }
+
+                            override fun onError(errorMessage: String?) {
+                                if (continuation.isActive) continuation.resume(null)
+                            }
+                        })
                     }
                 } else {
                     @Suppress("DEPRECATION")

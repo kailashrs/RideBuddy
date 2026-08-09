@@ -61,7 +61,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,8 +77,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import android.widget.Toast
 import com.spaceboy.ridebuddy.BuildConfig
 import com.spaceboy.ridebuddy.NavigationKeyUiState
+import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.data.AppSettings
@@ -117,7 +124,7 @@ data class MoreSettingsActions(
 )
 
 @Composable
-fun MoreScreen(
+fun SettingsScreen(
     modifier: Modifier = Modifier,
     navigationKey: NavigationKeyUiState,
     onOpenNavigationSettings: () -> Unit,
@@ -153,7 +160,16 @@ fun MoreScreen(
     onOpenAppPermissions: () -> Unit,
 ) {
     val context = LocalContext.current
-    val installedSupportedApps = remember(context) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var installedAppsRefresh by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) installedAppsRefresh++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val installedSupportedApps = remember(context, installedAppsRefresh) {
         SupportedNotificationApps.filter { app ->
             try {
                 context.packageManager.getPackageInfo(app.packageName, 0)
@@ -535,7 +551,15 @@ fun MoreScreen(
                 settingsActions.onWeatherAlertsChanged(it)
             }
             if (settings.weatherAlerts) {
-                TextButton(onClick = { uriHandler.openUri("https://open-meteo.com/") }, modifier = Modifier.padding(start = 56.dp)) {
+                TextButton(
+                    onClick = {
+                        runCatching { uriHandler.openUri("https://open-meteo.com/") }
+                            .onFailure {
+                                Toast.makeText(context, R.string.browser_unavailable, Toast.LENGTH_LONG).show()
+                            }
+                    },
+                    modifier = Modifier.padding(start = 56.dp),
+                ) {
                     Text("Weather data by Open-Meteo.com")
                 }
             }

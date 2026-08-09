@@ -10,6 +10,7 @@ import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -44,14 +45,15 @@ class RidingAlertMonitor(
             }
         }
         scope.launch {
-            rideRecorder.liveSamples.collectLatest { samples ->
-                val acceleration = samples.lastOrNull()?.accelerationMetresPerSecondSquared ?: return@collectLatest
+            rideRecorder.liveSampleEvents.collect { sample ->
+                val acceleration = sample.accelerationMetresPerSecondSquared
                 val preferences = settings.settings.value
-                if (preferences.accelerationAlerts && acceleration >= 3.0) {
-                    alert("acceleration", "Hard acceleration", "Acceleration reached %.1f m/s²".format(acceleration))
-                }
-                if (preferences.brakingAlerts && acceleration <= -3.5) {
-                    alert("braking", "Hard braking", "Deceleration reached %.1f m/s²".format(acceleration))
+                when (ridingMotionAlert(acceleration, preferences.accelerationAlerts, preferences.brakingAlerts)) {
+                    RidingMotionAlert.HardAcceleration ->
+                        alert("acceleration", "Hard acceleration", "Acceleration reached %.1f m/s²".format(acceleration))
+                    RidingMotionAlert.HardBraking ->
+                        alert("braking", "Hard braking", "Deceleration reached %.1f m/s²".format(acceleration))
+                    null -> Unit
                 }
             }
         }
@@ -98,4 +100,16 @@ class RidingAlertMonitor(
         const val ChannelId = "riding_alerts"
         const val AlertCooldownMillis = 30_000L
     }
+}
+
+internal enum class RidingMotionAlert { HardAcceleration, HardBraking }
+
+internal fun ridingMotionAlert(
+    accelerationMetresPerSecondSquared: Double,
+    accelerationAlertsEnabled: Boolean,
+    brakingAlertsEnabled: Boolean,
+): RidingMotionAlert? = when {
+    accelerationAlertsEnabled && accelerationMetresPerSecondSquared >= 3.0 -> RidingMotionAlert.HardAcceleration
+    brakingAlertsEnabled && accelerationMetresPerSecondSquared <= -3.5 -> RidingMotionAlert.HardBraking
+    else -> null
 }

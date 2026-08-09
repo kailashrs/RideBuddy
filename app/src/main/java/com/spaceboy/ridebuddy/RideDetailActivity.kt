@@ -83,13 +83,18 @@ class RideDetailActivity : ComponentActivity() {
     private var loadState by mutableStateOf<RideDetailLoadState>(RideDetailLoadState.Loading)
     private var units by mutableStateOf(DistanceUnits.Metric)
     private lateinit var appSettings: com.spaceboy.ridebuddy.data.AppSettings
-    private var pendingExportFormat: RideExportFormat? = null
-    private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        val format = pendingExportFormat
-        pendingExportFormat = null
-        if (uri == null || format == null) return@registerForActivityResult
+    private val createCsvDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        uri?.let { exportRideToUri(it, RideExportFormat.Csv) }
+    }
+    private val createGpxDocument = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/gpx+xml"),
+    ) { uri ->
+        uri?.let { exportRideToUri(it, RideExportFormat.Gpx) }
+    }
+
+    private fun exportRideToUri(uri: Uri, format: RideExportFormat) {
         lifecycleScope.launch {
-            val container = (application as Rs457Application).container
+            val container = appContainer
             val rideId = intent.getLongExtra(ExtraRideId, -1)
             var exportRide = (loadState as? RideDetailLoadState.Loaded)?.data?.ride
                 ?: container.rideRepository.rides.value.firstOrNull { it.id == rideId }
@@ -103,7 +108,7 @@ class RideDetailActivity : ComponentActivity() {
             }
             val exportSamples = container.rideRepository.samples(exportRide.id)
             val result = withContext(Dispatchers.IO) {
-                runCatching {
+                try {
                     checkNotNull(contentResolver.openOutputStream(uri)) { "Could not open the selected document" }
                         .bufferedWriter().use { writer ->
                             when (format) {
@@ -111,6 +116,11 @@ class RideDetailActivity : ComponentActivity() {
                                 RideExportFormat.Gpx -> writer.writeGpx(exportRide, exportSamples)
                             }
                         }
+                    Result.success(Unit)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    Result.failure(error)
                 }
             }
             if (result.isFailure) Toast.makeText(this@RideDetailActivity, "Could not export this ride", Toast.LENGTH_LONG).show()
@@ -122,9 +132,7 @@ class RideDetailActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val rideId = intent.getLongExtra(ExtraRideId, -1)
-        pendingExportFormat = savedInstanceState?.getString(KeyPendingExportFormat)
-            ?.let { name -> runCatching { RideExportFormat.valueOf(name) }.getOrNull() }
-        val container = (application as Rs457Application).container
+        val container = appContainer
         appSettings = container.appSettings.settings.value
         units = appSettings.distanceUnits
         loadRide(rideId)
@@ -178,7 +186,7 @@ class RideDetailActivity : ComponentActivity() {
     private fun loadRide(rideId: Long) {
         loadState = RideDetailLoadState.Loading
         lifecycleScope.launch {
-            val container = (application as Rs457Application).container
+            val container = appContainer
             try {
                 var loadedRide = container.rideRepository.rides.value.firstOrNull { it.id == rideId }
                 if (loadedRide == null) {
@@ -205,13 +213,14 @@ class RideDetailActivity : ComponentActivity() {
     }
 
     private fun export(fileName: String, format: RideExportFormat) {
-        pendingExportFormat = format
-        createDocument.launch(fileName)
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        pendingExportFormat?.let { outState.putString(KeyPendingExportFormat, it.name) }
-        super.onSaveInstanceState(outState)
+        runCatching {
+            when (format) {
+                RideExportFormat.Csv -> createCsvDocument.launch(fileName)
+                RideExportFormat.Gpx -> createGpxDocument.launch(fileName)
+            }
+        }.onFailure {
+            Toast.makeText(this, R.string.document_provider_unavailable, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun shareRide(ride: Ride) {
@@ -221,19 +230,31 @@ class RideDetailActivity : ComponentActivity() {
             ride.startArea?.let { append(" from $it") }
             ride.endArea?.let { append(" to $it") }
         }
-        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, summary), "Share ride"))
+        runCatching {
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, summary),
+                    getString(R.string.ride_share_title),
+                ),
+            )
+        }.onFailure {
+            Toast.makeText(this, R.string.ride_share_unavailable, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun openParking(ride: Ride) {
         val latitude = ride.endLatitude ?: return
         val longitude = ride.endLongitude ?: return
         val label = Uri.encode(ride.endArea ?: "Parked motorcycle")
-        startActivity(Intent(Intent.ACTION_VIEW, "geo:$latitude,$longitude?q=$latitude,$longitude($label)".toUri()))
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, "geo:$latitude,$longitude?q=$latitude,$longitude($label)".toUri()))
+        }.onFailure {
+            Toast.makeText(this, R.string.parking_map_unavailable, Toast.LENGTH_LONG).show()
+        }
     }
 
     companion object {
         private const val ExtraRideId = "ride_id"
-        private const val KeyPendingExportFormat = "pending_export_format"
         fun intent(context: Context, rideId: Long) = Intent(context, RideDetailActivity::class.java)
             .putExtra(ExtraRideId, rideId)
     }

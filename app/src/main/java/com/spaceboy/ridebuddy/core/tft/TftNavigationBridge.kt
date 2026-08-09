@@ -15,13 +15,32 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
+
+internal fun shouldReplayTftNavigation(
+    navigationStarted: Boolean,
+    outputEnabled: Boolean,
+    hasLastInfo: Boolean,
+): Boolean = navigationStarted && outputEnabled && hasLastInfo
+
+internal fun shouldResetTftOutput(
+    sessionActive: Boolean,
+    textAlertActive: Boolean,
+    hasLastInfo: Boolean,
+): Boolean = sessionActive || textAlertActive || hasLastInfo
+
+internal fun arrivalDisplayTimerGeneration(
+    arrivalGeneration: Long?,
+    writeCompletedSuccessfully: Boolean,
+): Long? = arrivalGeneration?.takeIf { writeCompletedSuccessfully }
 
 class TftNavigationBridge(
     private val connection: BikeConnection,
     private val settings: AppSettingsRepository,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
 ) {
     private val queueLock = Any()
     private val wakeWorker = Channel<Unit>(Channel.CONFLATED)
@@ -32,7 +51,10 @@ class TftNavigationBridge(
     private var textAlertActive = false
     private var textAlertMessage: String? = null
     private var transportReady = false
+    private var outputEnabled = settings.settings.value.tftNavigationOutputEnabled
+    private var clusterResetNeeded = false
     private var sessionGeneration = 0L
+    private var arrivalPendingGeneration: Long? = null
     private var textAlertGeneration = 0L
     private var lastInfo: NavInfo? = null
 
@@ -65,34 +87,60 @@ class TftNavigationBridge(
                         }
                     } ?: break
                     if (!isCurrent(batch)) continue
-                    val accepted = runCatching { writeBatch(batch) }.getOrDefault(false)
-                    if (!accepted) {
-                        restore(batch)
-                        delay(FailedWriteRetryMillis.milliseconds)
-                        wakeWorker.trySend(Unit)
-                        break
+                    val result = runCatching { writeBatch(batch) }
+                        .getOrDefault(BatchWriteResult.Failed)
+                    when (result) {
+                        BatchWriteResult.Stale -> continue
+                        BatchWriteResult.Failed -> {
+                            restore(batch)
+                            delay(FailedWriteRetryMillis.milliseconds)
+                            wakeWorker.trySend(Unit)
+                            break
+                        }
+                        BatchWriteResult.Completed -> Unit
+                    }
+                    arrivalDisplayTimerGeneration(
+                        arrivalGeneration = batch.arrivalGeneration,
+                        writeCompletedSuccessfully = result == BatchWriteResult.Completed,
+                    )?.let(::scheduleArrivalReset)
+                    if (batch.clearsCluster) {
+                        synchronized(queueLock) { clusterResetNeeded = false }
                     }
                 }
             }
         }
+        scope.launch {
+            settings.settings
+                .map { appSettings -> appSettings.tftNavigationOutputEnabled }
+                .distinctUntilChanged()
+                .collect(::setOutputEnabled)
+        }
     }
 
     fun start() {
-        if (!settings.settings.value.tftNavigationOutputEnabled) {
-            stop()
-            return
-        }
-        synchronized(queueLock) {
+        val queuedReset = synchronized(queueLock) {
+            val wasShowingArrival = arrivalPendingGeneration != null
+            arrivalPendingGeneration = null
+            if (wasShowingArrival) {
+                sessionActive = false
+                clusterResetNeeded = true
+                controlBatches.clear()
+                latestData.clear()
+                if (transportReady) queueClusterResetLocked()
+            }
             sessionGeneration++
             acceptingUpdates = true
+            wasShowingArrival && transportReady
         }
+        if (queuedReset) wakeWorker.trySend(Unit)
     }
 
     fun accept(info: NavInfo) {
         val controlFrames = mutableListOf<Frame>()
         val generation = synchronized(queueLock) {
-            if (!acceptingUpdates || !settings.settings.value.tftNavigationOutputEnabled) return
+            if (!acceptingUpdates) return
             lastInfo = info
+            if (!outputEnabled) return
             if (!sessionActive) {
                 controlFrames += Frame(
                     BleCharacteristics.NavigationSession,
@@ -142,7 +190,7 @@ class TftNavigationBridge(
 
         synchronized(queueLock) {
             if (!acceptingUpdates || !sessionActive || sessionGeneration != generation ||
-                !settings.settings.value.tftNavigationOutputEnabled
+                !outputEnabled
             ) return
             val framesToQueue = if (textAlertActive) {
                 dataFrames.filterNot { it.characteristic == BleCharacteristics.NavigationText }
@@ -170,12 +218,39 @@ class TftNavigationBridge(
         Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionRerouting)),
     )
 
-    fun arrived() = queueControl(
-        Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionArrived)),
-    )
+    /** Shows the arrival state briefly, then clears the cluster without racing a newer route. */
+    fun arrivedAndStop() {
+        val generation = synchronized(queueLock) {
+            if (!sessionActive || !outputEnabled) return@synchronized null
+            sessionGeneration++
+            val arrivalGeneration = sessionGeneration
+            acceptingUpdates = false
+            textAlertGeneration++
+            textAlertActive = false
+            textAlertMessage = null
+            lastInfo = null
+            latestData.clear()
+            controlBatches.clear()
+            arrivalPendingGeneration = arrivalGeneration
+            controlBatches += WriteBatch(
+                frames = listOf(
+                    Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionArrived)),
+                ),
+                priority = true,
+                sessionGeneration = arrivalGeneration,
+                arrivalGeneration = arrivalGeneration,
+            )
+            arrivalGeneration
+        }
+        if (generation == null) {
+            stop()
+            return
+        }
+        wakeWorker.trySend(Unit)
+    }
 
     fun speedLimit(kph: Int) {
-        if (synchronized(queueLock) { sessionActive }) {
+        if (synchronized(queueLock) { sessionActive && acceptingUpdates }) {
             queueLatest(Frame(BleCharacteristics.NavigationSpeedLimit, TftPacketEncoder.speedLimit(kph)))
         }
     }
@@ -186,12 +261,12 @@ class TftNavigationBridge(
 
     /** Displays a short alert using the TFT navigation text surface. */
     fun presentTextAlert(message: String): Boolean {
-        if (message.isBlank() || !settings.settings.value.tftNavigationOutputEnabled) return false
+        if (message.isBlank() || !synchronized(queueLock) { outputEnabled }) return false
         if (connection.connectionState.value !is BikeConnectionState.Connected || !connection.diagnostics.value.authenticated) {
             return false
         }
         synchronized(queueLock) {
-            if (!settings.settings.value.tftNavigationOutputEnabled) return false
+            if (!outputEnabled) return false
             val startsTemporarySession = !sessionActive
             if (startsTemporarySession) sessionActive = true
             textAlertGeneration++
@@ -243,16 +318,8 @@ class TftNavigationBridge(
             if (!acceptingUpdates && sessionActive) {
                 sessionActive = false
                 lastInfo = null
-                controlBatches.addLast(
-                    WriteBatch(
-                        frames = listOf(
-                            Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionEnded)),
-                            Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()),
-                            Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)),
-                        ),
-                        priority = true,
-                    ),
-                )
+                clusterResetNeeded = true
+                queueClusterResetLocked()
                 TextAlertDismissal(queuedShutdown = true)
             } else {
                 TextAlertDismissal(guidanceToRepublish = lastInfo)
@@ -263,33 +330,47 @@ class TftNavigationBridge(
     }
 
     fun stop() {
+        val shutdown = synchronized(queueLock) { stopLocked() }
+        if (shutdown != null) wakeWorker.trySend(Unit)
+    }
+
+    private fun stopAfterArrival(generation: Long) {
         val shutdown = synchronized(queueLock) {
-            sessionGeneration++
-            acceptingUpdates = false
-            textAlertGeneration++
-            val shouldShutdown = sessionActive
-            sessionActive = false
-            textAlertActive = false
-            textAlertMessage = null
-            lastInfo = null
-            latestData.clear()
-            controlBatches.clear()
-            if (!shouldShutdown) return@synchronized null
-            WriteBatch(
-                frames = listOf(
-                    Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionEnded)),
-                    Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()),
-                    Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)),
-                ),
-                priority = true,
-            ).also(controlBatches::addLast)
+            if (arrivalPendingGeneration != generation ||
+                sessionGeneration != generation || acceptingUpdates
+            ) return
+            stopLocked()
         }
         if (shutdown != null) wakeWorker.trySend(Unit)
     }
 
+    private fun scheduleArrivalReset(generation: Long) {
+        scope.launch {
+            delay(ArrivalDisplayMillis.milliseconds)
+            stopAfterArrival(generation)
+        }
+    }
+
+    private fun stopLocked(): WriteBatch? {
+        sessionGeneration++
+        arrivalPendingGeneration = null
+        acceptingUpdates = false
+        textAlertGeneration++
+        val shouldShutdown = sessionActive
+        sessionActive = false
+        textAlertActive = false
+        textAlertMessage = null
+        lastInfo = null
+        latestData.clear()
+        controlBatches.clear()
+        if (shouldShutdown) clusterResetNeeded = true
+        if (!clusterResetNeeded || !transportReady) return null
+        return queueClusterResetLocked()
+    }
+
     private fun queueControl(frame: Frame) {
         val queued = synchronized(queueLock) {
-            if (!sessionActive || !settings.settings.value.tftNavigationOutputEnabled) false else {
+            if (!sessionActive || !outputEnabled) false else {
                 controlBatches += WriteBatch(
                     frames = listOf(frame),
                     priority = false,
@@ -303,7 +384,7 @@ class TftNavigationBridge(
 
     private fun queueLatest(frame: Frame) {
         val queued = synchronized(queueLock) {
-            if (!sessionActive || !settings.settings.value.tftNavigationOutputEnabled) false else {
+            if (!sessionActive || !outputEnabled) false else {
                 val key = frame.key()
                 latestData.remove(key)
                 latestData[key] = frame
@@ -311,6 +392,56 @@ class TftNavigationBridge(
             }
         }
         if (queued) wakeWorker.trySend(Unit)
+    }
+
+    private fun setOutputEnabled(enabled: Boolean) {
+        var replay: NavInfo? = null
+        val queuedReset = synchronized(queueLock) {
+            if (outputEnabled == enabled) return
+            outputEnabled = enabled
+            if (!enabled) {
+                sessionGeneration++
+                arrivalPendingGeneration = null
+                textAlertGeneration++
+                clusterResetNeeded = clusterResetNeeded || shouldResetTftOutput(
+                    sessionActive = sessionActive,
+                    textAlertActive = textAlertActive,
+                    hasLastInfo = lastInfo != null,
+                )
+                sessionActive = false
+                textAlertActive = false
+                textAlertMessage = null
+                controlBatches.clear()
+                latestData.clear()
+                if (clusterResetNeeded && transportReady) queueClusterResetLocked() != null else false
+            } else {
+                if (clusterResetNeeded && transportReady) queueClusterResetLocked()
+                if (shouldReplayTftNavigation(
+                        navigationStarted = acceptingUpdates,
+                        outputEnabled = outputEnabled,
+                        hasLastInfo = lastInfo != null,
+                    )
+                ) {
+                    replay = lastInfo
+                }
+                clusterResetNeeded && transportReady
+            }
+        }
+        replay?.let(::accept)
+        if (queuedReset || replay != null) wakeWorker.trySend(Unit)
+    }
+
+    private fun queueClusterResetLocked(): WriteBatch? {
+        if (controlBatches.any(WriteBatch::clearsCluster)) return null
+        return WriteBatch(
+            frames = listOf(
+                Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionEnded)),
+                Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()),
+                Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)),
+            ),
+            priority = true,
+            clearsCluster = true,
+        ).also(controlBatches::addLast)
     }
 
     /**
@@ -327,7 +458,40 @@ class TftNavigationBridge(
                     sessionActive = false
                     controlBatches.clear()
                     latestData.clear()
-                    ConnectionRecovery(lastInfo, textAlertMessage)
+                    if (clusterResetNeeded) queueClusterResetLocked()
+                    val pendingArrival = arrivalPendingGeneration
+                    if (pendingArrival != null && outputEnabled) {
+                        sessionActive = true
+                        controlBatches += WriteBatch(
+                            frames = listOf(
+                                Frame(
+                                    BleCharacteristics.NavigationSession,
+                                    TftPacketEncoder.session(SessionGuidanceStarted),
+                                ),
+                                Frame(
+                                    BleCharacteristics.NavigationStatus,
+                                    TftPacketEncoder.status(StatusNavigationActive),
+                                ),
+                                Frame(
+                                    BleCharacteristics.NavigationSession,
+                                    TftPacketEncoder.session(SessionArrived),
+                                ),
+                            ),
+                            priority = true,
+                            sessionGeneration = pendingArrival,
+                            arrivalGeneration = pendingArrival,
+                        )
+                    }
+                    ConnectionRecovery(
+                        lastInfo = lastInfo.takeIf {
+                            pendingArrival == null && shouldReplayTftNavigation(
+                                navigationStarted = acceptingUpdates,
+                                outputEnabled = outputEnabled,
+                                hasLastInfo = lastInfo != null,
+                            )
+                        },
+                        textAlertMessage = textAlertMessage.takeIf { outputEnabled },
+                    )
                 }
 
                 !ready && transportReady -> {
@@ -335,6 +499,10 @@ class TftNavigationBridge(
                     sessionActive = false
                     controlBatches.clear()
                     latestData.clear()
+                    if (arrivalPendingGeneration != null) {
+                        sessionGeneration++
+                        arrivalPendingGeneration = sessionGeneration
+                    }
                     null
                 }
 
@@ -357,18 +525,18 @@ class TftNavigationBridge(
         }
     }
 
-    private suspend fun writeBatch(batch: WriteBatch): Boolean {
+    private suspend fun writeBatch(batch: WriteBatch): BatchWriteResult {
         val passes = if (batch.replayForCluster) ClusterReplayCount else 1
         var firstWrite = true
         repeat(passes) {
             for (frame in batch.frames) {
-                if (!isCurrent(batch)) return true
+                if (!isCurrent(batch)) return BatchWriteResult.Stale
                 if (!firstWrite) delay(MinimumWriteIntervalMillis.milliseconds)
                 firstWrite = false
-                if (!connection.writeAndAwait(frame.toBikeWrite())) return false
+                if (!connection.writeAndAwait(frame.toBikeWrite())) return BatchWriteResult.Failed
             }
         }
-        return true
+        return BatchWriteResult.Completed
     }
 
     private fun isCurrent(batch: WriteBatch): Boolean = synchronized(queueLock) {
@@ -404,9 +572,12 @@ class TftNavigationBridge(
         val replayForCluster: Boolean = false,
         val alertGeneration: Long? = null,
         val sessionGeneration: Long? = null,
+        val arrivalGeneration: Long? = null,
+        val clearsCluster: Boolean = false,
     )
 
     private data class ConnectionRecovery(val lastInfo: NavInfo?, val textAlertMessage: String?)
+    private enum class BatchWriteResult { Completed, Failed, Stale }
     private data class TextAlertDismissal(
         val queuedShutdown: Boolean = false,
         val guidanceToRepublish: NavInfo? = null,
@@ -421,6 +592,7 @@ class TftNavigationBridge(
         const val MinimumWriteIntervalMillis = 200L
         const val ClusterReplayCount = 2
         const val FailedWriteRetryMillis = 1_000L
+        const val ArrivalDisplayMillis = 2_000L
         const val SessionGuidanceStarted = 80
         const val SessionRerouting = 82
         const val SessionArrived = 83

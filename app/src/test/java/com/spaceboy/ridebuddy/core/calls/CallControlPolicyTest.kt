@@ -18,6 +18,13 @@ class CallControlPolicyTest {
     }
 
     @Test
+    fun disablingBothFeaturesClearsOnlyAPreviouslyPublishedCall() {
+        assertTrue(shouldClearPublishedCall(true, callerDisplay = false, tftCallControls = false))
+        assertFalse(shouldClearPublishedCall(false, callerDisplay = false, tftCallControls = false))
+        assertFalse(shouldClearPublishedCall(true, callerDisplay = false, tftCallControls = true))
+    }
+
+    @Test
     fun legacyFallbackRequiresExplicitSettingAndPermission() {
         assertFalse(canUseLegacyCallFallback(enabled = false, permissionGranted = true))
         assertFalse(canUseLegacyCallFallback(enabled = true, permissionGranted = false))

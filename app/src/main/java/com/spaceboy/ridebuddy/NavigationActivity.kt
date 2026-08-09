@@ -58,13 +58,13 @@ import com.google.android.libraries.navigation.NavigationView
 import com.google.android.libraries.navigation.Navigator
 import com.google.android.libraries.navigation.RoutingOptions
 import com.google.android.libraries.navigation.SpeedAlertOptions
-import com.google.android.libraries.navigation.SpeedingListener
 import com.google.android.libraries.navigation.Waypoint
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import com.spaceboy.ridebuddy.service.NavInfoReceivingService
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.text.DateFormat
 import java.util.Date
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.launch
 
 class NavigationActivity : ComponentActivity() {
@@ -74,13 +74,11 @@ class NavigationActivity : ComponentActivity() {
     private var navigator: Navigator? = null
     private var guidanceStarted = false
     private var navigationEndedByUser = false
+    private val navigationSessionId = NextNavigationSessionId.incrementAndGet()
 
-    private val arrivalListener = Navigator.ArrivalListener { event ->
-        (application as Rs457Application).container.tftNavigationBridge.arrived()
-        if (event.isFinalDestination) runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
-    }
     private val reroutingListener = Navigator.ReroutingListener {
-        (application as Rs457Application).container.apply {
+        if (!NavigationSessionOwners.isOwner(navigationSessionId)) return@ReroutingListener
+        appContainer.apply {
             tftNavigationBridge.rerouting()
             val message = "The route is being recalculated; check for changed road conditions"
             if (ridingAlertMonitor.navigationHazard(message)) {
@@ -109,7 +107,9 @@ class NavigationActivity : ComponentActivity() {
             },
         )
 
-        val container = (application as Rs457Application).container
+        val container = appContainer
+        NavigationSessionOwners.register(navigationSessionId)
+        container.navigationGuidanceLifecycle.registerPendingSession(navigationSessionId)
 
         val composeOverlay = ComposeView(this).apply {
             setContent {
@@ -143,7 +143,16 @@ class NavigationActivity : ComponentActivity() {
                                     Button(
                                         onClick = {
                                             if (hasRequiredLocationPermissions()) {
-                                                navigator?.let(::calculateRoute) ?: initializeNavigation()
+                                                if (intent.getBooleanExtra(ExtraAttachExistingGuidance, false)) {
+                                                    navigator?.takeUnless { it.isGuidanceRunning }?.let { currentNavigator ->
+                                                        currentNavigator.removeReroutingListener(reroutingListener)
+                                                        releaseNavigationSession(currentNavigator, stopGuidance = false)
+                                                    }
+                                                    navigator = null
+                                                    initializeNavigation()
+                                                } else {
+                                                    navigator?.let(::calculateRoute) ?: initializeNavigation()
+                                                }
                                             } else {
                                                 requestLocationOrInitialize()
                                             }
@@ -185,7 +194,8 @@ class NavigationActivity : ComponentActivity() {
         requestLocationOrInitialize()
 
         lifecycleScope.launch {
-            (application as Rs457Application).container.bikeConnection.controls.collect { event ->
+            appContainer.bikeConnection.controls.collect { event ->
+                if (!NavigationSessionOwners.isOwner(navigationSessionId)) return@collect
                 when (event) {
                     BikeControlEvent.ExitNavigation -> endNavigationAndFinish()
                     BikeControlEvent.SkipManeuver -> {
@@ -215,61 +225,125 @@ class NavigationActivity : ComponentActivity() {
     }
 
     private fun initializeNavigation() {
-        NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
-            override fun onNavigatorReady(readyNavigator: Navigator) {
-                if (isFinishing || isDestroyed) {
-                    readyNavigator.cleanup()
-                    return
-                }
-                navigator = readyNavigator
-                navigationView.isNavigationUiEnabled = true
-                val settings = (application as Rs457Application).container.appSettings.settings.value
-                navigationView.setTrafficPromptsEnabled(settings.hazardAlerts)
-                navigationView.setTrafficIncidentCardsEnabled(settings.hazardAlerts)
-                if (readyNavigator.isGuidanceRunning) {
-                    readyNavigator.stopGuidance()
-                    readyNavigator.unregisterServiceForNavUpdates()
-                    guidanceStarted = false
-                    (application as Rs457Application).container.navigationFeed.clear()
-                }
-                val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
-                val tftBridge = (application as Rs457Application).container.tftNavigationBridge
-                tftBridge.start()
-                val navUpdatesRegistered = runCatching {
-                    readyNavigator.registerServiceForNavUpdates(
-                        packageName,
-                        NavInfoReceivingService::class.java.name,
-                        options,
-                    )
-                }.getOrDefault(false)
-                if (!navUpdatesRegistered) {
-                    tftBridge.stop()
-                    Toast.makeText(this@NavigationActivity, "TFT turn updates are unavailable", Toast.LENGTH_LONG)
-                        .show()
-                }
-                readyNavigator.addArrivalListener(arrivalListener)
-                readyNavigator.addReroutingListener(reroutingListener)
-                readyNavigator.setTaskRemovedBehavior(Navigator.TaskRemovedBehavior.CONTINUE_SERVICE)
-                readyNavigator.setAudioGuidance(
-                    if (settings.voiceGuidance) Navigator.AudioGuidance.VOICE_ALERTS_AND_GUIDANCE
-                    else Navigator.AudioGuidance.SILENT,
-                )
-                readyNavigator.setSpeedAlertOptions(SpeedAlertOptions(0.05f, 0.15f, 5.0))
-                readyNavigator.setSpeedingListener(SpeedingListener { percentageAboveLimit, _ ->
-                    val speed = (application as Rs457Application).container.bikeConnection.telemetry.value
-                        ?.speedKilometresPerHour ?: return@SpeedingListener
-                    if (percentageAboveLimit >= 0f && speed > 0.0) {
-                        val limit = (speed / (1.0 + percentageAboveLimit)).div(5.0).toInt().times(5)
-                        if (limit > 0) (application as Rs457Application).container.tftNavigationBridge.speedLimit(limit)
+        runCatching {
+            NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
+                override fun onNavigatorReady(readyNavigator: Navigator) {
+                    if (isFinishing || isDestroyed) {
+                        if ((navigationEndedByUser || !readyNavigator.isGuidanceRunning) &&
+                            NavigationSessionOwners.claimIfUnowned(navigationSessionId)
+                        ) {
+                            releaseNavigationSession(readyNavigator, stopGuidance = navigationEndedByUser)
+                        }
+                        return
                     }
-                })
-                calculateRoute(readyNavigator)
-            }
+                    if (!NavigationSessionOwners.claim(navigationSessionId)) return
+                    navigator = readyNavigator
+                    if (!configureNavigator(readyNavigator)) {
+                        navigator = null
+                        NavigationSessionOwners.release(navigationSessionId)
+                        return
+                    }
 
-            override fun onError(errorCode: Int) {
-                showError("Navigation could not start ($errorCode)")
-            }
-        })
+                    val attachRequested = intent.getBooleanExtra(ExtraAttachExistingGuidance, false)
+                    when (
+                        navigationLaunchPolicy(
+                            attachRequested = attachRequested,
+                            guidanceWasStarted = guidanceStarted,
+                            guidanceIsRunning = readyNavigator.isGuidanceRunning,
+                        )
+                    ) {
+                        NavigationLaunchPolicy.AttachExisting -> {
+                            guidanceStarted = true
+                            appContainer.navigationGuidanceLifecycle
+                                .markGuidanceStarted(navigationSessionId)
+                            retryVisibleState.value = false
+                            statusTextState.value = getString(R.string.navigation_active)
+                        }
+                        NavigationLaunchPolicy.NoActiveRoute -> {
+                            guidanceStarted = false
+                            showError(getString(R.string.navigation_no_active_route))
+                        }
+                        NavigationLaunchPolicy.PrepareNewRoute -> prepareNewRoute(readyNavigator)
+                    }
+                }
+
+                override fun onError(errorCode: Int) {
+                    appContainer.navigationGuidanceLifecycle
+                        .abandonPendingSession(navigationSessionId)
+                    if (!NavigationSessionOwners.isCurrent(navigationSessionId) || isFinishing || isDestroyed) return
+                    showError(getString(R.string.navigation_start_failed, errorCode))
+                }
+            })
+        }.onFailure {
+            appContainer.navigationGuidanceLifecycle
+                .abandonPendingSession(navigationSessionId)
+            if (!NavigationSessionOwners.isCurrent(navigationSessionId) || isFinishing || isDestroyed) return@onFailure
+            showError(getString(R.string.navigation_start_failed_unknown))
+        }
+    }
+
+    private fun configureNavigator(readyNavigator: Navigator): Boolean {
+        navigationView.isNavigationUiEnabled = true
+        val container = appContainer
+        val settings = container.appSettings.settings.value
+        navigationView.setTrafficPromptsEnabled(settings.hazardAlerts)
+        navigationView.setTrafficIncidentCardsEnabled(settings.hazardAlerts)
+        readyNavigator.addReroutingListener(reroutingListener)
+        readyNavigator.setTaskRemovedBehavior(Navigator.TaskRemovedBehavior.CONTINUE_SERVICE)
+        readyNavigator.setAudioGuidance(
+            if (settings.voiceGuidance) Navigator.AudioGuidance.VOICE_ALERTS_AND_GUIDANCE
+            else Navigator.AudioGuidance.SILENT,
+        )
+        readyNavigator.setSpeedAlertOptions(SpeedAlertOptions(0.05f, 0.15f, 5.0))
+        val attached = container.navigationGuidanceLifecycle.attach(
+            sessionId = navigationSessionId,
+            navigator = readyNavigator,
+            onFinalArrival = finalArrival@{
+                if (!NavigationSessionOwners.isOwner(navigationSessionId) || navigator !== readyNavigator) {
+                    return@finalArrival
+                }
+                guidanceStarted = false
+                readyNavigator.removeReroutingListener(reroutingListener)
+                runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
+            },
+            onSpeeding = speeding@{ percentageAboveLimit ->
+                val speed = container.bikeConnection.telemetry.value
+                    ?.speedKilometresPerHour ?: return@speeding
+                if (percentageAboveLimit >= 0f && speed > 0.0) {
+                    val limit = (speed / (1.0 + percentageAboveLimit)).div(5.0).toInt().times(5)
+                    if (limit > 0) container.tftNavigationBridge.speedLimit(limit)
+                }
+            },
+        )
+        if (!attached) {
+            readyNavigator.removeReroutingListener(reroutingListener)
+        }
+        return attached
+    }
+
+    private fun prepareNewRoute(readyNavigator: Navigator) {
+        val container = appContainer
+        if (readyNavigator.isGuidanceRunning) {
+            runCatching(readyNavigator::stopGuidance)
+            runCatching(readyNavigator::unregisterServiceForNavUpdates)
+            guidanceStarted = false
+            container.navigationFeed.clear()
+            container.tftNavigationBridge.stop()
+        }
+        val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
+        container.tftNavigationBridge.start()
+        val navUpdatesRegistered = runCatching {
+            readyNavigator.registerServiceForNavUpdates(
+                packageName,
+                NavInfoReceivingService::class.java.name,
+                options,
+            )
+        }.getOrDefault(false)
+        if (!navUpdatesRegistered) {
+            container.tftNavigationBridge.stop()
+            Toast.makeText(this, R.string.navigation_tft_updates_unavailable, Toast.LENGTH_LONG).show()
+        }
+        calculateRoute(readyNavigator)
     }
 
     private fun calculateRoute(navigator: Navigator) {
@@ -283,7 +357,7 @@ class NavigationActivity : ComponentActivity() {
             .setLatLng(latitude, longitude)
             .setTitle(intent.getStringExtra(ExtraTitle) ?: "Destination")
             .build()
-        val preferences = (application as Rs457Application).container.appSettings.settings.value
+        val preferences = appContainer.appSettings.settings.value
         val routing = RoutingOptions()
             .travelMode(RoutingOptions.TravelMode.TWO_WHEELER)
             .avoidTolls(preferences.avoidTolls)
@@ -291,12 +365,23 @@ class NavigationActivity : ComponentActivity() {
             .avoidFerries(preferences.avoidFerries)
         navigator.setDestination(waypoint, routing).setOnResultListener { status ->
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (isFinishing || isDestroyed ||
+                    !NavigationSessionOwners.isOwner(navigationSessionId) || this.navigator !== navigator
+                ) return@runOnUiThread
                 if (status == Navigator.RouteStatus.OK) {
                     retryVisibleState.value = false
                     statusTextState.value = intent.getStringExtra(ExtraTitle) ?: "Navigation active"
-                    navigator.startGuidance()
-                    guidanceStarted = true
+                    val startResult = runCatching(navigator::startGuidance)
+                    if (startResult.isSuccess) {
+                        guidanceStarted = true
+                        appContainer.navigationGuidanceLifecycle
+                            .markGuidanceStarted(navigationSessionId)
+                    } else {
+                        guidanceStarted = false
+                        runCatching(navigator::unregisterServiceForNavUpdates)
+                        clearNavigationOutput()
+                        showError(getString(R.string.navigation_start_failed_unknown))
+                    }
                 } else showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
             }
         }
@@ -344,20 +429,52 @@ class NavigationActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        navigator?.removeArrivalListener(arrivalListener)
-        navigator?.removeReroutingListener(reroutingListener)
-        navigator?.setSpeedingListener(null)
-        if (navigationEndedByUser) {
-            if (guidanceStarted) navigator?.stopGuidance()
-            navigator?.unregisterServiceForNavUpdates()
-            navigator?.cleanup()
-            (application as Rs457Application).container.apply {
-                navigationFeed.clear()
-                tftNavigationBridge.stop()
+        val currentNavigator = navigator
+        currentNavigator?.removeReroutingListener(reroutingListener)
+        val continueInBackground = shouldKeepGuidanceInBackground(
+            navigationEndedByUser = navigationEndedByUser,
+            guidanceStarted = guidanceStarted,
+            guidanceIsRunning = currentNavigator?.isGuidanceRunning == true,
+        )
+        if (!continueInBackground) {
+            if (currentNavigator != null) {
+                releaseNavigationSession(currentNavigator, stopGuidance = navigationEndedByUser)
+            } else if (navigationEndedByUser) {
+                clearNavigationOutput()
             }
+        } else {
+            appContainer.navigationGuidanceLifecycle.detachUi(navigationSessionId)
+            NavigationSessionOwners.release(navigationSessionId)
+        }
+        if (currentNavigator == null) {
+            appContainer.navigationGuidanceLifecycle
+                .abandonPendingSession(navigationSessionId)
         }
         navigationView.onDestroy()
         super.onDestroy()
+    }
+
+    private fun releaseNavigationSession(target: Navigator, stopGuidance: Boolean) {
+        if (!NavigationSessionOwners.release(navigationSessionId)) {
+            if (navigator === target) navigator = null
+            guidanceStarted = false
+            return
+        }
+        appContainer.navigationGuidanceLifecycle
+            .release(navigationSessionId, target)
+        if (stopGuidance) runCatching(target::stopGuidance)
+        runCatching(target::unregisterServiceForNavUpdates)
+        runCatching(target::cleanup)
+        if (navigator === target) navigator = null
+        guidanceStarted = false
+        clearNavigationOutput()
+    }
+
+    private fun clearNavigationOutput() {
+        appContainer.apply {
+            navigationFeed.clear()
+            runCatching(tftNavigationBridge::stop)
+        }
     }
 
     override fun onTrimMemory(level: Int) {
@@ -369,7 +486,10 @@ class NavigationActivity : ComponentActivity() {
         private const val ExtraLatitude = "latitude"
         private const val ExtraLongitude = "longitude"
         private const val ExtraTitle = "title"
+        private const val ExtraAttachExistingGuidance = "attach_existing_guidance"
         private const val KeyGuidanceStarted = "guidance_started"
+        private val NextNavigationSessionId = AtomicLong()
+        private val NavigationSessionOwners = NavigationSessionOwnership()
         private val LocationPermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -380,5 +500,71 @@ class NavigationActivity : ComponentActivity() {
                 .putExtra(ExtraLatitude, latitude)
                 .putExtra(ExtraLongitude, longitude)
                 .putExtra(ExtraTitle, title)
+
+        fun activeGuidanceIntent(context: Context): Intent =
+            Intent(context, NavigationActivity::class.java)
+                .putExtra(ExtraAttachExistingGuidance, true)
+    }
+}
+
+internal enum class NavigationLaunchPolicy {
+    AttachExisting,
+    PrepareNewRoute,
+    NoActiveRoute,
+}
+
+internal fun navigationLaunchPolicy(
+    attachRequested: Boolean,
+    guidanceWasStarted: Boolean,
+    guidanceIsRunning: Boolean,
+): NavigationLaunchPolicy = when {
+    guidanceIsRunning && (attachRequested || guidanceWasStarted) -> NavigationLaunchPolicy.AttachExisting
+    attachRequested -> NavigationLaunchPolicy.NoActiveRoute
+    else -> NavigationLaunchPolicy.PrepareNewRoute
+}
+
+internal fun shouldKeepGuidanceInBackground(
+    navigationEndedByUser: Boolean,
+    guidanceStarted: Boolean,
+    guidanceIsRunning: Boolean,
+): Boolean = !navigationEndedByUser && (guidanceStarted || guidanceIsRunning)
+
+internal class NavigationSessionOwnership {
+    private var newestSessionId: Long? = null
+    private var ownerId: Long? = null
+
+    @Synchronized
+    fun register(sessionId: Long) {
+        if (sessionId > (newestSessionId ?: Long.MIN_VALUE)) {
+            newestSessionId = sessionId
+            ownerId = null
+        }
+    }
+
+    @Synchronized
+    fun claim(sessionId: Long): Boolean {
+        if (newestSessionId != sessionId || ownerId != null) return false
+        ownerId = sessionId
+        return true
+    }
+
+    @Synchronized
+    fun claimIfUnowned(sessionId: Long): Boolean {
+        if (newestSessionId != sessionId || ownerId != null) return false
+        ownerId = sessionId
+        return true
+    }
+
+    @Synchronized
+    fun isCurrent(sessionId: Long): Boolean = newestSessionId == sessionId
+
+    @Synchronized
+    fun isOwner(sessionId: Long): Boolean = newestSessionId == sessionId && ownerId == sessionId
+
+    @Synchronized
+    fun release(sessionId: Long): Boolean {
+        if (ownerId != sessionId) return false
+        ownerId = null
+        return true
     }
 }

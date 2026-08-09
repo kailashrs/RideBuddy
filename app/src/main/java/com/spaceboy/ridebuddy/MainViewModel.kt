@@ -52,6 +52,7 @@ class MainViewModel(
     private val navigationFeed: NavigationFeedRepository,
     private val appSettings: AppSettingsRepository,
 ) : ViewModel() {
+    private val navigationKeyOperationGuard = NavigationKeyOperationGuard()
     private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
     private val restoredSharedDestinationState = sharedDestinationStateStore.restore()
     private val sharedDestinationRequestIds = AtomicLong(
@@ -73,6 +74,7 @@ class MainViewModel(
     val discoveredBikes: StateFlow<List<DiscoveredBike>> = bikeScanner.bikes
     val connectionState = bikeConnection.connectionState
     val telemetry = bikeConnection.telemetry
+    val latestTelemetryReading = bikeConnection.latestTelemetryReading
     val identity = bikeConnection.identity
     val diagnostics = bikeConnection.diagnostics
     val bleCapture = bleCaptureRecorder.state
@@ -133,15 +135,17 @@ class MainViewModel(
             return
         }
 
-        mutableUiState.update { state ->
-            state.copy(navigationKey = state.navigationKey.copy(isSaving = true, errorMessage = null))
-        }
-        viewModelScope.launch {
+        runNavigationKeyOperation {
             val outcome = withContext(Dispatchers.IO) {
-                runCatching {
+                try {
                     navigationSdkGateway.configureIfNeeded(apiKey).also { result ->
                         if (result !is ConfigureResult.Failed) apiKeyStore.save(apiKey)
                     }
+                        .let { Result.success(it) }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Result.failure(error)
                 }
             }
 
@@ -167,8 +171,17 @@ class MainViewModel(
     }
 
     fun removeNavigationApiKey() {
-        viewModelScope.launch {
-            val outcome = withContext(Dispatchers.IO) { runCatching(apiKeyStore::clear) }
+        runNavigationKeyOperation {
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    apiKeyStore.clear()
+                    Result.success(Unit)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Result.failure(error)
+                }
+            }
             mutableUiState.update { state ->
                 outcome.fold(
                     onSuccess = {
@@ -192,19 +205,48 @@ class MainViewModel(
     }
 
     fun testNavigationApiKey() {
-        val key = apiKeyStore.load()
-        if (key == null) {
-            showMessage("Add an API key before testing")
-            return
+        runNavigationKeyOperation {
+            val key = withContext(Dispatchers.IO) { apiKeyStore.load() }
+            if (key == null) {
+                showMessage("Add an API key before testing")
+                return@runNavigationKeyOperation
+            }
+            val result = withContext(Dispatchers.IO) { navigationSdkGateway.configureIfNeeded(key) }
+            showMessage(
+                when (result) {
+                    ConfigureResult.Configured, ConfigureResult.AlreadyConfigured -> "Navigation SDK accepted the key configuration; cloud restrictions are verified when a route starts"
+                    ConfigureResult.RestartRequired -> "Restart the app to test the replacement key"
+                    is ConfigureResult.Failed -> result.message
+                },
+            )
         }
-        val result = navigationSdkGateway.configureIfNeeded(key)
-        showMessage(
-            when (result) {
-                ConfigureResult.Configured, ConfigureResult.AlreadyConfigured -> "Navigation SDK accepted the key configuration; cloud restrictions are verified when a route starts"
-                ConfigureResult.RestartRequired -> "Restart the app to test the replacement key"
-                is ConfigureResult.Failed -> result.message
-            },
-        )
+    }
+
+    private fun runNavigationKeyOperation(operation: suspend () -> Unit) {
+        if (!navigationKeyOperationGuard.tryAcquire()) return
+        mutableUiState.update { state ->
+            state.copy(navigationKey = state.navigationKey.copy(isSaving = true, errorMessage = null))
+        }
+        viewModelScope.launch {
+            try {
+                operation()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                mutableUiState.update { state ->
+                    state.copy(
+                        navigationKey = state.navigationKey.copy(
+                            errorMessage = error.message ?: "Navigation setup failed",
+                        ),
+                    )
+                }
+            } finally {
+                navigationKeyOperationGuard.release()
+                mutableUiState.update { state ->
+                    state.copy(navigationKey = state.navigationKey.copy(isSaving = false))
+                }
+            }
+        }
     }
 
     fun startBikeScan() = bikeScanner.start()
@@ -287,13 +329,15 @@ class MainViewModel(
     }
 
     fun acceptSharedDestination(value: String) {
-        updateSharedDestinationState { it.withManualSharedDestination(value) }
+        val destination = value.normalizedDestinationInput() ?: return
+        updateSharedDestinationState { it.withManualSharedDestination(destination) }
     }
 
     fun queueAutoStartSharedDestination(value: String) {
+        val destination = value.normalizedDestinationInput() ?: return
         val request = AutoStartSharedDestinationRequest(
             requestId = sharedDestinationRequestIds.incrementAndGet(),
-            destination = value,
+            destination = destination,
         )
         updateSharedDestinationState { it.withAutoStartSharedDestination(request) }
     }
@@ -339,6 +383,23 @@ class MainViewModel(
                 )
             }
         }
+    }
+}
+
+internal class NavigationKeyOperationGuard {
+    private var active = false
+
+    @Synchronized
+    fun tryAcquire(): Boolean {
+        if (active) return false
+        active = true
+        return true
+    }
+
+    @Synchronized
+    fun release() {
+        check(active) { "Navigation key operation was not active" }
+        active = false
     }
 }
 
@@ -420,14 +481,14 @@ internal class SharedDestinationStateStore(
         val autoStartRequestId = savedStateHandle.get<Long>(AutoStartRequestIdKey)
             ?.takeIf { it > 0L }
         val autoStartDestination = savedStateHandle.get<String>(AutoStartDestinationKey)
-            ?.takeIf(String::isNotBlank)
+            ?.normalizedDestinationInput()
         val autoStartRequest = if (autoStartRequestId != null && autoStartDestination != null) {
             AutoStartSharedDestinationRequest(autoStartRequestId, autoStartDestination)
         } else {
             null
         }
         val manualDestination = if (autoStartRequest == null) {
-            savedStateHandle.get<String>(ManualDestinationKey)?.takeIf(String::isNotBlank)
+            savedStateHandle.get<String>(ManualDestinationKey)?.normalizedDestinationInput()
         } else {
             null
         }
@@ -454,6 +515,11 @@ internal class SharedDestinationStateStore(
         const val ManualDestinationErrorKey = "shared_destination.manual.error"
     }
 }
+
+internal const val MaxDestinationInputLength = 4_096
+
+private fun String.normalizedDestinationInput(): String? = trim()
+    .takeIf { it.isNotEmpty() && it.length <= MaxDestinationInputLength }
 
 data class MainUiState(
     val selectedDestination: TopLevelDestination = TopLevelDestination.Live,

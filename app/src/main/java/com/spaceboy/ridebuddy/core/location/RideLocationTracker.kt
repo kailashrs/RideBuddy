@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ data class RideLocation(
     val longitude: Double,
     val accuracyMetres: Float,
     val altitudeMetres: Double?,
+    val fixElapsedRealtimeMillis: Long,
 )
 
 class RideLocationTracker(context: Context) : LocationListener {
@@ -24,6 +26,7 @@ class RideLocationTracker(context: Context) : LocationListener {
     private val appContext = context.applicationContext
     private val mutableLocation = MutableStateFlow<RideLocation?>(null)
     val location: StateFlow<RideLocation?> = mutableLocation.asStateFlow()
+    private var activeProvider: String? = null
 
     @SuppressLint("MissingPermission")
     fun start() {
@@ -35,9 +38,17 @@ class RideLocationTracker(context: Context) : LocationListener {
             else -> return
         }
         manager.requestLocationUpdates(provider, 2_000L, 3f, this)
+        activeProvider = provider
     }
 
-    fun stop() = manager.removeUpdates(this)
+    fun stop() {
+        manager.removeUpdates(this)
+        activeProvider = null
+        mutableLocation.value = null
+    }
+
+    fun freshLocation(nowElapsedRealtimeMillis: Long = SystemClock.elapsedRealtime()): RideLocation? =
+        mutableLocation.value?.takeIf { it.isFreshAt(nowElapsedRealtimeMillis) }
 
     override fun onLocationChanged(location: Location) {
         mutableLocation.value = RideLocation(
@@ -45,6 +56,28 @@ class RideLocationTracker(context: Context) : LocationListener {
             longitude = location.longitude,
             accuracyMetres = location.accuracy,
             altitudeMetres = location.altitude.takeIf { location.hasAltitude() },
+            fixElapsedRealtimeMillis = location.elapsedRealtimeNanos
+                .takeIf { it > 0L }
+                ?.div(NanosecondsPerMillisecond)
+                ?: SystemClock.elapsedRealtime(),
         )
     }
+
+    override fun onProviderDisabled(provider: String) {
+        if (provider == activeProvider) mutableLocation.value = null
+    }
+
+    private companion object {
+        const val NanosecondsPerMillisecond = 1_000_000L
+    }
 }
+
+internal fun RideLocation.isFreshAt(
+    nowElapsedRealtimeMillis: Long,
+    maximumAgeMillis: Long = MaximumRideLocationAgeMillis,
+): Boolean {
+    val ageMillis = nowElapsedRealtimeMillis - fixElapsedRealtimeMillis
+    return fixElapsedRealtimeMillis > 0L && ageMillis in 0..maximumAgeMillis
+}
+
+internal const val MaximumRideLocationAgeMillis = 30_000L

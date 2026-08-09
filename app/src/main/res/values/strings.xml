@@ -1,9 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RideBuddy</string>
+    <string name="notification_listener_label">RideBuddy TFT alerts</string>
+    <string name="destination_too_long">Enter a destination of 4,096 characters or fewer</string>
     <string name="navigation_preparing_route">Preparing route…</string>
-    <string name="navigation_end">End</string>
     <string name="navigation_arrived">You have arrived</string>
     <string name="navigation_rerouting">Finding a better route…</string>
     <string name="navigation_retry">Retry</string>
+    <string name="navigation_active">Navigation active</string>
+    <string name="navigation_no_active_route">There is no active route to show</string>
+    <string name="navigation_start_failed">Navigation could not start (%1$d)</string>
+    <string name="navigation_start_failed_unknown">Navigation could not start</string>
+    <string name="navigation_tft_updates_unavailable">TFT turn updates are unavailable</string>
+    <string name="navigation_map_unavailable">The full navigation map is unavailable</string>
+    <string name="settings_unavailable">System settings are unavailable on this device</string>
+    <string name="diagnostics_share_unavailable">No app is available to share diagnostics</string>
+    <string name="ble_capture_share_unavailable">No app is available to share the BLE capture</string>
+    <string name="navigation_end_failed">Navigation may still be active because it could not be stopped (%1$d)</string>
+    <string name="navigation_end_request_failed">Navigation may still be active because it could not be stopped</string>
+    <string name="navigation_end_cleanup_failed">The route was cleared locally, but Navigation SDK cleanup did not finish</string>
+    <string name="navigation_tft_clear_failed">Navigation ended, but the TFT clear command failed</string>
+    <string name="navigation_maneuver_distance">In %1$s</string>
+    <string name="navigation_full_map">Full map</string>
+    <string name="telemetry_receiving">Connected and receiving</string>
+    <string name="telemetry_waiting">Waiting for telemetry…</string>
+    <string name="browser_unavailable">No browser is available to open this page</string>
+    <string name="ride_share_unavailable">No app is available to share this ride</string>
+    <string name="ride_share_title">Share ride</string>
+    <string name="parking_map_unavailable">No map app is available to show the parking location</string>
+    <string name="document_provider_unavailable">No document provider is available for this export</string>
 </resources>

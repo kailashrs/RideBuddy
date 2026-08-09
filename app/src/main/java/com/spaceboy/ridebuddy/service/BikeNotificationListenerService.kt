@@ -1,57 +1,88 @@
 package com.spaceboy.ridebuddy.service
 
+import com.spaceboy.ridebuddy.appContainer
+
 import android.content.Context
 import android.os.BatteryManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import com.spaceboy.ridebuddy.Rs457Application
+import com.spaceboy.ridebuddy.AppContainer
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
+import com.spaceboy.ridebuddy.core.calls.isRideBuddyCallNotification
 
 class BikeNotificationListenerService : NotificationListenerService() {
-    private val activeKeysByEvent = mutableMapOf<Int, MutableSet<String>>()
-    private val displayedEvents = mutableSetOf<Int>()
+    private val eventTracker = NotificationEventTracker()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        activeNotifications.orEmpty().forEach { notification ->
-            onNotificationPosted(notification)
+        val container = appContainer
+        val notifications = activeNotifications.orEmpty().toList()
+        container.callNotificationBridge.reconcileActiveNotifications(notifications)
+        val (callNotifications, regularNotifications) = notifications.partition { notification ->
+            notification.notification.isRideBuddyCallNotification()
         }
+        callNotifications.forEach(::onNotificationPosted)
+
+        val settings = container.appSettings.settings.value
+        val eligibleKeys = if (container.tftPriorityCoordinator.canPresentNotification()) {
+            regularNotifications.mapNotNull { notification ->
+                val mapping = EventCodes[notification.packageName] ?: return@mapNotNull null
+                if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) {
+                    return@mapNotNull null
+                }
+                mapping.shown to notification.key
+            }
+        } else {
+            emptyList()
+        }
+        eventTracker.reconcile(eligibleKeys).forEach { event ->
+            EventCodes.values.firstOrNull { mapping -> mapping.shown == event }?.let { mapping ->
+                sendEvent(mapping.hidden)
+            }
+            container.tftPriorityCoordinator.notificationRemoved(event)
+        }
+
+        regularNotifications.forEach(::onNotificationPosted)
     }
 
     override fun onNotificationPosted(notification: StatusBarNotification) {
-        if ((application as Rs457Application).container.callNotificationBridge.onNotificationPosted(notification)) return
-        val mapping = EventCodes[notification.packageName] ?: return
-        val container = (application as Rs457Application).container
+        val container = appContainer
+        val mapping = EventCodes[notification.packageName]
+        if (container.callNotificationBridge.onNotificationPosted(notification)) {
+            mapping?.let { removeTrackedEvent(it, notification.key, container) }
+            return
+        }
+        mapping ?: return
         if (!container.tftPriorityCoordinator.canPresentNotification()) return
         val settings = container.appSettings.settings.value
         if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) return
 
-        val shouldShow = synchronized(activeKeysByEvent) {
-            val keys = activeKeysByEvent.getOrPut(mapping.shown) { mutableSetOf() }
-            keys.add(notification.key)
-            displayedEvents.add(mapping.shown)
-        }
+        val shouldShow = eventTracker.posted(mapping.shown, notification.key)
         if (shouldShow) {
             sendEvent(mapping.shown)
             container.tftPriorityCoordinator.notificationPresented(mapping.shown) {
-                val shouldExpire = synchronized(activeKeysByEvent) { displayedEvents.remove(mapping.shown) }
+                val shouldExpire = eventTracker.expire(mapping.shown)
                 if (shouldExpire) sendEvent(mapping.hidden)
             }
         }
     }
 
     override fun onNotificationRemoved(notification: StatusBarNotification) {
-        if ((application as Rs457Application).container.callNotificationBridge.onNotificationRemoved(notification)) return
+        val container = appContainer
+        if (container.callNotificationBridge.onNotificationRemoved(notification)) return
         val mapping = EventCodes[notification.packageName] ?: return
-        val shouldHide = synchronized(activeKeysByEvent) {
-            val keys = activeKeysByEvent[mapping.shown] ?: return@synchronized null
-            if (!keys.remove(notification.key) || keys.isNotEmpty()) return@synchronized null
-            activeKeysByEvent.remove(mapping.shown)
-            displayedEvents.remove(mapping.shown)
-        }
-        if (shouldHide != null) {
-            if (shouldHide) sendEvent(mapping.hidden)
-            (application as Rs457Application).container.tftPriorityCoordinator.notificationRemoved(mapping.shown)
+        removeTrackedEvent(mapping, notification.key, container)
+    }
+
+    private fun removeTrackedEvent(
+        mapping: EventMapping,
+        notificationKey: String,
+        container: AppContainer,
+    ) {
+        val removal = eventTracker.removed(mapping.shown, notificationKey)
+        if (removal != null) {
+            if (removal.shouldHide) sendEvent(mapping.hidden)
+            container.tftPriorityCoordinator.notificationRemoved(mapping.shown)
         }
     }
 
@@ -65,7 +96,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
         )
     }
 
-    private fun connection() = (application as Rs457Application).container.bikeConnection
+    private fun connection() = appContainer.bikeConnection
 
     private fun AlertCategory.enabled(settings: com.spaceboy.ridebuddy.data.AppSettings): Boolean = when (this) {
         AlertCategory.Messages -> settings.messageAlerts
@@ -89,5 +120,50 @@ class BikeNotificationListenerService : NotificationListenerService() {
             "com.samsung.android.messaging" to EventMapping(6, 7, AlertCategory.Messages),
             "com.whatsapp" to EventMapping(6, 7, AlertCategory.Messages),
         )
+    }
+}
+
+internal data class NotificationEventRemoval(val shouldHide: Boolean)
+
+/** Tracks grouped notification keys independently of the Android service lifecycle. */
+internal class NotificationEventTracker {
+    private val activeKeysByEvent = mutableMapOf<Int, MutableSet<String>>()
+    private val displayedEvents = mutableSetOf<Int>()
+
+    @Synchronized
+    fun posted(event: Int, key: String): Boolean {
+        activeKeysByEvent.getOrPut(event) { mutableSetOf() }.add(key)
+        return displayedEvents.add(event)
+    }
+
+    @Synchronized
+    fun removed(event: Int, key: String): NotificationEventRemoval? {
+        val keys = activeKeysByEvent[event] ?: return null
+        if (!keys.remove(key) || keys.isNotEmpty()) return null
+        activeKeysByEvent.remove(event)
+        return NotificationEventRemoval(shouldHide = displayedEvents.remove(event))
+    }
+
+    @Synchronized
+    fun expire(event: Int): Boolean = displayedEvents.remove(event)
+
+    /**
+     * Drops keys whose removals were missed while the listener was disconnected and reports any
+     * displayed event that now has no live notification.
+     */
+    @Synchronized
+    fun reconcile(activeEntries: Collection<Pair<Int, String>>): Set<Int> {
+        val activeKeys = activeEntries.groupByTo(mutableMapOf(), Pair<Int, String>::first) { it.second }
+        val hiddenEvents = mutableSetOf<Int>()
+        val iterator = activeKeysByEvent.iterator()
+        while (iterator.hasNext()) {
+            val (event, keys) = iterator.next()
+            keys.retainAll(activeKeys[event].orEmpty().toSet())
+            if (keys.isEmpty()) {
+                iterator.remove()
+                if (displayedEvents.remove(event)) hiddenEvents += event
+            }
+        }
+        return hiddenEvents
     }
 }

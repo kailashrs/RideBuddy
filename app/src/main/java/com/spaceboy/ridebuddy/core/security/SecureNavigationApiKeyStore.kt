@@ -4,7 +4,6 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -31,23 +30,31 @@ class SecureNavigationApiKeyStore(context: Context) {
     }
 
     @Synchronized
+    @Suppress("UseKtx") // The KTX edit helper discards commit(), so its failure cannot be checked.
     fun save(apiKey: String) {
         val cipher = Cipher.getInstance(Transformation)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
         val encryptedValue = cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
 
-        preferences.edit(commit = true) {
-            putString(EncryptedValueKey, encryptedValue.encodeBase64())
-            putString(InitializationVectorKey, cipher.iv.encodeBase64())
-        }
+        requirePreferenceCommit(
+            preferences.edit()
+                .putString(EncryptedValueKey, encryptedValue.encodeBase64())
+                .putString(InitializationVectorKey, cipher.iv.encodeBase64())
+                .commit(),
+            "save the navigation API key",
+        )
     }
 
     @Synchronized
+    @Suppress("UseKtx") // The KTX edit helper discards commit(), so its failure cannot be checked.
     fun clear() {
-        preferences.edit(commit = true) {
-            remove(EncryptedValueKey)
-            remove(InitializationVectorKey)
-        }
+        requirePreferenceCommit(
+            preferences.edit()
+                .remove(EncryptedValueKey)
+                .remove(InitializationVectorKey)
+                .commit(),
+            "remove the navigation API key",
+        )
     }
 
     private fun getOrCreateSecretKey(): SecretKey {
@@ -82,4 +89,8 @@ class SecureNavigationApiKeyStore(context: Context) {
         const val Transformation = "AES/GCM/NoPadding"
         const val AuthenticationTagLengthBits = 128
     }
+}
+
+internal fun requirePreferenceCommit(committed: Boolean, operation: String) {
+    check(committed) { "Could not $operation" }
 }

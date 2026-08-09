@@ -34,11 +34,12 @@ internal fun lineChartPoints(
     scalePolicy: LineChartScalePolicy,
     clampNegativeValues: Boolean,
 ): List<LineChartPoint> {
-    if (values.size < 2) return emptyList()
+    if (values.isEmpty()) return emptyList()
 
     val valueToY: (Double) -> Float = when (scalePolicy) {
         LineChartScalePolicy.ZeroBased -> {
-            val maximum = values.maxOrNull()?.takeIf { it > 0.0 } ?: return emptyList()
+            val maximum = values.maxOrNull()?.takeIf { it > 0.0 }
+                ?: if (values.size == 1) 1.0 else return emptyList()
             val transform: (Double) -> Float = { value ->
                 val plottedValue = if (clampNegativeValues) value.coerceAtLeast(0.0) else value
                 height - (plottedValue / maximum * height).toFloat()
@@ -55,11 +56,11 @@ internal fun lineChartPoints(
             transform
         }
     }
-    val dx = width / values.lastIndex
+    val dx = if (values.size == 1) 0f else width / values.lastIndex
     return values.mapIndexed { index, value ->
         LineChartPoint(
-            x = index * dx,
-            y = valueToY(value),
+            x = if (values.size == 1) width / 2f else index * dx,
+            y = if (values.size == 1) height / 2f else valueToY(value),
         )
     }
 }
@@ -98,6 +99,14 @@ internal fun LineChart(
             clampNegativeValues = clampNegativeValues,
         )
         if (points.isEmpty()) return@Canvas
+        if (points.size == 1) {
+            drawCircle(
+                color = color,
+                radius = strokeWidth.coerceAtLeast(3f),
+                center = Offset(points.single().x, points.single().y),
+            )
+            return@Canvas
+        }
         val path = Path()
         var previousX = points.first().x
         var previousY = points.first().y

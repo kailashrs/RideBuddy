@@ -21,5 +21,20 @@ class RidePerformanceTest {
         assertNull(listOf(sample(0, 2.0), sample(5_000, 65.0)).accelerationTime(60.0))
     }
 
+    @Test
+    fun preservesLowSpeedLaunchContextBeforeTheRideStartThreshold() {
+        val liveWindow = listOf(
+            sample(0, 0.0),
+            sample(1_000, 4.0),
+            sample(2_000, 8.0),
+        )
+        val completedRideSamples = liveWindow.performancePreRoll(nowMillis = 2_000) + listOf(
+            sample(3_000, 30.0),
+            sample(4_000, 61.0),
+        )
+
+        assertEquals(2_967L, completedRideSamples.accelerationTime(60.0))
+    }
+
     private fun sample(timestamp: Long, speed: Double) = RideSample(timestamp, speed, 1_000, 10, 5.0, 0.0)
 }

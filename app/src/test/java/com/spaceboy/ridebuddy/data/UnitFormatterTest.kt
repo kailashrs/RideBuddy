@@ -24,6 +24,16 @@ class UnitFormatterTest {
     @Test
     fun usesImperialGallonsForBritishMileage() {
         assertEquals("56.5 mpg", UnitFormatter.consumption(5.0, DistanceUnits.Imperial, Locale.UK))
+        assertEquals("2.2 gal", UnitFormatter.fuel(10.0, DistanceUnits.Imperial, Locale.UK))
+        assertEquals("2.6 gal", UnitFormatter.fuel(10.0, DistanceUnits.Imperial, Locale.US))
+    }
+
+    @Test
+    fun formatsManeuverDistanceInTheSelectedUnitSystem() {
+        assertEquals("250 m", UnitFormatter.maneuverDistance(250, DistanceUnits.Metric, Locale.US))
+        assertEquals("1.2 km", UnitFormatter.maneuverDistance(1_200, DistanceUnits.Metric, Locale.US))
+        assertEquals("328 ft", UnitFormatter.maneuverDistance(100, DistanceUnits.Imperial, Locale.US))
+        assertEquals("1.0 mi", UnitFormatter.maneuverDistance(1_609, DistanceUnits.Imperial, Locale.US))
     }
 
     @Test

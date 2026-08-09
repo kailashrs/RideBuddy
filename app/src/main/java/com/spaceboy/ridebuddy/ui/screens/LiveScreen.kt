@@ -55,6 +55,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.spaceboy.ridebuddy.MaxDestinationInputLength
+import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.ble.BikeScanState
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
@@ -98,6 +101,7 @@ fun LiveScreen(
     onConnectBike: (DiscoveredBike) -> Unit,
     onDisconnectBike: () -> Unit,
     onStartNavigation: (String) -> Unit,
+    onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
     onSharedDestinationHandled: () -> Unit,
 ) {
@@ -129,27 +133,7 @@ fun LiveScreen(
         }
 
         if (discoveredBikes.isNotEmpty() && connectionState !is BikeConnectionState.Connected) {
-            Text(
-                text = "Nearby bikes",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 16.dp)
-                    .semantics { heading() },
-            )
-            discoveredBikes.forEach { bike ->
-                OutlinedCard(onClick = { onConnectBike(bike) }, modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.TwoWheeler, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(bike.name.ifBlank { "Motorcycle" }, style = MaterialTheme.typography.titleMedium)
-                            Text("${bike.name} • ${bike.addressSuffix}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text("${bike.rssi} dBm", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
+            NearbyBikesSection(discoveredBikes, onConnectBike)
         }
 
         Text(
@@ -160,12 +144,11 @@ fun LiveScreen(
                 .padding(start = 16.dp)
                 .semantics { heading() },
         )
-        ElevatedCard(
+        Card(
             modifier = Modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = if (guidance.active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             ),
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -240,7 +223,10 @@ fun LiveScreen(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                             ) {
                                 Text(
-                                    text = "In ${m}m",
+                                    text = stringResource(
+                                        R.string.navigation_maneuver_distance,
+                                        UnitFormatter.maneuverDistance(m, units, locale),
+                                    ),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -264,13 +250,13 @@ fun LiveScreen(
                             Text("End Route", color = MaterialTheme.colorScheme.error)
                         }
                         Button(
-                            onClick = { onStartNavigation(destination.ifBlank { guidance.roadName }) },
+                            onClick = onOpenActiveNavigation,
                             modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.large,
                         ) {
                             Icon(Icons.Outlined.Directions, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Full Map")
+                            Text(stringResource(R.string.navigation_full_map))
                         }
                     }
                 } else {
@@ -278,7 +264,7 @@ fun LiveScreen(
                         value = destination,
                         onValueChange = { value ->
                             if (sharedDestinationError != null) onSharedDestinationHandled()
-                            destination = value
+                            destination = value.take(MaxDestinationInputLength)
                         },
                         placeholder = { Text("Destination or Google Maps link") },
                         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
@@ -706,4 +692,32 @@ private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<Ride
     if (size <= maxPoints) return this
     val lastIndex = lastIndex
     return List(maxPoints) { index -> this[index * lastIndex / (maxPoints - 1)] }
+}
+
+@Composable
+private fun NearbyBikesSection(
+    discoveredBikes: List<DiscoveredBike>,
+    onConnectBike: (DiscoveredBike) -> Unit,
+) {
+    Text(
+        text = "Nearby bikes",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(start = 16.dp)
+            .semantics { heading() },
+    )
+    discoveredBikes.forEach { bike ->
+        OutlinedCard(onClick = { onConnectBike(bike) }, modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.TwoWheeler, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(bike.name.ifBlank { "Motorcycle" }, style = MaterialTheme.typography.titleMedium)
+                    Text("${bike.name} • ${bike.addressSuffix}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("${bike.rssi} dBm", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }

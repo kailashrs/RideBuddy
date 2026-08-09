@@ -56,8 +56,10 @@ class MainActivity : ComponentActivity() {
     private var backgroundLocationGranted by mutableStateOf(false)
     private var lastAssociationConnectionAddress: String? = null
     private var navigationStartJob: Job? = null
+    private val navigationStartStopGuard: NavigationStartStopGuard
+        get() = appContainer.navigationStartStopGuard
     private val viewModel: MainViewModel by viewModels {
-        MainViewModel.factory((application as Rs457Application).container)
+        MainViewModel.factory(appContainer)
     }
 
     private val bluetoothPermissionLauncher = registerForActivityResult(
@@ -82,13 +84,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private val onboardingLocationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        preciseLocationGranted = granted
-        if (granted && viewModel.connectionState.value !is BikeConnectionState.Disconnected) {
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        refreshRuntimePermissionState()
+        if (preciseLocationGranted && viewModel.connectionState.value !is BikeConnectionState.Disconnected) {
             BikeConnectionService.enableLocation(this)
         }
-        viewModel.showMessage(if (granted) "Precise location granted" else "Route recording needs precise location")
+        viewModel.showMessage(
+            if (preciseLocationGranted) "Precise location granted" else "Route recording needs precise location",
+        )
     }
 
     private val appNotificationPermissionLauncher = registerForActivityResult(
@@ -101,7 +105,7 @@ class MainActivity : ComponentActivity() {
     private val associationApprovalLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
-        val manager = (application as Rs457Application).container.bikeCompanionManager
+        val manager = appContainer.bikeCompanionManager
         val bike = manager.acceptActivityResult(result.resultCode, result.data)
         if (bike != null) {
             connectNewAssociation(bike)
@@ -131,6 +135,7 @@ class MainActivity : ComponentActivity() {
             val discoveredBikes = viewModel.discoveredBikes.collectAsStateWithLifecycle().value
             val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
             val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
+            val latestTelemetryReading = viewModel.latestTelemetryReading.collectAsStateWithLifecycle().value
             val identity = viewModel.identity.collectAsStateWithLifecycle().value
             val diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value
             val bleCapture = viewModel.bleCapture.collectAsStateWithLifecycle().value
@@ -149,7 +154,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            val bikeAssociation = (application as Rs457Application).container.bikeCompanionManager.state
+            val bikeAssociation = appContainer.bikeCompanionManager.state
                 .collectAsStateWithLifecycle().value
             val settingsActions = remember {
                 MoreSettingsActions(
@@ -195,9 +200,9 @@ class MainActivity : ComponentActivity() {
                         authenticated = diagnostics.authenticated,
                         navigationConfigured = uiState.navigationKey.isConfigured,
                         onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
-                        onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                        onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
                         onConnectBike = ::requestBluetoothPermissionsAndScan,
-                        onOpenNotificationAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        onOpenNotificationAccess = ::openNotificationAccessSettings,
                         onRequestAppNotificationPermission = ::requestAppNotificationPermission,
                         onEnableLegacyCalls = { setLegacyCallControls(true) },
                         onSetUpNavigation = {
@@ -213,6 +218,7 @@ class MainActivity : ComponentActivity() {
                         discoveredBikes = discoveredBikes,
                         connectionState = connectionState,
                         telemetry = telemetry,
+                        latestTelemetryReceivedAtElapsedRealtime = latestTelemetryReading?.receivedAtElapsedRealtime,
                         identity = identity,
                         diagnostics = diagnostics,
                         bleCapture = bleCapture,
@@ -242,17 +248,16 @@ class MainActivity : ComponentActivity() {
                         onConnectBike = ::connectBike,
                         onDisconnectBike = { BikeConnectionService.disconnect(this@MainActivity) },
                         onStartNavigation = ::startNavigation,
+                        onOpenActiveNavigation = ::openActiveNavigation,
                         onStopNavigation = ::stopNavigation,
                         onSharedDestinationHandled = viewModel::clearSharedDestination,
                         onInsightPeriodSelected = viewModel::selectInsightPeriod,
                         onClearRideHistory = viewModel::clearRideHistory,
                         onExportRideHistory = ::exportRideHistory,
-                        onOpenNotificationAccess = {
-                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        },
+                        onOpenNotificationAccess = ::openNotificationAccessSettings,
                         onEnableCallControls = {
                             if (!notificationAccessEnabled) {
-                                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                                openNotificationAccessSettings()
                             } else {
                                 viewModel.showMessage("Standard call controls are enabled")
                             }
@@ -299,7 +304,7 @@ class MainActivity : ComponentActivity() {
         refreshRuntimePermissionState()
         backgroundLocationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
-        val container = (application as Rs457Application).container
+        val container = appContainer
         container.bikeCompanionManager.refresh()
         container.bikeCompanionManager.ensurePresenceObservation()
         if (viewModel.connectionState.value !is BikeConnectionState.Disconnected &&
@@ -348,14 +353,14 @@ class MainActivity : ComponentActivity() {
 
     private fun connectBike(bike: DiscoveredBike) {
         viewModel.stopBikeScan()
-        (application as Rs457Application).container.bikeCompanionManager.rememberLegacyBike(bike)
+        appContainer.bikeCompanionManager.rememberLegacyBike(bike)
         if (!BikeConnectionService.connect(this, bike)) {
             viewModel.showMessage("Unable to start connection service")
         }
     }
 
     private fun beginAssociationOrLegacyScan() {
-        val manager = (application as Rs457Application).container.bikeCompanionManager
+        val manager = appContainer.bikeCompanionManager
         val existing = manager.state.value.bike
         if (existing != null) {
             if (!BikeConnectionService.reconnect(this, existing, launchedFromVisibleActivity = true)) {
@@ -390,8 +395,12 @@ class MainActivity : ComponentActivity() {
 
     private fun forgetBike() {
         BikeConnectionService.disconnect(this)
-        (application as Rs457Application).container.bikeCompanionManager.forget()
-        viewModel.showMessage("Bike association removed")
+        val manager = appContainer.bikeCompanionManager
+        if (manager.forget()) {
+            viewModel.showMessage("Bike association removed")
+        } else {
+            viewModel.showMessage(manager.state.value.errorMessage ?: "Could not remove the motorcycle association")
+        }
     }
 
     private fun setLegacyCallControls(enabled: Boolean) {
@@ -407,26 +416,46 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openAppPermissionSettings() {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri()))
+        launchExternalActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri()),
+            R.string.settings_unavailable,
+        )
+    }
+
+    private fun openNotificationAccessSettings() {
+        launchExternalActivity(
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+            R.string.settings_unavailable,
+        )
+    }
+
+    private fun launchExternalActivity(intent: Intent, failureMessageRes: Int) {
+        runCatching { startActivity(intent) }
+            .onFailure { viewModel.showMessage(getString(failureMessageRes)) }
     }
 
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return
-        val destination = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank) ?: return
+        val destination = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
 
         // ACTION_SEND remains attached to a recreated Activity unless it is explicitly consumed.
-        // Replace it only after the destination has been copied into ViewModel state.
+        // Consume it before validation so malformed input is not retried after recreation.
+        setIntent(Intent(this, MainActivity::class.java))
+        if (destination.isEmpty()) return
+        if (destination.length > MaxDestinationInputLength) {
+            viewModel.showMessage(getString(R.string.destination_too_long))
+            return
+        }
         navigationStartJob?.cancel()
         if (viewModel.settings.value.autoStartSharedDestinations) {
             viewModel.queueAutoStartSharedDestination(destination)
         } else {
             viewModel.acceptSharedDestination(destination)
         }
-        setIntent(Intent(this, MainActivity::class.java))
     }
 
     private fun requiredNearbyDevicePermissions(): Array<String> {
-        val companionSupported = (application as Rs457Application).container.bikeCompanionManager.state.value.supported
+        val companionSupported = appContainer.bikeCompanionManager.state.value.supported
         return buildList {
             add(Manifest.permission.BLUETOOTH_CONNECT)
             if (!companionSupported) add(Manifest.permission.BLUETOOTH_SCAN)
@@ -434,20 +463,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startNavigation(rawDestination: String) {
+        val destination = rawDestination.trim()
+        if (destination.isEmpty() || destination.length > MaxDestinationInputLength) {
+            viewModel.showMessage(getString(R.string.destination_too_long))
+            return
+        }
         navigationStartJob?.cancel()
         viewModel.uiState.value.autoStartSharedDestination
             ?.requestId
             ?.let(viewModel::completeAutoStartSharedDestination)
-        lifecycleScope.launch { startNavigation(rawDestination, autoStartRequestId = null) }
+        lifecycleScope.launch { startNavigation(destination, autoStartRequestId = null) }
     }
 
     private suspend fun startNavigation(rawDestination: String, autoStartRequestId: Long?) {
         val currentJob = currentCoroutineContext().job
         navigationStartJob?.takeIf { it !== currentJob }?.cancel()
         navigationStartJob = currentJob
-        val container = (application as Rs457Application).container
+        val container = appContainer
         var navigationStartAttemptId: Long? = null
         try {
+            val destinationInput = rawDestination.trim()
+            if (destinationInput.isEmpty() || destinationInput.length > MaxDestinationInputLength) {
+                autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
+                viewModel.showMessage(getString(R.string.destination_too_long))
+                return
+            }
             if (autoStartRequestId != null &&
                 viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
             ) {
@@ -462,7 +502,7 @@ class MainActivity : ComponentActivity() {
                 viewModel.showMessage("Add a Google Navigation API key first")
                 return
             }
-            val result = container.destinationParser.parse(rawDestination)
+            val result = container.destinationParser.parse(destinationInput)
             if (autoStartRequestId != null &&
                 viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
             ) {
@@ -479,6 +519,7 @@ class MainActivity : ComponentActivity() {
                                 destination.title,
                             ),
                         )
+                        navigationStartStopGuard.beginStart()
                         autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
                         viewModel.clearSharedDestination()
                     } catch (error: Exception) {
@@ -505,19 +546,61 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun openActiveNavigation() {
+        runCatching {
+            startActivity(NavigationActivity.activeGuidanceIntent(this))
+        }.onFailure {
+            viewModel.showMessage(getString(R.string.navigation_map_unavailable))
+        }
+    }
+
     private fun stopNavigation() {
-        NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
-            override fun onNavigatorReady(navigator: Navigator) {
-                navigator.stopGuidance()
-                navigator.unregisterServiceForNavUpdates()
-                navigator.cleanup()
-                (application as Rs457Application).container.apply {
-                    navigationFeed.clear()
-                    tftNavigationBridge.stop()
+        val stopRequestId = navigationStartStopGuard.beginStop() ?: return
+        navigationStartJob?.cancel()
+        runCatching {
+            NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
+                override fun onNavigatorReady(navigator: Navigator) {
+                    if (!navigationStartStopGuard.isCurrentStop(stopRequestId)) return
+                    val stopResult = runCatching(navigator::stopGuidance)
+                    if (stopResult.isFailure) {
+                        navigationStartStopGuard.finishStop(stopRequestId)
+                        viewModel.showMessage(getString(R.string.navigation_end_request_failed))
+                        return
+                    }
+                    appContainer.navigationGuidanceLifecycle
+                        .release(navigator)
+                    val cleanupFailure = listOf(
+                        runCatching(navigator::unregisterServiceForNavUpdates),
+                        runCatching(navigator::cleanup),
+                    ).firstOrNull { it.isFailure }?.exceptionOrNull()
+                    clearNavigationOutput()
+                    navigationStartStopGuard.finishStop(stopRequestId)
+                    if (cleanupFailure != null) {
+                        viewModel.showMessage(getString(R.string.navigation_end_cleanup_failed))
+                    }
                 }
+
+                override fun onError(errorCode: Int) {
+                    if (!navigationStartStopGuard.isCurrentStop(stopRequestId)) return
+                    navigationStartStopGuard.finishStop(stopRequestId)
+                    viewModel.showMessage(getString(R.string.navigation_end_failed, errorCode))
+                }
+            })
+        }.onFailure {
+            if (navigationStartStopGuard.isCurrentStop(stopRequestId)) {
+                navigationStartStopGuard.finishStop(stopRequestId)
+                viewModel.showMessage(getString(R.string.navigation_end_request_failed))
             }
-            override fun onError(errorCode: Int) {}
-        })
+        }
+    }
+
+    private fun clearNavigationOutput() {
+        appContainer.apply {
+            navigationFeed.clear()
+            runCatching(tftNavigationBridge::stop).onFailure {
+                viewModel.showMessage(getString(R.string.navigation_tft_clear_failed))
+            }
+        }
     }
 
     private fun exportDiagnostics() {
@@ -541,19 +624,20 @@ class MainActivity : ComponentActivity() {
             appendLine("\nRecent frames")
             value.recentFrames.forEach(::appendLine)
         }
-        startActivity(
+        launchExternalActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/plain")
                     .putExtra(Intent.EXTRA_SUBJECT, "RideBuddy diagnostics")
                     .putExtra(Intent.EXTRA_TEXT, report),
                 "Share diagnostics",
             ),
+            R.string.diagnostics_share_unavailable,
         )
     }
 
     private fun exportBleCapture() {
-        val report = (application as Rs457Application).container.bleCaptureRecorder.exportText()
-        startActivity(
+        val report = appContainer.bleCaptureRecorder.exportText()
+        launchExternalActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
@@ -561,6 +645,7 @@ class MainActivity : ComponentActivity() {
                     .putExtra(Intent.EXTRA_TEXT, report),
                 "Share BLE capture",
             ),
+            R.string.ble_capture_share_unavailable,
         )
     }
 
@@ -622,7 +707,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runStationaryTftTest() {
-        val container = (application as Rs457Application).container
+        val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
             viewModel.showMessage("Connect and authenticate the bike before testing")
             return
@@ -674,5 +759,35 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val NotificationPermission = "android.permission.POST_NOTIFICATIONS"
+        val LocationPermissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+    }
+}
+
+internal class NavigationStartStopGuard {
+    private var generation = 0L
+    private var stopInProgress = false
+
+    @Synchronized
+    fun beginStart(): Long {
+        stopInProgress = false
+        return ++generation
+    }
+
+    @Synchronized
+    fun beginStop(): Long? {
+        if (stopInProgress) return null
+        stopInProgress = true
+        return ++generation
+    }
+
+    @Synchronized
+    fun isCurrentStop(requestId: Long): Boolean = stopInProgress && generation == requestId
+
+    @Synchronized
+    fun finishStop(requestId: Long) {
+        if (generation == requestId) stopInProgress = false
     }
 }

@@ -14,11 +14,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+internal const val DefaultRideDatabaseName = "rides.db"
+
 class RideRepository(
     context: Context,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    databaseName: String = DefaultRideDatabaseName,
 ) {
-    private val database = RideDatabase(context.applicationContext)
+    private val database = RideDatabase(context.applicationContext, databaseName)
     private val databaseMutex = Mutex()
     private val mutableRides = MutableStateFlow<List<Ride>>(emptyList())
     val rides: StateFlow<List<Ride>> = mutableRides.asStateFlow()
@@ -56,7 +59,7 @@ class RideRepository(
     }
 }
 
-private class RideDatabase(context: Context) : SQLiteOpenHelper(context, Name, null, Version) {
+private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(context, name, null, Version) {
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
@@ -243,7 +246,6 @@ private class RideDatabase(context: Context) : SQLiteOpenHelper(context, Name, n
     companion object {
         const val Table = "rides"
         const val SamplesTable = "ride_samples"
-        const val Name = "rides.db"
         const val Version = 3
     }
 }

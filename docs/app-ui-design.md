@@ -1,4 +1,4 @@
-# RS 457 Companion — Material You UI design
+# RideBuddy — Material You UI design
 
 ## Product direction
 
@@ -6,7 +6,7 @@ The app should feel like a quiet riding companion rather than a dashboard full o
 
 The UI uses Material 3 / Material You principles:
 
-- Dynamic system colors when available, with an Aprilia-inspired red fallback theme.
+- Dynamic system colors when available, with a deep-red fallback theme.
 - Tonal surfaces instead of heavy borders and gradients.
 - Large touch targets, generous spacing, and clear hierarchy.
 - Cards and bottom sheets for progressive disclosure.
@@ -23,7 +23,7 @@ Use a five-item Material 3 navigation bar on compact screens when the bike is no
 | History | Ride history, summaries, routes, performance trends |
 | Insights | Long-term totals, averages, records, and period comparisons |
 | Info | Bike identity, connection, firmware, protocol status |
-| More | Settings, permissions, notifications, about |
+| Settings | Settings, permissions, notifications, about |
 
 Five peer destinations fit the Material 3 navigation bar limit on compact windows. On medium and expanded windows, adapt the same destinations to a navigation rail. Preserve each destination's state when switching tabs.
 
@@ -33,7 +33,7 @@ When navigation is active, switch to a dedicated full-screen navigation destinat
 
 Keep setup linear and explain why each permission is needed.
 
-1. Welcome: “Your RS 457, at a glance.”
+1. Welcome: “Your motorcycle, at a glance.”
 2. Bluetooth permission and explanation.
 3. Location permission and explanation for routes and ride recording.
 4. Optional notification access and legacy call-compatibility permission.
@@ -43,7 +43,7 @@ Keep setup linear and explain why each permission is needed.
 8. If no Google Navigation API key is configured, offer an optional “Set up navigation” step. Bike connection and telemetry remain usable without it.
 9. Show a short “ready” screen with connection, telemetry, and navigation status.
 
-Do not expose protocol terminology such as GATT, characteristics, or challenge-response in normal onboarding. Put technical diagnostics under More → Diagnostics.
+Do not expose protocol terminology such as GATT, characteristics, or challenge-response in normal onboarding. Put technical diagnostics under Settings → Diagnostics.
 
 ## Live screen
 
@@ -53,7 +53,7 @@ The Live screen has two states.
 
 ```text
 ┌─────────────────────────────┐
-│ RS 457 Companion       ⋮    │
+│ RideBuddy              ⋮    │
 │                             │
 │       Bike not connected    │
 │   Connect when your bike is │
@@ -72,7 +72,7 @@ The main action is connection. Do not show empty telemetry gauges.
 
 ```text
 ┌─────────────────────────────┐
-│ RS 457                 ●    │
+│ Motorcycle             ●    │
 │ Connected                    │
 │                             │
 │           72                 │
@@ -134,7 +134,7 @@ The app should automatically suppress notification and media cards near an immin
 The primary destination flow is:
 
 ```text
-Google Maps → Share → RS 457 Companion → resolve destination → route → BLE/TFT guidance
+Google Maps → Share → RideBuddy → resolve destination → route → BLE/TFT guidance
 ```
 
 The receiving screen should be a short confirmation sheet:
@@ -203,11 +203,11 @@ The Info screen should make the bike and protocol feel dependable without exposi
 
 ```text
 Info
-RS 457
+RideBuddy
 Connected
 
 Vehicle identity
-VIN                  ********457
+VIN                  ********ABC
 Cluster software     1.0.0
 Last connected       Just now
 
@@ -231,7 +231,7 @@ Technical diagnostics can expose:
 
 Keep this behind an explicit diagnostics entry.
 
-## More and settings
+## Settings
 
 Organize settings by user intent:
 
@@ -250,7 +250,7 @@ Avoid exposing unsupported settings for gear calibration, fuel level, ride mode,
 
 ### Google Navigation API key
 
-Place API-key setup at More → Navigation → Google Navigation API key.
+Place API-key setup at Settings → Navigation → Google Navigation API key.
 
 Use a standard Material 3 settings flow:
 
@@ -280,7 +280,7 @@ If the key is absent or invalid:
 - Use `NavigationBar` with five `NavigationBarItem`s on compact windows.
 - Use adaptive navigation rail/drawer layouts on wider windows.
 - Use a small top app bar on Live, where vertical space is valuable.
-- Use large top app bars on History, Info, and More, collapsing naturally while scrolling.
+- Use large top app bars on History, Info, and Settings, collapsing naturally while scrolling.
 - Use `ListItem` and section headings for settings instead of nesting many cards.
 - Use filled buttons for the single highest-priority action, tonal buttons for secondary actions, and text buttons for low-emphasis actions.
 - Use modal bottom sheets for short contextual tasks; use full screens for API-key setup, permissions, diagnostics, and ride details.
@@ -290,7 +290,7 @@ If the key is absent or invalid:
 ### Color
 
 - Use the system dynamic color scheme on Android versions that support it.
-- Provide an Aprilia fallback seed color around deep red rather than forcing red over dynamic colors.
+- Provide a deep-red fallback seed color rather than forcing red over dynamic colors.
 - Use primary for actions and active navigation state.
 - Use error only for safety-critical warnings or failed connection states.
 - Use tertiary for telemetry emphasis and secondary for supporting information.
