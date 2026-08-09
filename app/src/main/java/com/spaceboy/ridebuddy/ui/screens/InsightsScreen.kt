@@ -1,13 +1,11 @@
 package com.spaceboy.ridebuddy.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -31,11 +29,8 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +40,9 @@ import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.ui.components.LineChart
+import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
+import com.spaceboy.ridebuddy.ui.components.Metric
 import java.util.Calendar
 
 @Composable
@@ -176,51 +174,18 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (hasData) {
-                Canvas(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(100.dp)
-                        .padding(top = 12.dp)
-                        .semantics {
-                            contentDescription = "Distance chart for the last ${values.size} rides"
-                        },
-                ) {
-                    if (values.size < 2) return@Canvas
-                    val maximum = values.maxOrNull()?.takeIf { it > 0.0 } ?: return@Canvas
-                    val dx = size.width / (values.size - 1)
-                    
-                    val path = androidx.compose.ui.graphics.Path()
-                    var previousX = 0f
-                    var previousY = size.height - (values.first() / maximum * size.height).toFloat()
-                    path.moveTo(previousX, previousY)
-                    
-                    for (i in 1 until values.size) {
-                        val x = i * dx
-                        val y = size.height - (values[i] / maximum * size.height).toFloat()
-                        val controlX1 = previousX + (x - previousX) / 2f
-                        val controlX2 = previousX + (x - previousX) / 2f
-                        path.cubicTo(controlX1, previousY, controlX2, y, x, y)
-                        previousX = x
-                        previousY = y
-                    }
-                    
-                    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
-                    
-                    val fillPath = androidx.compose.ui.graphics.Path().apply {
-                        addPath(path)
-                        lineTo(size.width, size.height)
-                        lineTo(0f, size.height)
-                        close()
-                    }
-                    drawPath(
-                        path = fillPath,
-                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colors = listOf(color.copy(alpha = 0.4f), androidx.compose.ui.graphics.Color.Transparent),
-                            startY = 0f,
-                            endY = size.height
-                        )
-                    )
-                }
+                LineChart(
+                    values = values,
+                    height = 100.dp,
+                    topPadding = 12.dp,
+                    color = color,
+                    contentDescription = "Distance chart for the last ${values.size} rides",
+                    scalePolicy = LineChartScalePolicy.ZeroBased,
+                    clampNegativeValues = false,
+                    smooth = true,
+                    strokeWidth = 3f,
+                    fillAlpha = 0.4f,
+                )
             }
         }
     }
@@ -235,8 +200,7 @@ private fun MetricGrid(metrics: List<Triple<String, String, ImageVector>>) {
                     OutlinedCard(modifier = Modifier.weight(1f)) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             androidx.compose.material3.Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
-                            Text(value, style = MaterialTheme.typography.titleLarge)
-                            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Metric(label = label, value = value)
                         }
                     }
                 }

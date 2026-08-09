@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.data
 
+import java.text.DateFormat
+import java.util.Date
 import java.util.Locale
 
 object UnitFormatter {
@@ -40,4 +42,13 @@ object UnitFormatter {
 
     private const val KmToMiles = 0.621371192
     private const val LitresToUsGallons = 0.264172052
+
+    fun formatDateTime(millis: Long): String =
+        DateFormat.getDateTimeInstance().format(Date(millis))
+
+    fun formatShortDateTime(millis: Long): String =
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
+
+    fun formatTime(millis: Long): String =
+        DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(millis))
 }

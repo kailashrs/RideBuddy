@@ -21,8 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
-import java.text.DateFormat
-import java.util.Date
+import com.spaceboy.ridebuddy.data.UnitFormatter
 
 @Composable
 fun DiagnosticsScreen(
@@ -56,7 +55,7 @@ fun DiagnosticsScreen(
                 "Estimated malformed frames" to diagnostics.malformedTelemetryFrames.toString(),
                 "MTU" to (diagnostics.negotiatedMtu?.toString() ?: "—"),
                 "Last error" to (diagnostics.lastError ?: "None"),
-                "Error time" to (diagnostics.lastErrorAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "—"),
+                "Error time" to (diagnostics.lastErrorAtMillis?.let { UnitFormatter.formatDateTime(it) } ?: "—"),
                 "BLE capture" to if (bleCapture.enabled) "On • ${bleCapture.entries.size} packets" else "Off",
             ),
         )

@@ -50,7 +50,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.milliseconds
 
-private fun requestedWriteType(
+internal fun requestedWriteType(
     characteristic: BluetoothGattCharacteristic,
     mode: BikeWriteMode,
 ): Int? {
@@ -858,39 +858,6 @@ class AndroidBikeConnection(
     }
 
     private fun UUID.shortName(): String = toString().takeLast(4)
-
-    private sealed interface GattOperation {
-        val label: String
-        val attempt: Int
-        val awaitsCallback: Boolean get() = true
-        fun retry(): GattOperation
-        data class Subscribe(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
-            GattOperation {
-            override val label = "subscription"
-            override fun retry() = copy(attempt = attempt + 1)
-        }
-
-        data class Read(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
-            GattOperation {
-            override val label = "read"
-            override fun retry() = copy(attempt = attempt + 1)
-        }
-
-        data class Write(
-            val characteristic: BluetoothGattCharacteristic,
-            val value: ByteArray,
-            val mode: BikeWriteMode = BikeWriteMode.Default,
-            val completion: CompletableDeferred<Boolean>? = null,
-            val requestId: Long? = null,
-            override val attempt: Int = 0,
-        ) : GattOperation {
-            override val label = "write"
-            override val awaitsCallback: Boolean
-                get() = requestedWriteType(characteristic, mode) == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-
-            override fun retry() = copy(attempt = attempt + 1)
-        }
-    }
 
     private companion object {
         val ReconnectToken = Any()

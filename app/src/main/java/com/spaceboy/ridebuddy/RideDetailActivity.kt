@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,9 +36,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -65,12 +61,12 @@ import com.spaceboy.ridebuddy.data.RideEventDetector
 import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.ui.components.LineChart
+import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.screens.formatDuration
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
-import java.text.DateFormat
 import java.time.Instant
 import java.io.Writer
-import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -319,7 +315,7 @@ private fun RideDetailContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Text(DateFormat.getDateTimeInstance().format(Date(ride.startedAtMillis)), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(UnitFormatter.formatDateTime(ride.startedAtMillis), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text("${UnitFormatter.distance(ride.distanceKilometres, units, locale)} • ${formatDuration(ride.durationMillis)} • ${UnitFormatter.speed(ride.averageSpeedKph, units, locale)} average", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (data.routePoints.size > 1) item { RouteCard(data.routePoints) }
@@ -346,7 +342,7 @@ private fun RideDetailContent(
                     if (data.events.isEmpty()) Text("No hard acceleration or braking events detected", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     data.events.forEach { event ->
                         val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
-                        Text("$label • ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(event.timestampMillis))} • %+.1f m/s²".format(event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
+                        Text("$label • ${UnitFormatter.formatTime(event.timestampMillis)} • %+.1f m/s²".format(event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -482,20 +478,20 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double>) {
             val maximum = values.maxOrNull() ?: 0.0
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text("Peak %.1f %s".format(maximum, unit), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Canvas(
-                Modifier.fillMaxWidth().height(140.dp).padding(top = 12.dp)
-                    .semantics { contentDescription = "$title over the duration of the ride; peak %.1f $unit".format(maximum) },
-            ) {
-                drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), 2f)
-                if (values.size < 2 || maximum <= 0.0) return@Canvas
-                val path = Path()
-                values.forEachIndexed { index, value ->
-                    val x = index.toFloat() / (values.lastIndex) * size.width
-                    val y = size.height - (value.coerceAtLeast(0.0) / maximum * size.height).toFloat()
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-                drawPath(path, color, style = Stroke(width = 5f))
-            }
+            LineChart(
+                values = values,
+                height = 140.dp,
+                topPadding = 12.dp,
+                color = color,
+                contentDescription = "$title over the duration of the ride; peak %.1f $unit".format(maximum),
+                scalePolicy = LineChartScalePolicy.ZeroBased,
+                clampNegativeValues = true,
+                smooth = false,
+                strokeWidth = 5f,
+                fillAlpha = null,
+                drawBaseline = true,
+                baselineColor = grid,
+            )
         }
     }
 }

@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,10 +48,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -69,8 +66,9 @@ import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
-import java.text.DateFormat
-import java.util.Date
+import com.spaceboy.ridebuddy.ui.components.LineChart
+import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
+import com.spaceboy.ridebuddy.ui.components.Metric
 import kotlin.math.roundToInt
 
 private enum class LiveDetailLevel(val label: String) {
@@ -86,7 +84,7 @@ fun LiveScreen(
     scanState: BikeScanState,
     discoveredBikes: List<DiscoveredBike>,
     sharedDestination: String?,
-    autoStartSharedDestinations: Boolean,
+    sharedDestinationError: String?,
     isNavigationStarting: Boolean,
     connectionState: BikeConnectionState,
     telemetry: TelemetryFrame?,
@@ -107,19 +105,13 @@ fun LiveScreen(
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
     var liveDetailLevel by rememberSaveable { mutableStateOf(LiveDetailLevel.Glance) }
-    var showSharedConfirmation by rememberSaveable(sharedDestination, autoStartSharedDestinations) { 
-        mutableStateOf(!sharedDestination.isNullOrBlank() && !autoStartSharedDestinations) 
+    var showSharedConfirmation by rememberSaveable(sharedDestination, sharedDestinationError) {
+        mutableStateOf(!sharedDestination.isNullOrBlank() && sharedDestinationError == null)
     }
-    LaunchedEffect(sharedDestination, autoStartSharedDestinations) { 
+    LaunchedEffect(sharedDestination, sharedDestinationError) {
         if (!sharedDestination.isNullOrBlank()) {
             destination = sharedDestination
-            if (autoStartSharedDestinations) {
-                showSharedConfirmation = false
-                onSharedDestinationHandled()
-                onStartNavigation(sharedDestination)
-            } else {
-                showSharedConfirmation = true
-            }
+            showLiveDetails = false
         }
     }
 
@@ -230,7 +222,7 @@ fun LiveScreen(
                             }
                         }
                         guidance.timeToDestinationSeconds?.let { seconds ->
-                            val etaStr = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(System.currentTimeMillis() + seconds * 1000L))
+                            val etaStr = UnitFormatter.formatTime(System.currentTimeMillis() + seconds * 1000L)
                             Surface(
                                 shape = MaterialTheme.shapes.medium,
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -284,12 +276,28 @@ fun LiveScreen(
                 } else {
                     androidx.compose.material3.TextField(
                         value = destination,
-                        onValueChange = { destination = it },
+                        onValueChange = { value ->
+                            if (sharedDestinationError != null) onSharedDestinationHandled()
+                            destination = value
+                        },
                         placeholder = { Text("Destination or Google Maps link") },
                         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = if (destination.isNotBlank()) {
-                            { IconButton(onClick = { destination = "" }) { Icon(Icons.Outlined.Close, contentDescription = "Clear") } }
+                            {
+                                IconButton(
+                                    onClick = {
+                                        destination = ""
+                                        if (sharedDestination != null) onSharedDestinationHandled()
+                                    },
+                                ) {
+                                    Icon(Icons.Outlined.Close, contentDescription = "Clear")
+                                }
+                            }
                         } else null,
+                        isError = sharedDestinationError != null,
+                        supportingText = sharedDestinationError?.let { message ->
+                            { Text(message) }
+                        },
                         maxLines = 3,
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.extraLarge,
@@ -300,7 +308,10 @@ fun LiveScreen(
                         )
                     )
                     Button(
-                        onClick = { onStartNavigation(destination) },
+                        onClick = {
+                            if (sharedDestinationError != null) onSharedDestinationHandled()
+                            onStartNavigation(destination)
+                        },
                         enabled = destination.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.large,
@@ -334,7 +345,7 @@ fun LiveScreen(
         Spacer(Modifier.height(8.dp))
     }
 
-    if (showLiveDetails) {
+    if (showLiveDetails && !showSharedConfirmation) {
         ModalBottomSheet(
             onDismissRequest = { showLiveDetails = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -419,7 +430,7 @@ private fun ConnectionCard(
                         .background(statusColor, shape = CircleShape),
                 )
                 Text(
-                    (state as BikeConnectionState.Connected).deviceName,
+                    state.deviceName,
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
@@ -666,46 +677,18 @@ private fun LiveChart(title: String, values: List<Double>, unit: String) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(values.lastOrNull()?.let { "Latest %.1f %s".format(it, unit) } ?: "Waiting for samples", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Canvas(Modifier.fillMaxWidth().height(100.dp).padding(top = 8.dp).semantics { contentDescription = "$title chart with ${values.size} samples" }) {
-                if (values.size < 2) return@Canvas
-                val minimum = values.minOrNull() ?: return@Canvas
-                val maximum = values.maxOrNull() ?: return@Canvas
-                val range = (maximum - minimum).takeIf { it > 0.0 } ?: 1.0
-                val dx = size.width / (values.size - 1)
-                
-                val path = androidx.compose.ui.graphics.Path()
-                var previousX = 0f
-                var previousY = size.height - ((values.first() - minimum) / range * size.height).toFloat()
-                path.moveTo(previousX, previousY)
-                
-                for (i in 1 until values.size) {
-                    val x = i * dx
-                    val y = size.height - ((values[i] - minimum) / range * size.height).toFloat()
-                    val controlX1 = previousX + (x - previousX) / 2f
-                    val controlX2 = previousX + (x - previousX) / 2f
-                    path.cubicTo(controlX1, previousY, controlX2, y, x, y)
-                    previousX = x
-                    previousY = y
-                }
-                
-                drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
-                
-                // Add subtle gradient fill under the line
-                val fillPath = androidx.compose.ui.graphics.Path().apply {
-                    addPath(path)
-                    lineTo(size.width, size.height)
-                    lineTo(0f, size.height)
-                    close()
-                }
-                drawPath(
-                    path = fillPath,
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(color.copy(alpha = 0.3f), Color.Transparent),
-                        startY = 0f,
-                        endY = size.height
-                    )
-                )
-            }
+            LineChart(
+                values = values,
+                height = 100.dp,
+                topPadding = 8.dp,
+                color = color,
+                contentDescription = "$title chart with ${values.size} samples",
+                scalePolicy = LineChartScalePolicy.AutoRange,
+                clampNegativeValues = false,
+                smooth = true,
+                strokeWidth = 3f,
+                fillAlpha = 0.3f,
+            )
         }
     }
 }
@@ -723,12 +706,4 @@ private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<Ride
     if (size <= maxPoints) return this
     val lastIndex = lastIndex
     return List(maxPoints) { index -> this[index * lastIndex / (maxPoints - 1)] }
-}
-
-@Composable
-private fun Metric(label: String, value: String) {
-    Column {
-        Text(value, style = MaterialTheme.typography.titleLarge)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
 }

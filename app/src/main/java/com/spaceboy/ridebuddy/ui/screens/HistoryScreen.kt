@@ -34,9 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import java.text.DateFormat
 import java.util.Calendar
-import java.util.Date
 
 @Composable
 fun HistoryScreen(
@@ -83,7 +81,7 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
     OutlinedCard(onClick = { onRideSelected(ride) }, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ride.startedAtMillis)),
+                UnitFormatter.formatShortDateTime(ride.startedAtMillis),
                 style = MaterialTheme.typography.titleMedium,
             )
             ride.startArea?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

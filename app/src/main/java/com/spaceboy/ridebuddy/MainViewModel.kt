@@ -1,8 +1,12 @@
 package com.spaceboy.ridebuddy
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spaceboy.ridebuddy.ble.AndroidBikeScanner
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.ble.BikeScanState
@@ -34,8 +38,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 class MainViewModel(
+    savedStateHandle: SavedStateHandle,
     private val apiKeyStore: SecureNavigationApiKeyStore,
     private val navigationSdkGateway: GoogleNavigationSdkGateway,
     private val bikeScanner: AndroidBikeScanner,
@@ -46,9 +52,15 @@ class MainViewModel(
     private val navigationFeed: NavigationFeedRepository,
     private val appSettings: AppSettingsRepository,
 ) : ViewModel() {
+    private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
+    private val restoredSharedDestinationState = sharedDestinationStateStore.restore()
+    private val sharedDestinationRequestIds = AtomicLong(
+        restoredSharedDestinationState.autoStartSharedDestination?.requestId ?: 0L,
+    )
+    private val navigationStartAttemptIds = AtomicLong()
     private val storedKey = apiKeyStore.load()
     private val mutableUiState = MutableStateFlow(
-        MainUiState(
+        restoredSharedDestinationState.copy(
             navigationKey = NavigationKeyUiState(
                 isConfigured = storedKey != null,
                 maskedKey = storedKey?.let(NavigationApiKeyPolicy::mask),
@@ -101,8 +113,14 @@ class MainViewModel(
         mutableUiState.update { it.copy(isDiagnosticsOpen = false) }
     }
 
-    fun setNavigationStarting(starting: Boolean) {
-        mutableUiState.update { it.copy(isNavigationStarting = starting) }
+    fun beginNavigationStart(): Long {
+        val attemptId = navigationStartAttemptIds.incrementAndGet()
+        mutableUiState.update { it.withNavigationStartAttempt(attemptId) }
+        return attemptId
+    }
+
+    fun finishNavigationStart(attemptId: Long) {
+        mutableUiState.update { it.withFinishedNavigationStartAttempt(attemptId) }
     }
 
     fun saveNavigationApiKey(value: String) {
@@ -263,18 +281,33 @@ class MainViewModel(
         appSettings.update(transform)
     }
 
+    private fun updateSharedDestinationState(transform: (MainUiState) -> MainUiState) {
+        mutableUiState.update(transform)
+        sharedDestinationStateStore.persist(mutableUiState.value)
+    }
+
     fun acceptSharedDestination(value: String) {
-        mutableUiState.update { state ->
-            state.copy(
-                selectedDestination = TopLevelDestination.Live,
-                sharedDestination = value,
-                isNavigationSettingsOpen = false,
-            )
-        }
+        updateSharedDestinationState { it.withManualSharedDestination(value) }
+    }
+
+    fun queueAutoStartSharedDestination(value: String) {
+        val request = AutoStartSharedDestinationRequest(
+            requestId = sharedDestinationRequestIds.incrementAndGet(),
+            destination = value,
+        )
+        updateSharedDestinationState { it.withAutoStartSharedDestination(request) }
+    }
+
+    fun completeAutoStartSharedDestination(requestId: Long) {
+        updateSharedDestinationState { it.withCompletedAutoStartSharedDestination(requestId) }
+    }
+
+    fun restoreAutoStartSharedDestination(requestId: Long, errorMessage: String? = null) {
+        updateSharedDestinationState { it.withRestoredAutoStartSharedDestination(requestId, errorMessage) }
     }
 
     fun clearSharedDestination() {
-        mutableUiState.update { it.copy(sharedDestination = null) }
+        updateSharedDestinationState { it.copy(sharedDestination = null, sharedDestinationError = null) }
     }
 
     fun clearTransientMessage() {
@@ -290,10 +323,10 @@ class MainViewModel(
     }
 
     companion object {
-        fun factory(container: AppContainer): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(
+        fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                MainViewModel(
+                    savedStateHandle = createSavedStateHandle(),
                     apiKeyStore = container.navigationApiKeyStore,
                     navigationSdkGateway = container.navigationSdkGateway,
                     bikeScanner = container.bikeScanner,
@@ -303,8 +336,9 @@ class MainViewModel(
                     rideRepository = container.rideRepository,
                     navigationFeed = container.navigationFeed,
                     appSettings = container.appSettings,
-                ) as T
+                )
             }
+        }
     }
 }
 
@@ -324,14 +358,119 @@ internal fun navigationKeyStateFor(
     )
 }
 
+internal fun MainUiState.withManualSharedDestination(value: String): MainUiState = copy(
+    selectedDestination = TopLevelDestination.Live,
+    isNavigationSettingsOpen = false,
+    isDiagnosticsOpen = false,
+    sharedDestination = value,
+    sharedDestinationError = null,
+    autoStartSharedDestination = null,
+    isNavigationStarting = false,
+    navigationStartAttemptId = null,
+)
+
+internal fun MainUiState.withAutoStartSharedDestination(
+    request: AutoStartSharedDestinationRequest,
+): MainUiState = copy(
+    selectedDestination = TopLevelDestination.Live,
+    isNavigationSettingsOpen = false,
+    isDiagnosticsOpen = false,
+    sharedDestination = null,
+    sharedDestinationError = null,
+    autoStartSharedDestination = request,
+    isNavigationStarting = false,
+    navigationStartAttemptId = null,
+)
+
+internal fun MainUiState.withCompletedAutoStartSharedDestination(requestId: Long): MainUiState =
+    if (autoStartSharedDestination?.requestId == requestId) {
+        copy(
+            autoStartSharedDestination = null,
+            isNavigationStarting = false,
+            navigationStartAttemptId = null,
+        )
+    } else {
+        this
+    }
+
+internal fun MainUiState.withRestoredAutoStartSharedDestination(
+    requestId: Long,
+    errorMessage: String? = null,
+): MainUiState {
+    val request = autoStartSharedDestination?.takeIf { it.requestId == requestId } ?: return this
+    return withManualSharedDestination(request.destination).copy(sharedDestinationError = errorMessage)
+}
+
+internal fun MainUiState.withNavigationStartAttempt(attemptId: Long): MainUiState = copy(
+    isNavigationStarting = true,
+    navigationStartAttemptId = attemptId,
+)
+
+internal fun MainUiState.withFinishedNavigationStartAttempt(attemptId: Long): MainUiState =
+    if (navigationStartAttemptId == attemptId) {
+        copy(isNavigationStarting = false, navigationStartAttemptId = null)
+    } else {
+        this
+    }
+
+internal class SharedDestinationStateStore(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    fun restore(): MainUiState {
+        val autoStartRequestId = savedStateHandle.get<Long>(AutoStartRequestIdKey)
+            ?.takeIf { it > 0L }
+        val autoStartDestination = savedStateHandle.get<String>(AutoStartDestinationKey)
+            ?.takeIf(String::isNotBlank)
+        val autoStartRequest = if (autoStartRequestId != null && autoStartDestination != null) {
+            AutoStartSharedDestinationRequest(autoStartRequestId, autoStartDestination)
+        } else {
+            null
+        }
+        val manualDestination = if (autoStartRequest == null) {
+            savedStateHandle.get<String>(ManualDestinationKey)?.takeIf(String::isNotBlank)
+        } else {
+            null
+        }
+        return MainUiState(
+            sharedDestination = manualDestination,
+            sharedDestinationError = manualDestination?.let {
+                savedStateHandle.get<String>(ManualDestinationErrorKey)?.takeIf(String::isNotBlank)
+            },
+            autoStartSharedDestination = autoStartRequest,
+        )
+    }
+
+    fun persist(state: MainUiState) {
+        savedStateHandle[AutoStartRequestIdKey] = state.autoStartSharedDestination?.requestId
+        savedStateHandle[AutoStartDestinationKey] = state.autoStartSharedDestination?.destination
+        savedStateHandle[ManualDestinationKey] = state.sharedDestination
+        savedStateHandle[ManualDestinationErrorKey] = state.sharedDestinationError
+    }
+
+    private companion object {
+        const val AutoStartRequestIdKey = "shared_destination.auto_start.request_id"
+        const val AutoStartDestinationKey = "shared_destination.auto_start.destination"
+        const val ManualDestinationKey = "shared_destination.manual.destination"
+        const val ManualDestinationErrorKey = "shared_destination.manual.error"
+    }
+}
+
 data class MainUiState(
     val selectedDestination: TopLevelDestination = TopLevelDestination.Live,
     val isNavigationSettingsOpen: Boolean = false,
     val isDiagnosticsOpen: Boolean = false,
     val navigationKey: NavigationKeyUiState = NavigationKeyUiState(),
     val sharedDestination: String? = null,
+    val sharedDestinationError: String? = null,
+    val autoStartSharedDestination: AutoStartSharedDestinationRequest? = null,
     val transientMessage: String? = null,
     val isNavigationStarting: Boolean = false,
+    val navigationStartAttemptId: Long? = null,
+)
+
+data class AutoStartSharedDestinationRequest(
+    val requestId: Long,
+    val destination: String,
 )
 
 data class NavigationKeyUiState(

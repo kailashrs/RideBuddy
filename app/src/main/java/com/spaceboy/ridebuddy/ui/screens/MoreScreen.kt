@@ -17,7 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.PhoneCallback
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
@@ -38,7 +37,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.ReportProblem
@@ -53,35 +51,27 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -96,6 +86,11 @@ import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.ui.components.SettingsChoiceRow
+import com.spaceboy.ridebuddy.ui.components.SettingsRow
+import com.spaceboy.ridebuddy.ui.components.SettingsSection
+import com.spaceboy.ridebuddy.ui.components.SettingsSliderRow
+import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import kotlin.math.roundToInt
 
 data class MoreSettingsActions(
@@ -564,11 +559,11 @@ fun MoreScreen(
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsChoiceRow(
                 title = "Navigation text",
-                choices = listOf("Full" to (settings.tftTextMode == TftTextMode.Full), "Compact" to (settings.tftTextMode == TftTextMode.Compact)),
+                choices = TftTextMode.entries,
+                selectedChoice = settings.tftTextMode,
                 icon = Icons.Outlined.TextFields,
-                onSelected = { label ->
-                    settingsActions.onTftTextModeChanged(if (label == "Compact") TftTextMode.Compact else TftTextMode.Full)
-                },
+                choiceLabel = TftTextMode::name,
+                onSelected = settingsActions.onTftTextModeChanged,
             )
             Text(
                 "Extreme-weather and supported route warnings briefly use the navigation text rows. Calls and approaching turns always take priority.",
@@ -579,10 +574,13 @@ fun MoreScreen(
         }
         SettingsSection("App Theme & Display") {
             SettingsChoiceRow(
-                "Theme",
-                ThemeMode.entries.map { mode -> mode.name to (settings.themeMode == mode) },
+                title = "Theme",
+                choices = ThemeMode.entries,
+                selectedChoice = settings.themeMode,
                 icon = Icons.Outlined.Palette,
-            ) { label -> settingsActions.onThemeModeChanged(ThemeMode.valueOf(label)) }
+                choiceLabel = ThemeMode::name,
+                onSelected = settingsActions.onThemeModeChanged,
+            )
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsSwitchRow("Dynamic color", "Use your device's Material You palette", settings.dynamicColor, icon = Icons.Outlined.ColorLens) {
                 settingsActions.onDynamicColorChanged(it)
@@ -712,162 +710,11 @@ fun MoreScreen(
 }
 
 @Composable
-private fun SettingsSliderRow(
-    title: String,
-    supportingText: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    icon: ImageVector? = null,
-    onValueChange: (Float) -> Unit,
-) {
-    var sliderValue by remember(value) { mutableFloatStateOf(value) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = { Text(supportingText) },
-            leadingContent = icon?.let {
-                {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
-                        Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-        Slider(
-            value = sliderValue,
-            onValueChange = { sliderValue = it },
-            onValueChangeFinished = { onValueChange(sliderValue) },
-            valueRange = range,
-            steps = steps,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 56.dp, end = 16.dp, bottom = 8.dp)
-                .semantics { contentDescription = title },
-        )
-    }
-}
-
-@Composable
-private fun SettingsChoiceRow(
-    title: String,
-    choices: List<Pair<String, Boolean>>,
-    icon: ImageVector? = null,
-    onSelected: (String) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text(title) },
-            leadingContent = icon?.let {
-                {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
-                        Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
-        ) {
-            choices.forEach { (label, selected) ->
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelected(label) },
-                    label = { Text(label) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsSwitchRow(
-    title: String,
-    supportingText: String,
-    checked: Boolean,
-    icon: ImageVector? = null,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(supportingText) },
-        leadingContent = icon?.let {
-            {
-                Box(modifier = Modifier.padding(top = 2.dp)) {
-                    Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.toggleable(
-            value = checked,
-            role = Role.Switch,
-            onValueChange = onCheckedChange,
-        ),
-    )
-}
-
-@Composable
-private fun SettingsSection(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .padding(start = 16.dp)
-                .semantics { heading() },
-        )
-        OutlinedCard(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(content = { content() })
-        }
-    }
-}
-
-@Composable
 private fun DeveloperToolsGroupLabel(label: String) {
     Text(
         text = label,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp, end = 16.dp),
-    )
-}
-
-@Composable
-private fun SettingsRow(
-    icon: ImageVector,
-    title: String,
-    supportingText: String,
-    onClick: (() -> Unit)? = null,
-) {
-    val clickModifier = if (onClick != null) {
-        Modifier.clickable(role = Role.Button, onClick = onClick)
-    } else {
-        Modifier
-    }
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(supportingText) },
-        leadingContent = {
-            Box(modifier = Modifier.padding(top = 2.dp)) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            }
-        },
-        trailingContent = {
-            if (onClick != null) {
-                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = clickModifier,
     )
 }

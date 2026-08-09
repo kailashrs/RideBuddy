@@ -38,11 +38,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
-import java.text.DateFormat
-import java.util.Date
 
 private data class InfoRowItem(
     val label: String,
@@ -95,7 +94,7 @@ fun InfoScreen(
                 InfoRowItem("Cluster software", identity.clusterSoftwareVersion ?: "Available after connection", Icons.Outlined.Memory),
                 InfoRowItem(
                     "Last connected",
-                    identity.lastConnectedAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "Never",
+                    identity.lastConnectedAtMillis?.let { UnitFormatter.formatDateTime(it) } ?: "Never",
                     Icons.Outlined.Schedule,
                 ),
             ),
@@ -113,7 +112,7 @@ fun InfoScreen(
                 InfoRowItem("Last error", diagnostics.lastError ?: "None", Icons.Outlined.ErrorOutline),
                 InfoRowItem(
                     "Error time",
-                    diagnostics.lastErrorAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "—",
+                    diagnostics.lastErrorAtMillis?.let { UnitFormatter.formatDateTime(it) } ?: "—",
                     Icons.Outlined.AccessTime,
                 ),
             ),

@@ -13,33 +13,39 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.viewModels
-import androidx.core.content.ContextCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.FileProvider
-import androidx.core.net.toUri
-import java.io.File
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
-import com.spaceboy.ridebuddy.ui.MainScreen
-import com.spaceboy.ridebuddy.ui.MainScreenActions
-import com.spaceboy.ridebuddy.ui.MainScreenState
-import com.spaceboy.ridebuddy.ui.OnboardingScreen
-import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
-import com.spaceboy.ridebuddy.service.BikeConnectionService
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.libraries.navigation.NavigationApi
+import com.google.android.libraries.navigation.Navigator
+import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.service.BikeConnectionService
+import com.spaceboy.ridebuddy.ui.MainScreen
+import com.spaceboy.ridebuddy.ui.MainScreenActions
+import com.spaceboy.ridebuddy.ui.MainScreenState
+import com.spaceboy.ridebuddy.ui.OnboardingScreen
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
-import com.google.android.libraries.navigation.NavigationApi
-import com.google.android.libraries.navigation.Navigator
+import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private var notificationAccessEnabled by mutableStateOf(false)
@@ -49,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private var legacyCallPermissionGranted by mutableStateOf(false)
     private var backgroundLocationGranted by mutableStateOf(false)
     private var lastAssociationConnectionAddress: String? = null
+    private var navigationStartJob: Job? = null
     private val viewModel: MainViewModel by viewModels {
         MainViewModel.factory((application as Rs457Application).container)
     }
@@ -134,6 +141,14 @@ class MainActivity : ComponentActivity() {
             val insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value
             val guidance = viewModel.guidance.collectAsStateWithLifecycle().value
             val settings = viewModel.settings.collectAsStateWithLifecycle().value
+            val autoStartSharedDestination = uiState.autoStartSharedDestination
+            LaunchedEffect(autoStartSharedDestination?.requestId) {
+                autoStartSharedDestination?.let { request ->
+                    lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        startNavigation(request.destination, request.requestId)
+                    }
+                }
+            }
             val bikeAssociation = (application as Rs457Application).container.bikeCompanionManager.state
                 .collectAsStateWithLifecycle().value
             val settingsActions = remember {
@@ -400,12 +415,14 @@ class MainActivity : ComponentActivity() {
         val destination = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank) ?: return
 
         // ACTION_SEND remains attached to a recreated Activity unless it is explicitly consumed.
-        // Replace it before publishing state or posting the optional one-shot navigation action.
-        setIntent(Intent(this, MainActivity::class.java))
-        viewModel.acceptSharedDestination(destination)
+        // Replace it only after the destination has been copied into ViewModel state.
+        navigationStartJob?.cancel()
         if (viewModel.settings.value.autoStartSharedDestinations) {
-            window.decorView.post { startNavigation(destination) }
+            viewModel.queueAutoStartSharedDestination(destination)
+        } else {
+            viewModel.acceptSharedDestination(destination)
         }
+        setIntent(Intent(this, MainActivity::class.java))
     }
 
     private fun requiredNearbyDevicePermissions(): Array<String> {
@@ -417,32 +434,74 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startNavigation(rawDestination: String) {
+        navigationStartJob?.cancel()
+        viewModel.uiState.value.autoStartSharedDestination
+            ?.requestId
+            ?.let(viewModel::completeAutoStartSharedDestination)
+        lifecycleScope.launch { startNavigation(rawDestination, autoStartRequestId = null) }
+    }
+
+    private suspend fun startNavigation(rawDestination: String, autoStartRequestId: Long?) {
+        val currentJob = currentCoroutineContext().job
+        navigationStartJob?.takeIf { it !== currentJob }?.cancel()
+        navigationStartJob = currentJob
         val container = (application as Rs457Application).container
-        if (!viewModel.uiState.value.navigationKey.isConfigured) {
-            viewModel.openNavigationSettings()
-            viewModel.showMessage("Add a Google Navigation API key first")
-            return
-        }
-        viewModel.setNavigationStarting(true)
-        lifecycleScope.launch {
-            container.destinationParser.parse(rawDestination).fold(
+        var navigationStartAttemptId: Long? = null
+        try {
+            if (autoStartRequestId != null &&
+                viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
+            ) {
+                return
+            }
+            navigationStartAttemptId = viewModel.beginNavigationStart()
+            if (!viewModel.uiState.value.navigationKey.isConfigured) {
+                autoStartRequestId?.let { requestId ->
+                    viewModel.restoreAutoStartSharedDestination(requestId)
+                }
+                viewModel.openNavigationSettings()
+                viewModel.showMessage("Add a Google Navigation API key first")
+                return
+            }
+            val result = container.destinationParser.parse(rawDestination)
+            if (autoStartRequestId != null &&
+                viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
+            ) {
+                return
+            }
+            result.fold(
                 onSuccess = { destination ->
-                    viewModel.setNavigationStarting(false)
-                    viewModel.clearSharedDestination()
-                    startActivity(
-                        NavigationActivity.intent(
-                            this@MainActivity,
-                            destination.latitude,
-                            destination.longitude,
-                            destination.title,
-                        ),
-                    )
+                    try {
+                        startActivity(
+                            NavigationActivity.intent(
+                                this@MainActivity,
+                                destination.latitude,
+                                destination.longitude,
+                                destination.title,
+                            ),
+                        )
+                        autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
+                        viewModel.clearSharedDestination()
+                    } catch (error: Exception) {
+                        val message = error.message ?: "Could not start navigation"
+                        autoStartRequestId?.let { requestId ->
+                            viewModel.restoreAutoStartSharedDestination(requestId, message)
+                        }
+                        viewModel.showMessage(message)
+                    }
                 },
                 onFailure = { error ->
-                    viewModel.setNavigationStarting(false)
-                    viewModel.showMessage(error.message ?: "Could not read that destination")
+                    val message = error.message ?: "Could not read that destination"
+                    autoStartRequestId?.let { requestId ->
+                        viewModel.restoreAutoStartSharedDestination(requestId, message)
+                    }
+                    viewModel.showMessage(message)
                 },
             )
+        } finally {
+            navigationStartAttemptId?.let(viewModel::finishNavigationStart)
+            if (navigationStartJob === currentJob) {
+                navigationStartJob = null
+            }
         }
     }
 

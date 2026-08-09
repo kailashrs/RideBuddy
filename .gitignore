@@ -2,6 +2,7 @@
 .gradle_home/
 .kotlin/
 .idea/
+.vscode/
 *.iml
 local.properties
 .release-signing.properties
