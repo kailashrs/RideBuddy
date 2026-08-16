@@ -214,7 +214,7 @@ Last connected       Just now
 Connection
 Telemetry            Receiving
 Navigation           Ready
-Authentication       Verified
+Companion link       Ready
 
 [ Reconnect ]
 ```
@@ -225,7 +225,7 @@ Technical diagnostics can expose:
 - RSSI.
 - Service/characteristic discovery.
 - Notification state.
-- Authentication result.
+- Companion-link readiness and protection phase.
 - Last error and timestamp.
 - Telemetry frame rate.
 
@@ -355,7 +355,7 @@ Priority order:
 
 Use Kotlin with Jetpack Compose and Material 3 for the new app. Keep these modules separate:
 
-- `ble`: scanning, pairing, authentication, GATT queue, packet codecs.
+- `ble`: scanning, pairing, protection handshake, GATT scheduling, packet codecs.
 - `telemetry`: frame parsing and derived ride metrics.
 - `navigation`: destination sharing, Google Navigation SDK, maneuver mapping.
 - `ride`: automatic lifecycle and local persistence.

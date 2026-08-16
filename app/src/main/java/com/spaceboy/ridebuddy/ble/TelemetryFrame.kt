@@ -7,13 +7,11 @@ data class TelemetryFrame(
     val engineRpm: Long,
 ) {
     companion object {
-        private const val FrameLength = 10
+        private const val MinimumFrameLength = 9
         private const val Header = 0x10
-        private const val Terminator = 0x23
 
         fun parse(payload: ByteArray): TelemetryFrame? {
-            if (payload.size != FrameLength) return null
-            if (payload[0].unsigned != Header || payload[9].unsigned != Terminator) return null
+            if (payload.size < MinimumFrameLength || payload[0].unsigned != Header) return null
 
             val rawSpeed = payload[1].unsigned or (payload[2].unsigned shl 8)
             val rawRpm = payload[5].unsigned.toLong() or

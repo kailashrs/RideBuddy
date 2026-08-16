@@ -37,6 +37,7 @@ import com.spaceboy.ridebuddy.ui.MainScreen
 import com.spaceboy.ridebuddy.ui.MainScreenActions
 import com.spaceboy.ridebuddy.ui.MainScreenState
 import com.spaceboy.ridebuddy.ui.OnboardingScreen
+import com.spaceboy.ridebuddy.ui.labelResource
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.io.File
@@ -608,13 +609,21 @@ class MainActivity : ComponentActivity() {
         val report = buildString {
             appendLine("RideBuddy diagnostics")
             appendLine("Connection: ${viewModel.connectionState.value}")
-            appendLine("Authenticated: ${value.authenticated}")
+            appendLine("Companion link ready: ${value.authenticated}")
+            appendLine("Protection phase: ${getString(value.protectionPhase.labelResource())}")
+            appendLine(
+                "Protection path: ${value.protectionPath?.let { getString(it.labelResource()) } ?: "unknown"}",
+            )
+            appendLine("Bonded: ${value.bonded ?: "unknown"}")
+            appendLine("Active GATT operation: ${value.activeGattOperation ?: "none"}")
             appendLine("RSSI: ${value.rssi ?: "unknown"} dBm")
             appendLine("Telemetry rate: %.2f Hz".format(value.telemetryHz))
             appendLine("MTU: ${value.negotiatedMtu ?: "unknown"}")
             appendLine("Services: ${value.servicesDiscovered}")
             appendLine("Notifications: ${value.notificationsReceived}")
-            appendLine("Writes: ${value.writesCompleted}")
+            appendLine("Descriptor writes: ${value.descriptorWritesCompleted}")
+            appendLine("Characteristic reads: ${value.readsCompleted}")
+            appendLine("Characteristic writes: ${value.writesCompleted}")
             appendLine("Malformed frames: ${value.malformedTelemetryFrames}")
             appendLine("Last error: ${value.lastError ?: "none"}")
             appendLine("\nGATT snapshot")
@@ -709,7 +718,7 @@ class MainActivity : ComponentActivity() {
     private fun runStationaryTftTest() {
         val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
-            viewModel.showMessage("Connect and authenticate the bike before testing")
+            viewModel.showMessage("Connect and verify the companion link before testing")
             return
         }
         lifecycleScope.launch {
@@ -720,7 +729,7 @@ class MainActivity : ComponentActivity() {
                 is StationaryTftTestResult.SafetyStopped -> {
                     val reason = when (result.reason) {
                         StationaryTftSafetyReason.Disconnected -> "the bike disconnected"
-                        StationaryTftSafetyReason.NotAuthenticated -> "the bike session was no longer authenticated"
+                        StationaryTftSafetyReason.NotAuthenticated -> "the motorcycle companion link was not verified"
                         StationaryTftSafetyReason.TelemetryUnavailable -> "live telemetry was unavailable"
                         StationaryTftSafetyReason.TelemetryStale -> "live telemetry became stale"
                         StationaryTftSafetyReason.BikeMoving -> "the bike started moving"

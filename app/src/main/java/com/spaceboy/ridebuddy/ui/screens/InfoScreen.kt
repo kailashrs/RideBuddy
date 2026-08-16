@@ -50,6 +50,7 @@ import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.ui.labelResource
 import kotlinx.coroutines.delay
 
 private data class InfoRowItem(
@@ -71,6 +72,10 @@ fun InfoScreen(
     onReconnect: () -> Unit,
 ) {
     val connected = connectionState is BikeConnectionState.Connected
+    val companionLinkStatus = stringResource(
+        if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
+    )
+    val protectionPhase = stringResource(diagnostics.protectionPhase.labelResource())
     var currentElapsedRealtime by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(connected) {
         while (connected) {
@@ -99,7 +104,7 @@ fun InfoScreen(
             Text(
                 text = when (connectionState) {
                     is BikeConnectionState.Connected -> "Connected to ${connectionState.deviceName}"
-                    is BikeConnectionState.Authenticating -> "Authenticating"
+                    is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
                     is BikeConnectionState.Connecting -> "Connecting"
                     is BikeConnectionState.Failed -> connectionState.message
                     else -> "Not connected"
@@ -133,7 +138,8 @@ fun InfoScreen(
                     Icons.Outlined.Sensors,
                 ),
                 InfoRowItem("Navigation", if (navigationConfigured) "Configured" else "Not configured", Icons.Outlined.Navigation),
-                InfoRowItem("Authentication", if (diagnostics.authenticated) "Verified" else "Not verified", Icons.Outlined.VerifiedUser),
+                InfoRowItem("Companion link", companionLinkStatus, Icons.Outlined.VerifiedUser),
+                InfoRowItem("Protection", protectionPhase, Icons.Outlined.VerifiedUser),
                 InfoRowItem("Signal strength", diagnostics.rssi?.let { "$it dBm" } ?: "—", Icons.Outlined.CellTower),
                 InfoRowItem("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz), Icons.Outlined.Speed),
                 InfoRowItem("Notification access", if (notificationAccessEnabled) "Enabled" else "Not enabled", Icons.Outlined.Notifications),

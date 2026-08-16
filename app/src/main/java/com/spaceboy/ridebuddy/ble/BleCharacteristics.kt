@@ -21,7 +21,8 @@ object BleCharacteristics {
     val CallEvent: UUID = uuid("8720")
     val CallState: UUID = uuid("8730")
     val CallControl: UUID = uuid("8740")
-    val MobileHeartbeat: UUID = uuid("8750")
+    /** Used by the India OEM app's SR-family path, not its RS457_ID connection path. */
+    val SrMobileStatus: UUID = uuid("8750")
     val CallerNumber: UUID = uuid("8760")
     val ClusterSoftwareVersion: UUID = uuid("8810")
     val Vin: UUID = uuid("8910")

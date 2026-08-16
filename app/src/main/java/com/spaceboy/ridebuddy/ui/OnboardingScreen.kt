@@ -146,7 +146,7 @@ fun OnboardingScreen(
                     readiness = listOf(
                         "Nearby access" to nearbyDeviceAccessGranted,
                         "Bike association" to bikeAssociated,
-                        "Authenticated telemetry" to (authenticated && telemetryReceiving),
+                        "Companion link ready" to (authenticated && telemetryReceiving),
                         "Route recording" to preciseLocationGranted,
                         "TFT calls and alerts" to notificationAccessEnabled,
                         "Google navigation" to navigationConfigured,
@@ -223,7 +223,7 @@ private fun BikeConnectionState.onboardingLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Not connected"
     BikeConnectionState.Scanning -> "Looking for your bike"
     is BikeConnectionState.Connecting -> "Connecting"
-    is BikeConnectionState.Authenticating -> "Authenticating securely"
+    is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
     is BikeConnectionState.Connected -> "Connected to $deviceName"
     is BikeConnectionState.Failed -> message
 }

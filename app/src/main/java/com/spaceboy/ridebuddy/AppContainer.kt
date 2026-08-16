@@ -4,6 +4,7 @@ import android.content.Context
 import com.spaceboy.ridebuddy.ble.AndroidBikeScanner
 import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
+import com.spaceboy.ridebuddy.ble.SharedPreferencesProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
@@ -22,6 +23,7 @@ import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.core.alerts.RidingAlertMonitor
 import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
+import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,11 +39,16 @@ class AppContainer(context: Context) {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val bikeScanner = AndroidBikeScanner(context)
     val bleCaptureRecorder = BleCaptureRecorder()
-    val bikeConnection = AndroidBikeConnection(context, bleCaptureRecorder)
+    private val protectionAcceptanceStore = SharedPreferencesProtectionAcceptanceStore(context)
+    val bikeConnection: BikeConnection = AndroidBikeConnection(
+        context,
+        bleCaptureRecorder,
+        protectionAcceptanceStore,
+    )
     val rideLocationTracker = RideLocationTracker(context)
     val rideRepository = RideRepository(context)
     val appSettings = AppSettingsRepository(context)
-    val bikeCompanionManager = BikeCompanionManager(context)
+    val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore)
     private val rideLocationLabeler = RideLocationLabeler(context)
     val rideRecorder = RideRecorder(
         bikeConnection,

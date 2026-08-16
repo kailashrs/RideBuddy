@@ -4,10 +4,11 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 
 ## Read-only connection
 
-1. Associate only a motorcycle model explicitly supported by the current build, then connect from the app. Do not pair a different vehicle family until its telemetry layout is implemented and validated.
+1. Associate only a motorcycle model explicitly supported by the current build, then connect from the app. On a fresh setup, confirm Android presents and completes its normal Bluetooth pairing flow before diagnostics report a GATT connection. Do not pair a different vehicle family until its telemetry layout is implemented and validated.
 2. Record the advertised name, RSSI, service UUIDs, characteristic properties, and descriptors.
-3. Confirm authentication completes once and that live telemetry is plausible at standstill. Do not publish authentication material in the validation record.
-4. Disconnect/reconnect at least three times and confirm no GATT operation timeouts or leaked connection callbacks appear in diagnostics.
+3. Confirm diagnostics identify either the indicated-challenge or previously-accepted protection path. A fresh connection should subscribe to `8610` and write one known response; an accepted reconnect should bypass both operations. In both cases, confirm all six normal subscriptions complete before the companion link becomes ready, and live telemetry is plausible at standstill. Do not publish protection material in the validation record.
+4. Disconnect/reconnect at least three times and confirm the previously verified path completes without a challenge wait, GATT timeout, or leaked callback.
+5. If practical, reset the bike-side pairing while stationary and confirm Android bonding followed by the first-time `8610` challenge and known `8620` response path separately. Verify that RideBuddy sends no `8750` `LIVE` packet and performs no proactive characteristic reads on the `RS457_ID` path.
 
 ## TFT output
 

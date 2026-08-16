@@ -1,0 +1,225 @@
+package com.spaceboy.ridebuddy.ble
+
+import com.spaceboy.ridebuddy.domain.ProtectionPath
+import com.spaceboy.ridebuddy.domain.ProtectionPhase
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProtectionSessionTest {
+    @Test
+    fun `fresh session begins by enabling challenge indications`() {
+        val session = session(accepted = false)
+
+        assertEquals(ProtectionAction.SubscribeChallenge, session.begin())
+        assertEquals(ProtectionPhase.SubscribingChallenge, session.phase)
+    }
+
+    @Test
+    fun `stored acceptance bypasses challenge subscription`() {
+        val session = session(accepted = true)
+
+        assertEquals(ProtectionAction.BeginPostAuthentication, session.begin())
+        assertEquals(ProtectionPhase.Verifying, session.phase)
+        assertEquals(ProtectionPath.StoredAcceptance, session.path)
+    }
+
+    @Test
+    fun `fresh session awaits an indicated challenge after subscription`() {
+        val session = session(accepted = false)
+        session.begin()
+
+        assertEquals(ProtectionAction.None, session.onChallengeSubscriptionReady())
+        assertEquals(ProtectionPhase.AwaitingChallenge, session.phase)
+    }
+
+    @Test
+    fun `known indicated challenge emits its response only once`() {
+        val session = session(accepted = false)
+        session.begin()
+        val challenge = hex("63 75 A3 A4 63 3B")
+
+        val first = session.onChallenge(challenge)
+        val duplicate = session.onChallenge(challenge.copyOf())
+
+        assertTrue(first is ProtectionAction.WriteResponse)
+        assertArrayEquals(hex("E9 77 97 5C C3 45"), (first as ProtectionAction.WriteResponse).value)
+        assertEquals(ProtectionAction.None, duplicate)
+        assertEquals(ProtectionPath.ChallengeIndication, session.path)
+        assertEquals(ProtectionPhase.Responding, session.phase)
+    }
+
+    @Test
+    fun `unknown challenge fails without guessing`() {
+        val session = session(accepted = false)
+        session.begin()
+
+        val action = session.onChallenge(ByteArray(6))
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.ClearAcceptance, action.policy)
+    }
+
+    @Test
+    fun `distinct known challenge is serialized behind a pending response`() {
+        val session = session(accepted = false)
+        session.begin()
+        session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        val action = session.onChallenge(hex("D9 EA DE F2 F9 A1"))
+
+        assertTrue(action is ProtectionAction.WriteResponse)
+        action as ProtectionAction.WriteResponse
+        assertArrayEquals(hex("95 C0 F8 B8 D7 AE"), action.value)
+        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
+        assertEquals(ProtectionPhase.Responding, session.phase)
+        assertEquals(ProtectionAction.BeginPostAuthentication, session.onProtectionResponseWritten())
+    }
+
+    @Test
+    fun `response write starts verification and profile evidence completes authentication`() {
+        val session = session(accepted = false)
+        session.begin()
+        session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertEquals(ProtectionAction.BeginPostAuthentication, session.onProtectionResponseWritten())
+        val completed = session.onPostAuthenticationEvidence("valid telemetry")
+
+        assertEquals(ProtectionAction.CompleteAuthentication("valid telemetry"), completed)
+        assertEquals(ProtectionPhase.Ready, session.phase)
+        assertEquals(ProtectionAction.None, session.onPostAuthenticationEvidence("VIN"))
+    }
+
+    @Test
+    fun `verification timeout clears acceptance and requests reconnect`() {
+        val session = session(accepted = true)
+        session.begin()
+
+        val action = session.onVerificationTimeout()
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+    }
+
+    @Test
+    fun `challenge timeout clears acceptance and requests reconnect`() {
+        val session = session(accepted = false)
+        session.begin()
+        session.onChallengeSubscriptionReady()
+
+        val action = session.onChallengeTimeout()
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+    }
+
+    @Test
+    fun `challenge timeout is ignored after a response is selected`() {
+        val session = session(accepted = false)
+        session.begin()
+        session.onChallengeSubscriptionReady()
+        session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertEquals(ProtectionAction.None, session.onChallengeTimeout())
+    }
+
+    @Test
+    fun `response completion without a challenge path fails explicitly`() {
+        val session = session(accepted = false)
+
+        val action = session.onProtectionResponseWritten()
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.ClearAcceptance, action.policy)
+        assertTrue(action.message.contains("without a pending challenge"))
+    }
+
+    @Test
+    fun `begin is idempotent`() {
+        val session = session(accepted = false)
+
+        assertEquals(ProtectionAction.SubscribeChallenge, session.begin())
+        assertEquals(ProtectionAction.None, session.begin())
+    }
+
+    @Test
+    fun `known challenge during verification is answered and verification resumes`() {
+        val session = session(accepted = true)
+        session.begin()
+        val challenge = hex("63 75 A3 A4 63 3B")
+
+        val response = session.onChallenge(challenge)
+
+        assertTrue(response is ProtectionAction.WriteResponse)
+        assertEquals(ProtectionPhase.Responding, session.phase)
+        assertEquals(ProtectionPath.StoredAcceptance, session.path)
+        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
+        assertEquals(ProtectionPhase.Verifying, session.phase)
+    }
+
+    @Test
+    fun `evidence received during renewal response completes after its write callback`() {
+        val session = session(accepted = true)
+        session.begin()
+        session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertEquals(
+            ProtectionAction.None,
+            session.onPostAuthenticationEvidence("valid telemetry"),
+        )
+        assertEquals(
+            ProtectionAction.CompleteAuthentication("valid telemetry"),
+            session.onProtectionResponseWritten(),
+        )
+        assertEquals(ProtectionPhase.Ready, session.phase)
+    }
+
+    @Test
+    fun `known challenge after readiness is answered without reopening subscriptions`() {
+        val session = session(accepted = true)
+        session.begin()
+        session.onPostAuthenticationEvidence("VIN")
+
+        val response = session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertTrue(response is ProtectionAction.WriteResponse)
+        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
+        assertEquals(ProtectionPhase.Ready, session.phase)
+        assertEquals(ProtectionPath.StoredAcceptance, session.path)
+    }
+
+    @Test
+    fun `required profile failure always clears acceptance and reconnects`() {
+        val session = session(accepted = true)
+        session.begin()
+
+        val action = session.onRequiredProfileFailure("Could not enable required data")
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+    }
+
+    @Test
+    fun `challenge callback before begin fails without mutating the state`() {
+        val session = session(accepted = false)
+
+        val action = session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertTrue(action is ProtectionAction.Fail)
+        assertEquals(ProtectionPhase.Idle, session.phase)
+    }
+
+    private fun session(accepted: Boolean): ProtectionSession =
+        ProtectionSession(previouslyAccepted = accepted)
+
+    private fun hex(value: String): ByteArray = value.split(" ")
+        .filter(String::isNotBlank)
+        .map { part -> part.toInt(16).toByte() }
+        .toByteArray()
+}

@@ -19,9 +19,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.ui.labelResource
 
 @Composable
 fun DiagnosticsScreen(
@@ -32,6 +35,11 @@ fun DiagnosticsScreen(
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val companionLinkStatus = stringResource(
+        if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
+    )
+    val protectionPhase = stringResource(diagnostics.protectionPhase.labelResource())
+    val protectionPath = diagnostics.protectionPath?.let { stringResource(it.labelResource()) } ?: "—"
     Column(
         modifier
             .fillMaxSize()
@@ -48,7 +56,18 @@ fun DiagnosticsScreen(
         DiagnosticCard(
             listOf(
                 "Device" to (deviceAddress ?: "Not associated"),
-                "Authentication" to if (diagnostics.authenticated) "Verified" else "Not verified",
+                "Companion link" to companionLinkStatus,
+                "Protection phase" to protectionPhase,
+                "Protection path" to protectionPath,
+                "System bond" to when (diagnostics.bonded) {
+                    true -> "Bonded"
+                    false -> "Not bonded"
+                    null -> "Unknown"
+                },
+                "Active GATT operation" to (diagnostics.activeGattOperation ?: "—"),
+                "Descriptor writes" to diagnostics.descriptorWritesCompleted.toString(),
+                "Characteristic reads" to diagnostics.readsCompleted.toString(),
+                "Characteristic writes" to diagnostics.writesCompleted.toString(),
                 "Notification listener" to if (notificationAccessEnabled) "Enabled" else "Disabled",
                 "RSSI" to (diagnostics.rssi?.let { "$it dBm" } ?: "—"),
                 "Telemetry" to "%.1f Hz".format(diagnostics.telemetryHz),

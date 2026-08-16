@@ -5,10 +5,34 @@ import com.spaceboy.ridebuddy.domain.BikeWriteMode
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 
 class GattOperationTest {
+    @Test
+    fun requestedWriteModePrefersTheRequestedCapabilityAndFallsBackSafely() {
+        val both = BluetoothGattCharacteristic.PROPERTY_WRITE or
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+
+        assertEquals(
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            requestedWriteType(both, BikeWriteMode.Default),
+        )
+        assertEquals(
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+            requestedWriteType(both, BikeWriteMode.NoResponsePreferred),
+        )
+        assertEquals(
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            requestedWriteType(
+                BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BikeWriteMode.NoResponsePreferred,
+            ),
+        )
+        assertNull(requestedWriteType(BluetoothGattCharacteristic.PROPERTY_READ, BikeWriteMode.Default))
+    }
+
     @Test
     fun writeEqualityUsesPayloadReferenceSemantics() {
         val characteristic = BluetoothGattCharacteristic(
@@ -36,6 +60,36 @@ class GattOperationTest {
 
         assertSame(payload, retry.value)
         assertEquals(1, retry.attempt)
+    }
+
+    @Test
+    fun readRetryIncrementsAttempt() {
+        val characteristic = BluetoothGattCharacteristic(
+            UUID.randomUUID(),
+            BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PERMISSION_READ,
+        )
+
+        val retry = GattOperation.Read(characteristic).retry()
+
+        assertEquals(1, retry.attempt)
+    }
+
+    @Test
+    fun retryRetainsOperationPriority() {
+        val characteristic = BluetoothGattCharacteristic(
+            UUID.randomUUID(),
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE,
+        )
+
+        val retry = GattOperation.Write(
+            characteristic,
+            byteArrayOf(0x01),
+            priority = GattOperationPriority.Critical,
+        ).retry()
+
+        assertEquals(GattOperationPriority.Critical, retry.priority)
     }
 
     @Test

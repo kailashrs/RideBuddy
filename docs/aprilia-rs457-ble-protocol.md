@@ -8,7 +8,7 @@ The OEM app is a conventional Android BLE central. It scans for devices whose na
 
 RideBuddy intentionally accepts only the RS 457/Tuono 457 name families for now. The OEM app uses a separate SR telemetry parser, so accepting SR/MIA advertisements without a model-specific decoder could record plausible-looking but incorrect ride data.
 
-The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. On a protected connection the app enables notifications on `8610`, looks up the received challenge, writes the corresponding six-byte response to `8620`, and then enables the normal subscription set.
+The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. The dashboard first requires an Android Bluetooth bond. For a first-time protected connection it enables indications on `8610`, handles the challenge in its characteristic-change callback, writes the corresponding six-byte response to `8620`, and persists a protection-accepted flag. Later connections with that flag bypass `8610` and enable the normal subscription set directly. Generic read callback code exists elsewhere in the APK, but the India dashboard connection path does not proactively read `8610`, the VIN, or the software version.
 
 The protocol exposes useful read-only telemetry and a fixed-function TFT interface. It does not expose a general framebuffer or any confirmed ECU control surface.
 
@@ -42,7 +42,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x2E]`; `132` is emitted by the OEM flow for a status-style update. |
 | `8280` | bike → phone | TFT navigation control | OEM handles a three-byte event; value 2 skips a waypoint and value 3 exits navigation. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
-| `8410` | bike → phone | live vehicle telemetry | Ten-byte packet described below. |
+| `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
 | `8420` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8510` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8610` | bike → phone | protection challenge/request | Subscribed first when the stored protection flag is not satisfied. |
@@ -51,23 +51,25 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8720` | bike → phone | unknown/call-flow related | Declared and subscribed by the generic notification set, but no clear consumer was found. |
 | `8730` | phone → bike | call state | Used by the OEM call-management path; exact state payload needs live confirmation. |
 | `8740` | bike → phone | call/TFT control event | OEM handles values 0–3 in connection/call flow; 1 is answer and 0 is reject/end in the observed path. |
-| `8750` | phone → bike | mobile heartbeat/version/time | Initial form is `[0x50, 'L','I','V','E', hour, minute, 0xF1, 0xF0]`; a shorter form omits time. |
+| `8750` | phone → bike | SR-family mobile status | The inspected India app schedules its `LIVE` packet only for the `SR_ID` model family. The `RS457_ID` dashboard path does not write it. |
 | `8760` | phone → bike | caller number | OEM sends up to 20 byte values derived from the phone number. |
 | `8810` | bike → phone | cluster software version | OEM treats the value as a byte string. |
 | `8910` | bike → phone | VIN | OEM expects a framed value and strips the first and last byte before decoding text. |
 
-The OEM's generic post-auth subscription list contains `8280`, `8720`, `8740`, `8410`, `8810`, and `8910`. The protected handshake separately subscribes to `8610`. The app's notification callback additionally recognizes telemetry, VIN, software version, and the navigation-control event.
+The OEM's generic post-auth subscription set contains `8280`, `8720`, `8740`, `8410`, `8810`, and `8910`. Its helper scans the GATT services and enables characteristics that belong to that set, so the decompiled implementation does not establish a stable order across devices. RideBuddy uses the same membership in a deterministic queue order. The protected handshake separately subscribes to `8610`. The app's notification callback additionally recognizes telemetry, VIN, software version, and the navigation-control event.
 
 ## Authentication
 
 ### Sequence
 
-1. Connect to the selected LE device and call `discoverServices()`.
-2. If the persisted `ProtectionCode` flag is not already accepted, enable notifications/indications on `8610`.
-3. Receive a challenge and canonicalize it as unsigned decimal bytes joined with commas, including a trailing comma. For example, bytes `0x63 0x75 0xA3` become `99,117,163,`.
-4. Look up the full six-byte challenge in the table below.
-5. Write the six-byte response to `8620` using the normal GATT write path.
-6. After a successful `8620` write callback, mark protection as accepted and enable the normal post-auth subscriptions.
+1. Resolve the selected `BluetoothDevice`. If it is not bonded, call Android's `createBond()` and wait for `ACTION_BOND_STATE_CHANGED` to report `BOND_BONDED` before opening GATT.
+2. Connect with LE transport, discover services, and verify that the protection endpoints and the six normal notification endpoints are present. The inspected OEM path does not request a larger MTU first.
+3. If RideBuddy previously verified protection for this still-bonded address, skip `8610` and enable the normal post-auth subscriptions.
+4. Otherwise, enable indications on `8610` by calling `setCharacteristicNotification()` and writing `ENABLE_INDICATION_VALUE` to its CCCD.
+5. Receive the challenge through `onCharacteristicChanged`. RideBuddy deliberately does not substitute a characteristic read or infer that an Android bond means application protection succeeded.
+6. Canonicalize the challenge as unsigned decimal bytes joined with commas, including a trailing comma. For example, bytes `0x63 0x75 0xA3` become `99,117,163,`.
+7. Look up the full six-byte challenge in the table below and write the mapped response to `8620` with an acknowledged write.
+8. After a successful `8620` write callback, enable the six normal subscription endpoints. RideBuddy deterministically queues `8280`, `8720`, `8740`, `8410`, `8810`, and `8910`, requires every CCCD write to succeed, and waits for valid post-auth profile evidence before presenting the session as connected. This queue order is a RideBuddy implementation choice; only the set membership is confirmed by the OEM code.
 
 ### Hardcoded pairs in APK
 
@@ -90,7 +92,7 @@ This table is a compatibility observation, not proof that every cluster firmware
 
 ## Live telemetry (`8410`)
 
-The RS 457/Tuono parser accepts a ten-byte frame:
+The RS 457/Tuono parser checks the `0x10` header and then consumes at least nine bytes:
 
 ```text
 byte 0       0x10 header
@@ -98,8 +100,10 @@ bytes 1..2   front-wheel speed, little-endian, raw * 0.01 km/h
 byte 3       throttle/gas opening, percentage-like value
 byte 4       instantaneous consumption, raw * 0.2 L/100 km
 bytes 5..8   engine RPM, little-endian unsigned integer
-byte 9       0x23 terminator
+bytes 9..n   ignored by the inspected parser
 ```
+
+Observed samples may contain `0x23` at byte 9, but the India OEM parser does not validate that byte or require an exact ten-byte length. RideBuddy therefore rejects frames shorter than nine bytes or with the wrong header, while tolerating trailing firmware-specific bytes.
 
 The OEM computes ride distance/time, average speed, average consumption, and a filtered longitudinal acceleration value on the phone. RPM is parsed and logged but is not prominently displayed. The parser has a separate variant for the SR Motard family; the custom app should key decoding by detected model/firmware rather than assuming all Piaggio clusters share one frame.
 
@@ -158,7 +162,7 @@ Build a small Android BLE test app that:
 
 1. Scans and logs device name, address, RSSI, advertisement data, service UUIDs, characteristic UUIDs, properties, and descriptors.
 2. Connects only to the user-selected bike while stationary.
-3. Reproduces the authentication subscription/write sequence and records every callback with timestamps.
+3. Reproduces both the first-time challenge/response path and the already-protected reconnect path, recording every descriptor, read, write, and notification callback with timestamps.
 4. Enables `8410` notifications and validates frame rate, framing, and parser values without writing navigation data.
 5. Sends only one known navigation field at a time, with conservative delays and a visible emergency disconnect control.
 

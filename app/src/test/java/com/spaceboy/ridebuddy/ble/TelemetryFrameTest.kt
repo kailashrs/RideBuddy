@@ -29,8 +29,25 @@ class TelemetryFrameTest {
     }
 
     @Test
-    fun `rejects malformed framing`() {
+    fun `accepts the nine bytes consumed by the OEM parser`() {
+        val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 20, 0x10, 0x27, 0x00, 0x00)
+
+        val frame = requireNotNull(TelemetryFrame.parse(payload))
+
+        assertEquals(1.0, frame.speedKilometresPerHour, 0.001)
+        assertEquals(10_000L, frame.engineRpm)
+    }
+
+    @Test
+    fun `ignores trailing bytes not consumed by the OEM parser`() {
+        val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 20, 0x10, 0x27, 0x00, 0x00, 0x7F, 0x55)
+
+        assertEquals(1.0, requireNotNull(TelemetryFrame.parse(payload)).speedKilometresPerHour, 0.001)
+    }
+
+    @Test
+    fun `rejects a short frame or wrong header`() {
+        assertNull(TelemetryFrame.parse(ByteArray(8)))
         assertNull(TelemetryFrame.parse(ByteArray(9)))
-        assertNull(TelemetryFrame.parse(ByteArray(10)))
     }
 }

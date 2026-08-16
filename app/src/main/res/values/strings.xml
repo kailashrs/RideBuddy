@@ -29,4 +29,14 @@
     <string name="ride_share_title">Share ride</string>
     <string name="parking_map_unavailable">No map app is available to show the parking location</string>
     <string name="document_provider_unavailable">No document provider is available for this export</string>
+    <string name="companion_link_ready">Ready</string>
+    <string name="companion_link_not_ready">Not ready</string>
+    <string name="protection_phase_idle">Idle</string>
+    <string name="protection_phase_subscribing">Enabling challenge indications</string>
+    <string name="protection_phase_awaiting">Awaiting challenge</string>
+    <string name="protection_phase_responding">Sending protection response</string>
+    <string name="protection_phase_verifying">Verifying companion profile</string>
+    <string name="protection_phase_ready">Ready</string>
+    <string name="protection_path_stored_acceptance">Previously accepted</string>
+    <string name="protection_path_challenge_indication">Challenge indication</string>
 </resources>

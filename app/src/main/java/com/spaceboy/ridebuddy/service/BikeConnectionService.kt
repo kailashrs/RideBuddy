@@ -241,7 +241,7 @@ class BikeConnectionService : Service() {
         val connectionLabel = when (this) {
             is BikeConnectionState.Connected -> "Connected to $deviceName"
             is BikeConnectionState.Connecting -> "Connecting to ${deviceName ?: "bike"}"
-            is BikeConnectionState.Authenticating -> "Authenticating $deviceName"
+            is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
             is BikeConnectionState.Failed -> message
             BikeConnectionState.Scanning -> "Scanning"
             BikeConnectionState.Disconnected -> "Disconnected"
@@ -275,7 +275,7 @@ class BikeConnectionService : Service() {
                 intent,
             )
             if (!started) {
-                context.appContainer.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -288,7 +288,7 @@ class BikeConnectionService : Service() {
                 Intent(context, BikeConnectionService::class.java).setAction(ActionDisconnect),
             )
             if (!started) {
-                context.appContainer.bikeConnection?.disconnect()
+                context.appContainer.bikeConnection.disconnect()
             }
             return started
         }
@@ -307,7 +307,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
             if (!started) {
-                context.appContainer.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -322,7 +322,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraAddressBytes, address.toByteArray()),
             )
             if (!started && AssociatedBikeStore(context).read()?.bluetoothAddress == address) {
-                context.appContainer.bikeConnection?.disconnect()
+                context.appContainer.bikeConnection.disconnect()
             }
             return started
         }

@@ -21,6 +21,11 @@ internal enum class GattFailureAction {
     ResetGattAndReconnect,
 }
 
+internal enum class GattOperationPriority {
+    Normal,
+    Critical,
+}
+
 internal fun gattStartAction(started: Boolean): GattStartAction =
     if (started) GattStartAction.AwaitCallback else GattStartAction.HandleSynchronousFailure
 
@@ -37,6 +42,8 @@ internal fun gattFailureAction(
 internal sealed interface GattOperation {
     val label: String
     val attempt: Int
+    val priority: GattOperationPriority
+        get() = GattOperationPriority.Normal
     fun retry(): GattOperation
 
     data class Subscribe(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
@@ -45,7 +52,10 @@ internal sealed interface GattOperation {
         override fun retry() = copy(attempt = attempt + 1)
     }
 
-    data class Read(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
+    data class Read(
+        val characteristic: BluetoothGattCharacteristic,
+        override val attempt: Int = 0,
+    ) :
         GattOperation {
         override val label = "read"
         override fun retry() = copy(attempt = attempt + 1)
@@ -57,6 +67,7 @@ internal sealed interface GattOperation {
         val mode: BikeWriteMode = BikeWriteMode.Default,
         val completion: CompletableDeferred<Boolean>? = null,
         val requestId: Long? = null,
+        override val priority: GattOperationPriority = GattOperationPriority.Normal,
         override val attempt: Int = 0,
     ) : GattOperation {
         override val label = "write"

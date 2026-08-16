@@ -449,7 +449,7 @@ private fun ConnectionCard(
                 Text(
                     text = when (state) {
                         is BikeConnectionState.Connecting -> "Connecting"
-                        is BikeConnectionState.Authenticating -> "Authenticating"
+                        is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
                         is BikeConnectionState.Failed -> "Connection Failed"
                         else -> "Disconnected"
                     },
@@ -468,7 +468,7 @@ private fun ConnectionCard(
             Text(
                 text = when (state) {
                     is BikeConnectionState.Connecting -> "Connecting…"
-                    is BikeConnectionState.Authenticating -> "Authenticating…"
+                    is BikeConnectionState.Authenticating -> "Verifying motorcycle link…"
                     is BikeConnectionState.Failed -> "Connection failed"
                     else -> if (scanState is BikeScanState.Scanning) "Looking for your bike" else "Bike not connected"
                 },

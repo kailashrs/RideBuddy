@@ -20,6 +20,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
+import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,7 +44,10 @@ data class BikeAssociationState(
 )
 
 /** Owns the system association only. BLE GATT remains the responsibility of BikeConnectionService. */
-class BikeCompanionManager(context: Context) {
+class BikeCompanionManager internal constructor(
+    context: Context,
+    private val protectionAcceptanceStore: ProtectionAcceptanceStore,
+) {
     private val appContext = context.applicationContext
     private val deviceStore = AssociatedBikeStore(appContext)
     private val supported = appContext.packageManager.hasSystemFeature(
@@ -172,7 +176,12 @@ class BikeCompanionManager(context: Context) {
             return
         }
         val refreshed = refreshResult.getOrNull()
-        if (refreshed != null) deviceStore.write(refreshed) else deviceStore.clear()
+        if (refreshed != null) {
+            storeAssociation(refreshed)
+        } else {
+            stored?.bluetoothAddress?.let(protectionAcceptanceStore::clear)
+            deviceStore.clear()
+        }
         mutableState.update { state ->
             state.copy(
                 bike = refreshed,
@@ -256,6 +265,7 @@ class BikeCompanionManager(context: Context) {
             }
             return false
         }
+        bike?.bluetoothAddress?.let(protectionAcceptanceStore::clear)
         deviceStore.clear()
         mutableState.value = BikeAssociationState(supported = supported)
         return true
@@ -277,7 +287,7 @@ class BikeCompanionManager(context: Context) {
 
     fun rememberLegacyBike(bike: DiscoveredBike) {
         val associated = AssociatedBike(bike.bluetoothAddress, bike.name)
-        deviceStore.write(associated)
+        storeAssociation(associated)
         mutableState.update { it.copy(bike = associated) }
     }
 
@@ -291,7 +301,7 @@ class BikeCompanionManager(context: Context) {
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
         val bike = AssociatedBike(address, name, associationInfo.id)
-        deviceStore.write(bike)
+        storeAssociation(bike)
         mutableState.update {
             it.copy(
                 bike = bike,
@@ -316,7 +326,7 @@ class BikeCompanionManager(context: Context) {
             ?: runCatching { device.name }.getOrNull()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
         val bike = AssociatedBike(address, name)
-        deviceStore.write(bike)
+        storeAssociation(bike)
         mutableState.update {
             it.copy(
                 bike = bike,
@@ -348,6 +358,12 @@ class BikeCompanionManager(context: Context) {
         onFailure(message)
     }
 
+    private fun storeAssociation(bike: AssociatedBike) {
+        protectionAcceptanceToClear(deviceStore.read(), bike)
+            ?.let(protectionAcceptanceStore::clear)
+        deviceStore.write(bike)
+    }
+
     private companion object {
         const val DefaultBikeName = "Motorcycle"
     }
@@ -357,6 +373,11 @@ internal fun preservedAssociationAfterRefreshFailure(
     current: AssociatedBike?,
     stored: AssociatedBike?,
 ): AssociatedBike? = current ?: stored
+
+internal fun protectionAcceptanceToClear(
+    previous: AssociatedBike?,
+    replacement: AssociatedBike?,
+): BluetoothAddress? = previous?.bluetoothAddress?.takeIf { it != replacement?.bluetoothAddress }
 
 internal fun canClearLocalAssociation(
     hasStoredAssociation: Boolean,

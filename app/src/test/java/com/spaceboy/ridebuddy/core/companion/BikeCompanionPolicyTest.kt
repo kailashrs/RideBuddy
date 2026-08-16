@@ -57,4 +57,17 @@ class BikeCompanionPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun replacingAssociationClearsAcceptanceForThePreviousAddress() {
+        val replacement = storedBike.copy(
+            bluetoothAddress = requireNotNull(BluetoothAddress.parse("11:22:33:44:55:66")),
+        )
+
+        assertEquals(
+            storedBike.bluetoothAddress,
+            protectionAcceptanceToClear(storedBike, replacement),
+        )
+        assertEquals(null, protectionAcceptanceToClear(storedBike, storedBike.copy(name = "Renamed")))
+    }
 }

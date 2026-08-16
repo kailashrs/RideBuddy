@@ -85,12 +85,32 @@ data class BikeIdentity(
     val lastConnectedAtMillis: Long? = null,
 )
 
+enum class ProtectionPhase {
+    Idle,
+    SubscribingChallenge,
+    AwaitingChallenge,
+    Responding,
+    Verifying,
+    Ready,
+}
+
+enum class ProtectionPath {
+    StoredAcceptance,
+    ChallengeIndication,
+}
+
 data class BleDiagnostics(
     val authenticated: Boolean = false,
+    val protectionPhase: ProtectionPhase = ProtectionPhase.Idle,
+    val protectionPath: ProtectionPath? = null,
+    val bonded: Boolean? = null,
     val negotiatedMtu: Int? = null,
     val servicesDiscovered: Int = 0,
     val notificationsReceived: Long = 0,
     val writesCompleted: Long = 0,
+    val descriptorWritesCompleted: Long = 0,
+    val readsCompleted: Long = 0,
+    val activeGattOperation: String? = null,
     val malformedTelemetryFrames: Long = 0,
     val lastFrameAtMillis: Long? = null,
     val rssi: Int? = null,
