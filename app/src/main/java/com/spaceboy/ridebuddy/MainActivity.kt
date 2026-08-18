@@ -28,7 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
+import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
             .filterKeys { it != NotificationPermission }
             .values.all { it }
         if (essentialGranted) {
-            beginAssociationOrLegacyScan()
+            startAssociation()
         } else {
             viewModel.showMessage("Nearby-device access is needed to connect to the motorcycle")
         }
@@ -132,8 +132,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
-            val scanState = viewModel.scanState.collectAsStateWithLifecycle().value
-            val discoveredBikes = viewModel.discoveredBikes.collectAsStateWithLifecycle().value
             val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
             val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
             val latestTelemetryReading = viewModel.latestTelemetryReading.collectAsStateWithLifecycle().value
@@ -202,7 +200,7 @@ class MainActivity : ComponentActivity() {
                         navigationConfigured = uiState.navigationKey.isConfigured,
                         onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
                         onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
-                        onConnectBike = ::requestBluetoothPermissionsAndScan,
+                        onAssociateBike = ::requestBluetoothPermissionsAndScan,
                         onOpenNotificationAccess = ::openNotificationAccessSettings,
                         onRequestAppNotificationPermission = ::requestAppNotificationPermission,
                         onEnableLegacyCalls = { setLegacyCallControls(true) },
@@ -215,8 +213,6 @@ class MainActivity : ComponentActivity() {
                 } else MainScreen(
                     state = MainScreenState(
                         uiState = uiState,
-                        scanState = scanState,
-                        discoveredBikes = discoveredBikes,
                         connectionState = connectionState,
                         telemetry = telemetry,
                         latestTelemetryReceivedAtElapsedRealtime = latestTelemetryReading?.receivedAtElapsedRealtime,
@@ -245,9 +241,7 @@ class MainActivity : ComponentActivity() {
                         onSaveNavigationApiKey = viewModel::saveNavigationApiKey,
                         onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
                         onTestNavigationApiKey = viewModel::testNavigationApiKey,
-                        onFindBike = ::requestBluetoothPermissionsAndScan,
                         onReconnect = ::reconnectToSavedBike,
-                        onConnectBike = ::connectBike,
                         onDisconnectBike = { BikeConnectionService.disconnect(this@MainActivity) },
                         onStartNavigation = ::startNavigation,
                         onOpenActiveNavigation = ::openActiveNavigation,
@@ -347,25 +341,17 @@ class MainActivity : ComponentActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            beginAssociationOrLegacyScan()
+            startAssociation()
         } else {
             bluetoothPermissionLauncher.launch(missingPermissions.toTypedArray())
-        }
-    }
-
-    private fun connectBike(bike: DiscoveredBike) {
-        viewModel.stopBikeScan()
-        appContainer.bikeCompanionManager.rememberLegacyBike(bike)
-        if (!BikeConnectionService.connect(this, bike)) {
-            viewModel.showMessage("Unable to start connection service")
         }
     }
 
     /**
      * Wired to the InfoScreen `Reconnect` button. If a bike is already associated, this
      * restarts the BikeConnectionService via [BikeConnectionService.restartConnect] so the
-     * foreground promotion happens before GATT begins. Falls back to the existing scan
-     * path when nothing is associated.
+     * foreground promotion happens before GATT begins. When no bike is associated yet,
+     * delegates to the CDM picker so the user can pick one.
      */
     private fun reconnectToSavedBike() {
         val bike = appContainer.bikeCompanionManager.state.value.bike
@@ -378,7 +364,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun beginAssociationOrLegacyScan() {
+    private fun startAssociation() {
         val manager = appContainer.bikeCompanionManager
         val existing = manager.state.value.bike
         if (existing != null) {
@@ -388,7 +374,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!manager.state.value.supported) {
-            viewModel.startBikeScan()
+            viewModel.showMessage("Your phone does not support the Companion device setup feature required by RideBuddy")
             return
         }
         lastAssociationConnectionAddress = null
@@ -402,10 +388,10 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun connectNewAssociation(bike: DiscoveredBike) {
+    private fun connectNewAssociation(bike: AssociatedBike) {
         if (lastAssociationConnectionAddress.equals(bike.address, ignoreCase = true)) return
         lastAssociationConnectionAddress = bike.address
-        if (!BikeConnectionService.connect(this, bike)) {
+        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
             viewModel.showMessage("Unable to start connection service")
         } else {
             viewModel.showMessage("Bike associated; connecting")
@@ -473,13 +459,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requiredNearbyDevicePermissions(): Array<String> {
-        val companionSupported = appContainer.bikeCompanionManager.state.value.supported
-        return buildList {
-            add(Manifest.permission.BLUETOOTH_CONNECT)
-            if (!companionSupported) add(Manifest.permission.BLUETOOTH_SCAN)
-        }.toTypedArray()
-    }
+    private fun requiredNearbyDevicePermissions(): Array<String> =
+        arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
     private fun startNavigation(rawDestination: String) {
         val destination = rawDestination.trim()

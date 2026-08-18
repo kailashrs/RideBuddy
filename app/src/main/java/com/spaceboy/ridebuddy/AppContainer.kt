@@ -1,7 +1,6 @@
 package com.spaceboy.ridebuddy
 
 import android.content.Context
-import com.spaceboy.ridebuddy.ble.AndroidBikeScanner
 import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.ble.SharedPreferencesProtectionAcceptanceStore
@@ -37,7 +36,6 @@ class AppContainer(context: Context) {
      *  foreground services that keep the application process alive. Coroutines
      *  launched here are bound to the process, not to any individual Activity. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val bikeScanner = AndroidBikeScanner(context)
     val bleCaptureRecorder = BleCaptureRecorder()
     private val protectionAcceptanceStore = SharedPreferencesProtectionAcceptanceStore(context)
     val bikeConnection: BikeConnection = AndroidBikeConnection(

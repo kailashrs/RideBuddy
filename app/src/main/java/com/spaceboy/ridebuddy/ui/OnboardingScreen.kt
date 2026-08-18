@@ -56,7 +56,7 @@ fun OnboardingScreen(
     navigationConfigured: Boolean,
     onRequestNearbyDeviceAccess: () -> Unit,
     onRequestPreciseLocation: () -> Unit,
-    onConnectBike: () -> Unit,
+    onAssociateBike: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onRequestAppNotificationPermission: () -> Unit,
     onEnableLegacyCalls: () -> Unit,
@@ -108,8 +108,8 @@ fun OnboardingScreen(
                         "Pair your motorcycle using Android's device manager. This allows RideBuddy to automatically reconnect whenever your bike is turned on."
                     },
                     actions = when {
-                        !bikeAssociated -> listOf("Choose motorcycle" to onConnectBike)
-                        !authenticated -> listOf("Reconnect motorcycle" to onConnectBike)
+                        !bikeAssociated -> listOf("Choose motorcycle" to onAssociateBike)
+                        !authenticated -> listOf("Reconnect motorcycle" to onAssociateBike)
                         else -> emptyList()
                     },
                     status = connectionState.onboardingLabel(),

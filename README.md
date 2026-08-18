@@ -34,7 +34,7 @@ Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC B
 - Gradle 8.13
 - Kotlin / Compose compiler 2.3.21
 - Jetpack Compose BOM 2026.06.01
-- compile SDK 36.1, target SDK 36, minimum SDK 31 (Android 12)
+- compile SDK 36.1, target SDK 36, minimum SDK 36 (Android 16); pairing requires `FEATURE_COMPANION_DEVICE_SETUP`
 - Google Navigation SDK 7.8.0
 
 The checked-in Gradle wrapper remains the authoritative build entry point.

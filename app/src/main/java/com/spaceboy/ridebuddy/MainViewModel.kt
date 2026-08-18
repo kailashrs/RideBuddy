@@ -7,10 +7,7 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.spaceboy.ridebuddy.ble.AndroidBikeScanner
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
-import com.spaceboy.ridebuddy.ble.BikeScanState
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.InsightsCalculator
 import com.spaceboy.ridebuddy.data.RideInsights
@@ -44,7 +41,6 @@ class MainViewModel(
     savedStateHandle: SavedStateHandle,
     private val apiKeyStore: SecureNavigationApiKeyStore,
     private val navigationSdkGateway: GoogleNavigationSdkGateway,
-    private val bikeScanner: AndroidBikeScanner,
     private val bikeConnection: BikeConnection,
     private val bleCaptureRecorder: BleCaptureRecorder,
     private val rideRecorder: RideRecorder,
@@ -70,8 +66,6 @@ class MainViewModel(
     )
 
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
-    val scanState: StateFlow<BikeScanState> = bikeScanner.scanState
-    val discoveredBikes: StateFlow<List<DiscoveredBike>> = bikeScanner.bikes
     val connectionState = bikeConnection.connectionState
     val telemetry = bikeConnection.telemetry
     val latestTelemetryReading = bikeConnection.latestTelemetryReading
@@ -249,15 +243,6 @@ class MainViewModel(
         }
     }
 
-    fun startBikeScan() = bikeScanner.start()
-
-    fun connectToBike(bike: DiscoveredBike) {
-        bikeScanner.stop()
-        bikeConnection.connect(bike.connectionTarget())
-    }
-
-    fun stopBikeScan() = bikeScanner.stop()
-
     fun disconnectBike() = bikeConnection.disconnect()
 
     fun selectInsightPeriod(period: InsightPeriod) {
@@ -362,10 +347,6 @@ class MainViewModel(
         mutableUiState.update { it.copy(transientMessage = message) }
     }
 
-    override fun onCleared() {
-        bikeScanner.stop()
-    }
-
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -373,7 +354,6 @@ class MainViewModel(
                     savedStateHandle = createSavedStateHandle(),
                     apiKeyStore = container.navigationApiKeyStore,
                     navigationSdkGateway = container.navigationSdkGateway,
-                    bikeScanner = container.bikeScanner,
                     bikeConnection = container.bikeConnection,
                     bleCaptureRecorder = container.bleCaptureRecorder,
                     rideRecorder = container.rideRecorder,

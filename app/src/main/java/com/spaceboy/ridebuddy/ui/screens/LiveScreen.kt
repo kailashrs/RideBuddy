@@ -58,8 +58,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
 import com.spaceboy.ridebuddy.R
-import com.spaceboy.ridebuddy.ble.BikeScanState
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
@@ -84,8 +82,6 @@ private enum class LiveDetailLevel(val label: String) {
 @Composable
 fun LiveScreen(
     modifier: Modifier = Modifier,
-    scanState: BikeScanState,
-    discoveredBikes: List<DiscoveredBike>,
     sharedDestination: String?,
     sharedDestinationError: String?,
     isNavigationStarting: Boolean,
@@ -97,8 +93,7 @@ fun LiveScreen(
     lastRide: Ride?,
     guidance: GuidanceState,
     units: DistanceUnits,
-    onFindBike: () -> Unit,
-    onConnectBike: (DiscoveredBike) -> Unit,
+    onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
     onStartNavigation: (String) -> Unit,
     onOpenActiveNavigation: () -> Unit,
@@ -126,14 +121,10 @@ fun LiveScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ConnectionCard(connectionState, scanState, onFindBike, onDisconnectBike)
+        ConnectionCard(connectionState, onConnectBike, onDisconnectBike)
 
         if (connectionState is BikeConnectionState.Connected && telemetry != null) {
             TelemetryCard(telemetry, activeRide, units, onDetails = { showLiveDetails = true })
-        }
-
-        if (discoveredBikes.isNotEmpty() && connectionState !is BikeConnectionState.Connected) {
-            NearbyBikesSection(discoveredBikes, onConnectBike)
         }
 
         Text(
@@ -386,8 +377,7 @@ fun LiveScreen(
 @Composable
 private fun ConnectionCard(
     state: BikeConnectionState,
-    scanState: BikeScanState,
-    onFindBike: () -> Unit,
+    onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
 ) {
     val connected = state is BikeConnectionState.Connected
@@ -470,7 +460,7 @@ private fun ConnectionCard(
                     is BikeConnectionState.Connecting -> "Connecting…"
                     is BikeConnectionState.Authenticating -> "Verifying motorcycle link…"
                     is BikeConnectionState.Failed -> "Connection failed"
-                    else -> if (scanState is BikeScanState.Scanning) "Looking for your bike" else "Bike not connected"
+                    else -> "Bike not connected"
                 },
                 style = MaterialTheme.typography.headlineSmall,
             )
@@ -484,10 +474,10 @@ private fun ConnectionCard(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Spacer(Modifier.height(16.dp))
-            if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating || scanState is BikeScanState.Scanning) {
+            if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             } else {
-                Button(onClick = onFindBike) {
+                Button(onClick = onConnectBike) {
                     Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Find my bike")
@@ -694,30 +684,4 @@ private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<Ride
     return List(maxPoints) { index -> this[index * lastIndex / (maxPoints - 1)] }
 }
 
-@Composable
-private fun NearbyBikesSection(
-    discoveredBikes: List<DiscoveredBike>,
-    onConnectBike: (DiscoveredBike) -> Unit,
-) {
-    Text(
-        text = "Nearby bikes",
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier
-            .padding(start = 16.dp)
-            .semantics { heading() },
-    )
-    discoveredBikes.forEach { bike ->
-        OutlinedCard(onClick = { onConnectBike(bike) }, modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.TwoWheeler, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(bike.name.ifBlank { "Motorcycle" }, style = MaterialTheme.typography.titleMedium)
-                    Text("${bike.name} • ${bike.addressSuffix}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text("${bike.rssi} dBm", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
+// Dropped NearbyBikesSection: bike selection is exclusively via CompanionDeviceManager.

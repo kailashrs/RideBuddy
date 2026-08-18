@@ -19,7 +19,6 @@ import android.os.Looper
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.ble.hasUnsupportedTelemetryLayout
 import com.spaceboy.ridebuddy.ble.isApriliaBikeName
@@ -71,7 +70,7 @@ class BikeCompanionManager internal constructor(
 
     fun associate(
         launchApproval: (IntentSender) -> Unit,
-        onAssociated: (DiscoveredBike) -> Unit,
+        onAssociated: (AssociatedBike) -> Unit,
         onFailure: (String) -> Unit,
     ) {
         val companionManager = manager
@@ -113,7 +112,7 @@ class BikeCompanionManager internal constructor(
         }.onFailure { fail(it.message ?: "Could not start bike association", onFailure) }
     }
 
-    fun acceptActivityResult(resultCode: Int, data: Intent?): DiscoveredBike? {
+    fun acceptActivityResult(resultCode: Int, data: Intent?): AssociatedBike? {
         if (resultCode != Activity.RESULT_OK || data == null) {
             mutableState.update { it.copy(associationInProgress = false) }
             return null
@@ -287,17 +286,10 @@ class BikeCompanionManager internal constructor(
         return state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
     }
 
-    fun rememberLegacyBike(bike: DiscoveredBike) {
-        val associated = AssociatedBike(bike.bluetoothAddress, bike.name)
-        storeAssociation(associated)
-        mutableState.update { it.copy(bike = associated) }
-    }
-
     @SuppressLint("MissingPermission")
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private fun accept(associationInfo: AssociationInfo): DiscoveredBike? {
+    private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
         val scanResult = if (Build.VERSION.SDK_INT >= 34) associationInfo.associatedDevice?.bleDevice else null
-        val exactDevice = scanResult?.device
         val address = associationInfo.bluetoothAddress() ?: return null
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
@@ -316,17 +308,11 @@ class BikeCompanionManager internal constructor(
             )
         }
         ensurePresenceObservation()
-        return DiscoveredBike(
-            name = name,
-            bluetoothAddress = address,
-            rssi = scanResult?.rssi ?: 0,
-            serviceUuids = scanResult?.scanRecord?.serviceUuids.orEmpty().map { it.uuid.toString() },
-            bluetoothDevice = exactDevice,
-        )
+        return bike
     }
 
     @SuppressLint("MissingPermission")
-    private fun accept(device: BluetoothDevice, advertisedName: String?, rssi: Int): DiscoveredBike? {
+    private fun accept(device: BluetoothDevice, advertisedName: String?, rssi: Int): AssociatedBike? {
         val address = BluetoothAddress.parse(device.address) ?: return null
         val name = advertisedName?.takeIf(String::isNotBlank)
             ?: runCatching { device.name }.getOrNull()?.takeIf(String::isNotBlank)
@@ -345,12 +331,7 @@ class BikeCompanionManager internal constructor(
             )
         }
         ensurePresenceObservation()
-        return DiscoveredBike(
-            name = name,
-            bluetoothAddress = address,
-            rssi = rssi,
-            bluetoothDevice = device,
-        )
+        return bike
     }
 
     @SuppressLint("MissingPermission")

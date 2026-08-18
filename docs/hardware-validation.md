@@ -4,7 +4,7 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 
 ## Read-only connection
 
-1. Associate only a motorcycle model explicitly supported by the current build, then connect from the app. On a fresh setup, confirm Android presents and completes its normal Bluetooth pairing flow before diagnostics report a GATT connection. Do not pair a different vehicle family until its telemetry layout is implemented and validated.
+1. Pairing runs through Android's CompanionDeviceManager — the system device picker handles scan and Bluetooth bond atomically. A phone without `FEATURE_COMPANION_DEVICE_SETUP` cannot pair with RideBuddy on Android 16+. Confirm the picker surfaces and completes the system flow before diagnostics report a GATT connection. Do not pair a different vehicle family until its telemetry layout is implemented and validated.
 2. Record the advertised name, RSSI, service UUIDs, characteristic properties, and descriptors.
 3. Confirm diagnostics identify either the indicated-challenge or previously-accepted protection path. A fresh connection should subscribe to `8610` and write one known response; an accepted reconnect should bypass both operations. In both cases, confirm all six normal subscriptions complete before the companion link becomes ready, and live telemetry is plausible at standstill. Do not publish protection material in the validation record.
 4. Disconnect/reconnect at least three times and confirm the previously verified path completes without a challenge wait, GATT timeout, or leaked callback.

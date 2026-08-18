@@ -22,7 +22,8 @@ android {
 
     defaultConfig {
         applicationId = "com.spaceboy.ridebuddy"
-        minSdk = 31
+        // CDM-only pairing path requires Android 16+ on every supported phone.
+        minSdk = 36
         // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36

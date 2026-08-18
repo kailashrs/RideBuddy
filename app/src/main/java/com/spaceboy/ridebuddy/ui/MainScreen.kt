@@ -46,9 +46,7 @@ import androidx.compose.ui.unit.dp
 
 import com.spaceboy.ridebuddy.MainUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
-import com.spaceboy.ridebuddy.ble.BikeScanState
 import com.spaceboy.ridebuddy.ble.BleCaptureState
-import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
@@ -88,8 +86,6 @@ private val destinations = listOf(
 
 data class MainScreenState(
     val uiState: MainUiState,
-    val scanState: BikeScanState,
-    val discoveredBikes: List<DiscoveredBike>,
     val connectionState: BikeConnectionState,
     val telemetry: TelemetryFrame?,
     val latestTelemetryReceivedAtElapsedRealtime: Long?,
@@ -119,9 +115,7 @@ data class MainScreenActions(
     val onSaveNavigationApiKey: (String) -> Unit,
     val onRemoveNavigationApiKey: () -> Unit,
     val onTestNavigationApiKey: () -> Unit,
-    val onFindBike: () -> Unit,
     val onReconnect: () -> Unit,
-    val onConnectBike: (DiscoveredBike) -> Unit,
     val onDisconnectBike: () -> Unit,
     val onStartNavigation: (String) -> Unit,
     val onOpenActiveNavigation: () -> Unit,
@@ -325,8 +319,6 @@ private fun ScreenContent(
         when (uiState.selectedDestination) {
             TopLevelDestination.Live -> LiveScreen(
                 modifier = modifier,
-                scanState = scanState,
-                discoveredBikes = discoveredBikes,
                 sharedDestination = uiState.sharedDestination,
                 sharedDestinationError = uiState.sharedDestinationError,
                 isNavigationStarting = uiState.isNavigationStarting,
@@ -338,8 +330,7 @@ private fun ScreenContent(
                 lastRide = rides.firstOrNull(),
                 guidance = guidance,
                 units = settings.distanceUnits,
-                onFindBike = onFindBike,
-                onConnectBike = onConnectBike,
+                onConnectBike = onAssociateBike,
                 onDisconnectBike = onDisconnectBike,
                 onStartNavigation = onStartNavigation,
                 onOpenActiveNavigation = onOpenActiveNavigation,
