@@ -35,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
@@ -119,6 +120,7 @@ data class MainScreenActions(
     val onRemoveNavigationApiKey: () -> Unit,
     val onTestNavigationApiKey: () -> Unit,
     val onFindBike: () -> Unit,
+    val onReconnect: () -> Unit,
     val onConnectBike: (DiscoveredBike) -> Unit,
     val onDisconnectBike: () -> Unit,
     val onStartNavigation: (String) -> Unit,
@@ -224,6 +226,11 @@ fun MainScreen(
         }
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            // Force the Scaffold (which owns the pinned LargeTopAppBar) to be rebuilt from scratch
+            // whenever the navigation group identity changes. The state holder already keys
+            // screen-level state on the same identifier, so SaveableStateProvider continues
+            // to preserve each destination's scroll/field state across navigation.
+            val layoutKey = "${maxWidth >= 600.dp}|${uiState.saveableContentKey()}"
             if (maxWidth >= 600.dp) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
@@ -238,34 +245,38 @@ fun MainScreen(
                             )
                         }
                     }
+                    key(layoutKey) {
+                        Scaffold(
+                            modifier = Modifier.weight(1f).nestedScroll(topBarScrollBehavior.nestedScrollConnection),
+                            topBar = topBar,
+                            snackbarHost = { SnackbarHost(snackbarHostState) },
+                            content = screenContent,
+                        )
+                    }
+                }
+            } else {
+                key(layoutKey) {
                     Scaffold(
-                        modifier = Modifier.weight(1f).nestedScroll(topBarScrollBehavior.nestedScrollConnection),
+                        modifier = Modifier.fillMaxSize().nestedScroll(topBarScrollBehavior.nestedScrollConnection),
                         topBar = topBar,
                         snackbarHost = { SnackbarHost(snackbarHostState) },
+                        bottomBar = {
+                            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                                destinations.forEach { item ->
+                                    val selected = item.destination == uiState.selectedDestination
+                                    NavigationBarItem(
+                                        modifier = Modifier.testTag("top-level-${item.destination.name}"),
+                                        selected = selected,
+                                        onClick = { onDestinationSelected(item.destination) },
+                                        icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
+                                        label = { Text(item.label) },
+                                    )
+                                }
+                            }
+                        },
                         content = screenContent,
                     )
                 }
-            } else {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize().nestedScroll(topBarScrollBehavior.nestedScrollConnection),
-                    topBar = topBar,
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    bottomBar = {
-                        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                            destinations.forEach { item ->
-                                val selected = item.destination == uiState.selectedDestination
-                                NavigationBarItem(
-                                    modifier = Modifier.testTag("top-level-${item.destination.name}"),
-                                    selected = selected,
-                                    onClick = { onDestinationSelected(item.destination) },
-                                    icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
-                                    label = { Text(item.label) },
-                                )
-                            }
-                        }
-                    },
-                    content = screenContent,
-                )
             }
         }
     }
@@ -353,7 +364,7 @@ private fun ScreenContent(
                 diagnostics = diagnostics,
                 deviceAddress = bikeAssociation.bike?.address,
                 notificationAccessEnabled = notificationAccessEnabled,
-                onReconnect = onFindBike,
+                onReconnect = onReconnect,
             )
             TopLevelDestination.More -> SettingsScreen(
                 modifier = modifier,

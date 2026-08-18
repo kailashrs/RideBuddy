@@ -39,4 +39,5 @@
     <string name="protection_phase_ready">Ready</string>
     <string name="protection_path_stored_acceptance">Previously accepted</string>
     <string name="protection_path_challenge_indication">Challenge indication</string>
+    <string name="info_battery_optimization_pausing">Phone may pause the connection</string>
 </resources>

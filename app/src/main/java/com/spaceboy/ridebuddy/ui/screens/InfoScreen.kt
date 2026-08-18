@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CellTower
@@ -45,7 +46,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import com.spaceboy.ridebuddy.R
+import com.spaceboy.ridebuddy.ble.isRideBuddyIgnoringBatteryOptimizations
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
@@ -76,6 +79,8 @@ fun InfoScreen(
         if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
     )
     val protectionPhase = stringResource(diagnostics.protectionPhase.labelResource())
+    val context = LocalContext.current
+    val batteryOptimizedOut = !isRideBuddyIgnoringBatteryOptimizations(context)
     var currentElapsedRealtime by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(connected) {
         while (connected) {
@@ -129,27 +134,46 @@ fun InfoScreen(
 
         InfoSection(
             title = "Live Link Status",
-            rows = listOf(
-                InfoRowItem(
-                    "Telemetry",
-                    stringResource(
-                        if (telemetryFresh) R.string.telemetry_receiving else R.string.telemetry_waiting,
+            rows = buildList {
+                add(
+                    InfoRowItem(
+                        "Telemetry",
+                        stringResource(
+                            if (telemetryFresh) R.string.telemetry_receiving else R.string.telemetry_waiting,
+                        ),
+                        Icons.Outlined.Sensors,
                     ),
-                    Icons.Outlined.Sensors,
-                ),
-                InfoRowItem("Navigation", if (navigationConfigured) "Configured" else "Not configured", Icons.Outlined.Navigation),
-                InfoRowItem("Companion link", companionLinkStatus, Icons.Outlined.VerifiedUser),
-                InfoRowItem("Protection", protectionPhase, Icons.Outlined.VerifiedUser),
-                InfoRowItem("Signal strength", diagnostics.rssi?.let { "$it dBm" } ?: "—", Icons.Outlined.CellTower),
-                InfoRowItem("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz), Icons.Outlined.Speed),
-                InfoRowItem("Notification access", if (notificationAccessEnabled) "Enabled" else "Not enabled", Icons.Outlined.Notifications),
-                InfoRowItem("Last error", diagnostics.lastError ?: "None", Icons.Outlined.ErrorOutline),
-                InfoRowItem(
-                    "Error time",
-                    diagnostics.lastErrorAtMillis?.let { UnitFormatter.formatDateTime(it) } ?: "—",
-                    Icons.Outlined.AccessTime,
-                ),
-            ),
+                )
+                add(InfoRowItem("Navigation", if (navigationConfigured) "Configured" else "Not configured", Icons.Outlined.Navigation))
+                add(InfoRowItem("Companion link", companionLinkStatus, Icons.Outlined.VerifiedUser))
+                add(InfoRowItem("Protection", protectionPhase, Icons.Outlined.VerifiedUser))
+                if (batteryOptimizedOut) {
+                    add(
+                        InfoRowItem(
+                            "Battery optimization",
+                            stringResource(R.string.info_battery_optimization_pausing),
+                            Icons.Outlined.BatteryAlert,
+                        ),
+                    )
+                }
+                add(InfoRowItem("Signal strength", diagnostics.rssi?.let { "$it dBm" } ?: "—", Icons.Outlined.CellTower))
+                add(InfoRowItem("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz), Icons.Outlined.Speed))
+                add(
+                    InfoRowItem(
+                        "Notification access",
+                        if (notificationAccessEnabled) "Enabled" else "Not enabled",
+                        Icons.Outlined.Notifications,
+                    ),
+                )
+                add(InfoRowItem("Last error", diagnostics.lastError ?: "None", Icons.Outlined.ErrorOutline))
+                add(
+                    InfoRowItem(
+                        "Error time",
+                        diagnostics.lastErrorAtMillis?.let { UnitFormatter.formatDateTime(it) } ?: "—",
+                        Icons.Outlined.AccessTime,
+                    ),
+                )
+            },
         )
 
         InfoSection(

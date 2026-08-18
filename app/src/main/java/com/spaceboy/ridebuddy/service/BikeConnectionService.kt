@@ -101,6 +101,23 @@ class BikeConnectionService : Service() {
                 return START_NOT_STICKY
             }
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
+            ActionRestartConnect -> {
+                val address = intent.bluetoothAddressExtra()
+                val name = intent.getStringExtra(ExtraName)
+                if (address != null && !name.isNullOrBlank()) {
+                    enableLocationTrackingIfAllowed(
+                        launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false),
+                    )
+                    rememberBike(address, name)
+                    container.bikeConnection.connect(
+                        BikeConnectionTarget(address = address, deviceName = name, device = intent.bluetoothDeviceExtra()),
+                    )
+                } else {
+                    container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+            }
             ActionConnect -> {
                 val address = intent.bluetoothAddressExtra()
                 val name = intent.getStringExtra(ExtraName)
@@ -241,7 +258,7 @@ class BikeConnectionService : Service() {
         val connectionLabel = when (this) {
             is BikeConnectionState.Connected -> "Connected to $deviceName"
             is BikeConnectionState.Connecting -> "Connecting to ${deviceName ?: "bike"}"
-            is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
+            is BikeConnectionState.Authenticating -> "Authenticating $deviceName"
             is BikeConnectionState.Failed -> message
             BikeConnectionState.Scanning -> "Scanning"
             BikeConnectionState.Disconnected -> "Disconnected"
@@ -258,6 +275,7 @@ class BikeConnectionService : Service() {
         private const val ActionDisconnect = "disconnect"
         private const val ActionDeviceAbsent = "device_absent"
         private const val ActionEnableLocation = "enable_location"
+        private const val ActionRestartConnect = "restart_connect"
         private const val ExtraAddressBytes = "address_bytes"
         private const val ExtraDevice = "device"
         private const val ExtraName = "name"
@@ -275,7 +293,7 @@ class BikeConnectionService : Service() {
                 intent,
             )
             if (!started) {
-                context.appContainer.bikeConnection.notifyStartFailed(
+                context.appContainer.bikeConnection?.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -288,7 +306,7 @@ class BikeConnectionService : Service() {
                 Intent(context, BikeConnectionService::class.java).setAction(ActionDisconnect),
             )
             if (!started) {
-                context.appContainer.bikeConnection.disconnect()
+                context.appContainer.bikeConnection?.disconnect()
             }
             return started
         }
@@ -307,7 +325,36 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
             if (!started) {
-                context.appContainer.bikeConnection.notifyStartFailed(
+                context.appContainer.bikeConnection?.notifyStartFailed(
+                    "Unable to start connection service",
+                )
+            }
+            return started
+        }
+
+        /**
+         * User-initiated restart path. Use this when the foreground service has been
+         * stopped (after a final-state `BikeConnectionState.Failed`) and the rider presses
+         * the in-app `Reconnect` button. Distinct from [reconnect] because it always uses
+         * the dedicated [ActionRestartConnect] branch so the new foreground promotion runs
+         * before the GATT socket is opened; calling `reconnect` on an already-stopped
+         * service would otherwise race the binder thread against doze.
+         */
+        fun restartConnect(
+            context: Context,
+            bike: AssociatedBike,
+            launchedFromVisibleActivity: Boolean = true,
+        ): Boolean {
+            val started = ContextCompatBridge.startForegroundService(
+                context,
+                Intent(context, BikeConnectionService::class.java)
+                    .setAction(ActionRestartConnect)
+                    .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
+                    .putExtra(ExtraName, bike.name)
+                    .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
+            )
+            if (!started) {
+                context.appContainer.bikeConnection?.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -322,7 +369,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraAddressBytes, address.toByteArray()),
             )
             if (!started && AssociatedBikeStore(context).read()?.bluetoothAddress == address) {
-                context.appContainer.bikeConnection.disconnect()
+                context.appContainer.bikeConnection?.disconnect()
             }
             return started
         }

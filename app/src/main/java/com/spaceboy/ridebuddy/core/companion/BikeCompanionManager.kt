@@ -21,6 +21,8 @@ import androidx.core.content.edit
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.DiscoveredBike
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
+import com.spaceboy.ridebuddy.ble.hasUnsupportedTelemetryLayout
+import com.spaceboy.ridebuddy.ble.isApriliaBikeName
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,7 +83,7 @@ class BikeCompanionManager internal constructor(
         val request = AssociationRequest.Builder()
             .addDeviceFilter(
                 BluetoothLeDeviceFilter.Builder()
-                    .setNamePattern(com.spaceboy.ridebuddy.ble.ApriliaBikeNamePattern)
+                    .setNamePattern(com.spaceboy.ridebuddy.ble.CdmAcceptAllBikeNames)
                     .build(),
             )
             .setSingleDevice(false)
@@ -300,6 +302,10 @@ class BikeCompanionManager internal constructor(
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
+        if (!isAcceptableAssociationName(name)) {
+            rejectAssociation(name)
+            return null
+        }
         val bike = AssociatedBike(address, name, associationInfo.id)
         storeAssociation(bike)
         mutableState.update {
@@ -325,6 +331,10 @@ class BikeCompanionManager internal constructor(
         val name = advertisedName?.takeIf(String::isNotBlank)
             ?: runCatching { device.name }.getOrNull()?.takeIf(String::isNotBlank)
             ?: DefaultBikeName
+        if (!isAcceptableAssociationName(name)) {
+            rejectAssociation(name)
+            return null
+        }
         val bike = AssociatedBike(address, name)
         storeAssociation(bike)
         mutableState.update {
@@ -356,6 +366,24 @@ class BikeCompanionManager internal constructor(
     private fun fail(message: String, onFailure: (String) -> Unit) {
         mutableState.update { it.copy(associationInProgress = false, errorMessage = message) }
         onFailure(message)
+    }
+
+    /**
+     * After the user picks a device from the CDM picker, validate that it matches an
+     * RS 457/Tuono 457 name family and is not in the SR/MIA family whose telemetry layout
+     * is intentionally unsupported.
+     */
+    private fun isAcceptableAssociationName(name: String): Boolean {
+        if (name == DefaultBikeName) return true // System gave us only the generic display name.
+        if (name.hasUnsupportedTelemetryLayout()) return false
+        return name.isApriliaBikeName()
+    }
+
+    private fun rejectAssociation(name: String) {
+        val message = "The selected device '$name' is not a supported Aprilia RS 457 / Tuono 457"
+        mutableState.update {
+            it.copy(associationInProgress = false, errorMessage = message)
+        }
     }
 
     private fun storeAssociation(bike: AssociatedBike) {

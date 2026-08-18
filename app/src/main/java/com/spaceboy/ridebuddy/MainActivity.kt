@@ -246,6 +246,7 @@ class MainActivity : ComponentActivity() {
                         onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
                         onTestNavigationApiKey = viewModel::testNavigationApiKey,
                         onFindBike = ::requestBluetoothPermissionsAndScan,
+                        onReconnect = ::reconnectToSavedBike,
                         onConnectBike = ::connectBike,
                         onDisconnectBike = { BikeConnectionService.disconnect(this@MainActivity) },
                         onStartNavigation = ::startNavigation,
@@ -356,6 +357,23 @@ class MainActivity : ComponentActivity() {
         viewModel.stopBikeScan()
         appContainer.bikeCompanionManager.rememberLegacyBike(bike)
         if (!BikeConnectionService.connect(this, bike)) {
+            viewModel.showMessage("Unable to start connection service")
+        }
+    }
+
+    /**
+     * Wired to the InfoScreen `Reconnect` button. If a bike is already associated, this
+     * restarts the BikeConnectionService via [BikeConnectionService.restartConnect] so the
+     * foreground promotion happens before GATT begins. Falls back to the existing scan
+     * path when nothing is associated.
+     */
+    private fun reconnectToSavedBike() {
+        val bike = appContainer.bikeCompanionManager.state.value.bike
+        if (bike == null) {
+            requestBluetoothPermissionsAndScan()
+            return
+        }
+        if (!BikeConnectionService.restartConnect(this, bike, launchedFromVisibleActivity = true)) {
             viewModel.showMessage("Unable to start connection service")
         }
     }
