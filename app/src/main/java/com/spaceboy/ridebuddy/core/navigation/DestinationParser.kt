@@ -3,7 +3,6 @@ package com.spaceboy.ridebuddy.core.navigation
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
-import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -62,21 +61,16 @@ class DestinationParser(context: Context) {
         val query = extractNavigationQuery(value)
         val geocoder = Geocoder(appContext, Locale.getDefault())
         val address = withTimeoutOrNull(TimeoutMillis.toLong().milliseconds) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                suspendCancellableCoroutine { continuation ->
-                    geocoder.getFromLocationName(query, 1, object : Geocoder.GeocodeListener {
-                        override fun onGeocode(addresses: MutableList<Address>) {
-                            if (continuation.isActive) continuation.resume(addresses.firstOrNull())
-                        }
+            suspendCancellableCoroutine { continuation ->
+                geocoder.getFromLocationName(query, 1, object : Geocoder.GeocodeListener {
+                    override fun onGeocode(addresses: MutableList<Address>) {
+                        if (continuation.isActive) continuation.resume(addresses.firstOrNull())
+                    }
 
-                        override fun onError(errorMessage: String?) {
-                            if (continuation.isActive) continuation.resume(null)
-                        }
-                    })
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                withContext(Dispatchers.IO) { geocoder.getFromLocationName(query, 1)?.firstOrNull() }
+                    override fun onError(errorMessage: String?) {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+                })
             }
         }
         return if (address == null) Result.failure(IllegalArgumentException("Could not find that destination"))

@@ -1,9 +1,6 @@
 package com.spaceboy.ridebuddy.core.companion
 
-import android.annotation.SuppressLint
 import android.app.Activity
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.le.ScanResult
 import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothLeDeviceFilter
@@ -13,10 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
@@ -93,7 +86,6 @@ class BikeCompanionManager internal constructor(
 
             override fun onAssociationPending(intentSender: IntentSender) = launchApproval(intentSender)
 
-            @RequiresApi(Build.VERSION_CODES.TIRAMISU)
             override fun onAssociationCreated(associationInfo: AssociationInfo) {
                 accept(associationInfo)?.let(onAssociated)
             }
@@ -103,12 +95,7 @@ class BikeCompanionManager internal constructor(
             }
         }
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                companionManager.associate(request, appContext.mainExecutor, callback)
-            } else {
-                @Suppress("DEPRECATION")
-                companionManager.associate(request, callback, Handler(Looper.getMainLooper()))
-            }
+            companionManager.associate(request, appContext.mainExecutor, callback)
         }.onFailure { fail(it.message ?: "Could not start bike association", onFailure) }
     }
 
@@ -117,52 +104,35 @@ class BikeCompanionManager internal constructor(
             mutableState.update { it.copy(associationInProgress = false) }
             return null
         }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            data.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)
-                ?.let(::accept)
-        } else {
-            @Suppress("DEPRECATION")
-            when (val device = data.getParcelableExtra<android.os.Parcelable>(CompanionDeviceManager.EXTRA_DEVICE)) {
-                is ScanResult -> accept(device.device, device.scanRecord?.deviceName, device.rssi)
-                is BluetoothDevice -> accept(device, null, 0)
-                else -> null
+        return data.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)
+            ?.let(::accept)
+            .also {
+                if (it == null) mutableState.update { state ->
+                    state.copy(
+                        associationInProgress = false,
+                        errorMessage = "The selected device could not be read",
+                    )
+                }
             }
-        }.also {
-            if (it == null) mutableState.update { state ->
-                state.copy(
-                    associationInProgress = false,
-                    errorMessage = "The selected device could not be read",
-                )
-            }
-        }
     }
 
     fun refresh() {
         val companionManager = manager ?: return
         val stored = deviceStore.read()
         val refreshResult = runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val associations = companionManager.myAssociations
-                val selected = associations.firstOrNull { association ->
-                    association.bluetoothAddress() == stored?.bluetoothAddress
-                } ?: associations.singleOrNull()
-                selected?.let { association ->
-                    val address = association.bluetoothAddress() ?: return@let null
-                    AssociatedBike(
-                        bluetoothAddress = address,
-                        name = association.displayName?.toString()?.takeIf(String::isNotBlank)
-                            ?: stored?.name
-                            ?: DefaultBikeName,
-                        associationId = association.id,
-                    )
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val address =
-                    companionManager.associations.firstOrNull { it.equals(stored?.address, ignoreCase = true) }
-                        ?: companionManager.associations.singleOrNull()
-                address?.let(BluetoothAddress::parse)
-                    ?.let { AssociatedBike(it, stored?.name ?: DefaultBikeName) }
+            val associations = companionManager.myAssociations
+            val selected = associations.firstOrNull { association ->
+                association.bluetoothAddress() == stored?.bluetoothAddress
+            } ?: associations.singleOrNull()
+            selected?.let { association ->
+                val address = association.bluetoothAddress() ?: return@let null
+                AssociatedBike(
+                    bluetoothAddress = address,
+                    name = association.displayName?.toString()?.takeIf(String::isNotBlank)
+                        ?: stored?.name
+                        ?: DefaultBikeName,
+                    associationId = association.id,
+                )
             }
         }
         if (refreshResult.isFailure) {
@@ -198,15 +168,10 @@ class BikeCompanionManager internal constructor(
         val bike = state.value.bike ?: return
         if (state.value.observingPresence) return
         val result = runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-                val id = bike.associationId ?: return@runCatching false
-                companionManager.startObservingDevicePresence(
-                    ObservingDevicePresenceRequest.Builder().setAssociationId(id).build(),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                companionManager.startObservingDevicePresence(bike.address)
-            }
+            val id = bike.associationId ?: return@runCatching false
+            companionManager.startObservingDevicePresence(
+                ObservingDevicePresenceRequest.Builder().setAssociationId(id).build(),
+            )
             true
         }
         mutableState.update {
@@ -223,22 +188,16 @@ class BikeCompanionManager internal constructor(
         var disassociationSucceeded = companionManager != null
         if (companionManager != null && bike != null) {
             val observationStopped = runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && bike.associationId != null) {
-                    companionManager.stopObservingDevicePresence(
-                        ObservingDevicePresenceRequest.Builder().setAssociationId(bike.associationId).build(),
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    companionManager.stopObservingDevicePresence(bike.address)
-                }
+                val id = bike.associationId ?: return@runCatching
+                companionManager.stopObservingDevicePresence(
+                    ObservingDevicePresenceRequest.Builder().setAssociationId(id).build(),
+                )
+                Unit
             }.isSuccess
             val disassociation = runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && bike.associationId != null) {
-                    companionManager.disassociate(bike.associationId)
-                } else {
-                    @Suppress("DEPRECATION")
-                    companionManager.disassociate(bike.address)
-                }
+                val id = bike.associationId ?: return@runCatching Unit
+                companionManager.disassociate(id)
+                Unit
             }
             disassociationSucceeded = disassociation.isSuccess
             if (!disassociationSucceeded) {
@@ -286,10 +245,8 @@ class BikeCompanionManager internal constructor(
         return state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
     }
 
-    @SuppressLint("MissingPermission")
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
-        val scanResult = if (Build.VERSION.SDK_INT >= 34) associationInfo.associatedDevice?.bleDevice else null
+        val scanResult = associationInfo.associatedDevice?.bleDevice
         val address = associationInfo.bluetoothAddress() ?: return null
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
@@ -311,37 +268,9 @@ class BikeCompanionManager internal constructor(
         return bike
     }
 
-    @SuppressLint("MissingPermission")
-    private fun accept(device: BluetoothDevice, advertisedName: String?, rssi: Int): AssociatedBike? {
-        val address = BluetoothAddress.parse(device.address) ?: return null
-        val name = advertisedName?.takeIf(String::isNotBlank)
-            ?: runCatching { device.name }.getOrNull()?.takeIf(String::isNotBlank)
-            ?: DefaultBikeName
-        if (!isAcceptableAssociationName(name)) {
-            rejectAssociation(name)
-            return null
-        }
-        val bike = AssociatedBike(address, name)
-        storeAssociation(bike)
-        mutableState.update {
-            it.copy(
-                bike = bike,
-                associationInProgress = false,
-                errorMessage = null,
-            )
-        }
-        ensurePresenceObservation()
-        return bike
-    }
-
-    @SuppressLint("MissingPermission")
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun AssociationInfo.bluetoothAddress(): BluetoothAddress? {
         BluetoothAddress.fromBytes(deviceMacAddress?.toByteArray())?.let { return it }
-        if (Build.VERSION.SDK_INT >= 34) {
-            return associatedDevice?.bleDevice?.device?.address?.let(BluetoothAddress::parse)
-        }
-        return null
+        return associatedDevice?.bleDevice?.device?.address?.let(BluetoothAddress::parse)
     }
 
     private fun fail(message: String, onFailure: (String) -> Unit) {
@@ -351,8 +280,9 @@ class BikeCompanionManager internal constructor(
 
     /**
      * After the user picks a device from the CDM picker, validate that it matches an
-     * RS 457/Tuono 457 name family and is not in the SR/MIA family whose telemetry layout
-     * is intentionally unsupported.
+     * RS 457/Tuono 457 name family and is not in the SR family whose telemetry layout
+     * is intentionally unsupported. MIA is intentionally not matched either way (the
+     * OEM app does not recognise it).
      */
     private fun isAcceptableAssociationName(name: String): Boolean {
         if (name == DefaultBikeName) return true // System gave us only the generic display name.

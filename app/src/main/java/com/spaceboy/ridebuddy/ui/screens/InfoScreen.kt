@@ -226,7 +226,7 @@ private fun InfoSection(title: String, rows: List<InfoRowItem>) {
                             )
                         },
                         leadingContent = {
-                            Box(modifier = Modifier.padding(top = 2.dp)) {
+                            Box(modifier = Modifier.padding(top = 4.dp)) {
                                 Icon(
                                     imageVector = row.icon,
                                     contentDescription = null,

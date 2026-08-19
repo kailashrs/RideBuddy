@@ -97,7 +97,7 @@ fun InsightsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Total distance", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     UnitFormatter.distance(insights.totalDistanceKilometres, units, locale),
@@ -193,9 +193,9 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
 
 @Composable
 private fun MetricGrid(metrics: List<Triple<String, String, ImageVector>>) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         metrics.chunked(2).forEach { row ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { (label, value, icon) ->
                     OutlinedCard(modifier = Modifier.weight(1f)) {
                         Column(modifier = Modifier.padding(16.dp)) {

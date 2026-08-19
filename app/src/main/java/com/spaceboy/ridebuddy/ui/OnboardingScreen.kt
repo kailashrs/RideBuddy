@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,7 +68,7 @@ fun OnboardingScreen(
     val steps = 7
     Scaffold { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(28.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             LinearProgressIndicator(
@@ -194,10 +195,10 @@ private fun OnboardingPage(
     }
     if (readiness.isNotEmpty()) {
         Spacer(Modifier.height(20.dp))
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             readiness.forEach { (label, ready) ->
-                androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             if (ready) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
                             contentDescription = if (ready) "Ready" else "Not configured",

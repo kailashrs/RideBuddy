@@ -11,10 +11,9 @@ import org.junit.Test
 class PowerOptimizationTest {
     @Test
     fun helperIsAnExtensionOnContext() {
-        // Static reference: ensures the helper remains a top-level extension function on Context.
+        // Static reference: the type annotation enforces that the helper remains a
+        // top-level extension function on Context. The reference itself is non-null by
+        // construction, so no runtime assertion is needed.
         val signature: Context.() -> Boolean = ::isRideBuddyIgnoringBatteryOptimizations
-        assert(signature != null) {
-            "isRideBuddyIgnoringBatteryOptimizations must remain a Context extension"
-        }
     }
 }

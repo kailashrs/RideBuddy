@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -50,7 +49,7 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private var notificationAccessEnabled by mutableStateOf(false)
-    private var appNotificationPermissionGranted by mutableStateOf(Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
+    private var appNotificationPermissionGranted by mutableStateOf(false)
     private var nearbyDeviceAccessGranted by mutableStateOf(false)
     private var preciseLocationGranted by mutableStateOf(false)
     private var legacyCallPermissionGranted by mutableStateOf(false)
@@ -200,7 +199,7 @@ class MainActivity : ComponentActivity() {
                         navigationConfigured = uiState.navigationKey.isConfigured,
                         onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
                         onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
-                        onAssociateBike = ::requestBluetoothPermissionsAndScan,
+                        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
                         onOpenNotificationAccess = ::openNotificationAccessSettings,
                         onRequestAppNotificationPermission = ::requestAppNotificationPermission,
                         onEnableLegacyCalls = { setLegacyCallControls(true) },
@@ -258,7 +257,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.showMessage("Standard call controls are enabled")
                             }
                         },
-                        onAssociateBike = ::requestBluetoothPermissionsAndScan,
+                        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
                         onForgetBike = ::forgetBike,
                         onRideSelected = { ride ->
                             startActivity(RideDetailActivity.intent(this@MainActivity, ride.id))
@@ -318,7 +317,7 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
         legacyCallPermissionGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) ==
             PackageManager.PERMISSION_GRANTED
-        appNotificationPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        appNotificationPermissionGranted =
             ContextCompat.checkSelfPermission(this, NotificationPermission) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -327,14 +326,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestAppNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appNotificationPermissionLauncher.launch(NotificationPermission)
-        } else {
-            appNotificationPermissionGranted = true
-        }
+        appNotificationPermissionLauncher.launch(NotificationPermission)
     }
 
-    private fun requestBluetoothPermissionsAndScan() {
+    private fun requestBluetoothPermissionsAndAssociate() {
         val requiredPermissions = requiredNearbyDevicePermissions()
         val missingPermissions = requiredPermissions.filter { permission ->
             ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
@@ -356,7 +351,7 @@ class MainActivity : ComponentActivity() {
     private fun reconnectToSavedBike() {
         val bike = appContainer.bikeCompanionManager.state.value.bike
         if (bike == null) {
-            requestBluetoothPermissionsAndScan()
+            requestBluetoothPermissionsAndAssociate()
             return
         }
         if (!BikeConnectionService.restartConnect(this, bike, launchedFromVisibleActivity = true)) {

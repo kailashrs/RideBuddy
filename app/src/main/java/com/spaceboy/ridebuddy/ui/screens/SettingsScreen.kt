@@ -51,6 +51,8 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -205,7 +207,15 @@ fun SettingsScreen(
             onDismissRequest = { confirmForget = false },
             title = { Text("Forget this bike?") },
             text = { Text("The app will stop reconnecting automatically. You can associate the bike again at any time.") },
-            confirmButton = { TextButton(onClick = { confirmForget = false; onForgetBike() }) { Text("Forget") } },
+            confirmButton = {
+                Button(
+                    onClick = { confirmForget = false; onForgetBike() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) { Text("Forget") }
+            },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )
     }
@@ -215,10 +225,16 @@ fun SettingsScreen(
             title = { Text("Clear all ride history?") },
             text = { Text("This permanently deletes $rideCount saved rides, their telemetry samples, route data, and performance records from this device. Export anything you want to keep first.") },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmClearRideHistory = false
-                    onClearRideHistory()
-                }) { Text("Delete history") }
+                Button(
+                    onClick = {
+                        confirmClearRideHistory = false
+                        onClearRideHistory()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) { Text("Delete history") }
             },
             dismissButton = { TextButton(onClick = { confirmClearRideHistory = false }) { Text("Cancel") } },
         )
@@ -362,7 +378,7 @@ fun SettingsScreen(
                 title = bikeAssociation.bike?.name ?: "Pair your motorcycle",
                 supportingText = when {
                     bikeAssociation.associationInProgress -> "Waiting for Bluetooth permission"
-                    bikeAssociation.bike == null && !bikeAssociation.supported -> "Standard pairing unavailable; using direct Bluetooth scan"
+                    bikeAssociation.bike == null && !bikeAssociation.supported -> "Companion device setup is unavailable on this phone"
                     bikeAssociation.bike == null -> "Pair with nearby motorcycle via Bluetooth"
                     bikeAssociation.observingPresence -> "Paired • automatic reconnection enabled"
                     else -> "Paired • tap to enable automatic reconnection"
@@ -438,7 +454,7 @@ fun SettingsScreen(
                     )
                 },
                 leadingContent = {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(Icons.Outlined.Apps, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },
@@ -623,7 +639,7 @@ fun SettingsScreen(
                     )
                 },
                 leadingContent = {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },
@@ -663,7 +679,7 @@ fun SettingsScreen(
                     )
                 },
                 leadingContent = {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(Icons.AutoMirrored.Outlined.ReceiptLong, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },
@@ -678,7 +694,7 @@ fun SettingsScreen(
                     Text("Send diagnostic display writes while the motorcycle is parked. This does not change feature availability.")
                 },
                 leadingContent = {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(Icons.Outlined.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },
@@ -713,7 +729,7 @@ fun SettingsScreen(
                 headlineContent = { Text("Ride history") },
                 supportingContent = { Text("$rideCount saved rides stored on this device") },
                 leadingContent = {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(Icons.Outlined.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },

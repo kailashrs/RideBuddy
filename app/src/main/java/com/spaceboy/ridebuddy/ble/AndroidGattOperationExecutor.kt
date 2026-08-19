@@ -5,7 +5,6 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothStatusCodes
-import android.os.Build
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
 
 internal fun requestedWriteType(
@@ -58,15 +57,7 @@ internal class AndroidGattOperationExecutor(
         } else {
             BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            run {
-                descriptor.value = value
-                gatt.writeDescriptor(descriptor)
-            }
-        }
+        return gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
     }
 
     private fun writeCharacteristic(
@@ -76,16 +67,7 @@ internal class AndroidGattOperationExecutor(
         mode: BikeWriteMode,
     ): Boolean {
         val writeType = requestedWriteType(characteristic, mode) ?: return false
-        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeCharacteristic(characteristic, value, writeType) == BluetoothStatusCodes.SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            run {
-                characteristic.writeType = writeType
-                characteristic.value = value
-                gatt.writeCharacteristic(characteristic)
-            }
-        }
+        val started = gatt.writeCharacteristic(characteristic, value, writeType) == BluetoothStatusCodes.SUCCESS
         captureRecorder.record(
             BleCaptureDirection.Outbound,
             characteristic.uuid,

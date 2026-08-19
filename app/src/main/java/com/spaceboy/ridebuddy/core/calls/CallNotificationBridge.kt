@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Person
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
 import android.telecom.TelecomManager
@@ -147,12 +146,10 @@ class CallNotificationBridge(
         val number = candidateNumber.filter { it.isDigit() || it == '+' }
             .takeIf { it.count(Char::isDigit) >= 5 }
             .orEmpty()
-        val callStyleIncoming = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            notification.extras.getInt(
-                Notification.EXTRA_CALL_TYPE,
-                Notification.CallStyle.CALL_TYPE_UNKNOWN,
-            ) == Notification.CallStyle.CALL_TYPE_INCOMING
-        } else false
+        val callStyleIncoming = notification.extras.getInt(
+            Notification.EXTRA_CALL_TYPE,
+            Notification.CallStyle.CALL_TYPE_UNKNOWN,
+        ) == Notification.CallStyle.CALL_TYPE_INCOMING
         synchronized(callLock) {
             applyFeatureSettingsLocked(settings.callFeatureSettings())
             activeCall.value = ActiveCallState(
@@ -323,15 +320,11 @@ class CallNotificationBridge(
         return CallIntents(answer, decline, hangUp)
     }
 
-    @Suppress("DEPRECATION")
     private fun Bundle.pendingIntent(key: String): PendingIntent? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) getParcelable(key, PendingIntent::class.java)
-        else getParcelable(key)
+        getParcelable(key, PendingIntent::class.java)
 
-    @Suppress("DEPRECATION")
     private fun Bundle.person(key: String): Person? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) getParcelable(key, Person::class.java)
-        else getParcelable(key)
+        getParcelable(key, Person::class.java)
 
     private data class CallIntents(
         val answer: PendingIntent? = null,

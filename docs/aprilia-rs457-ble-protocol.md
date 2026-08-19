@@ -4,9 +4,9 @@ Status: static analysis of `apriliaindia.apk` (package `com.piaggio.apriliaindia
 
 ## Executive summary
 
-The OEM app is a conventional Android BLE central. It scans for devices whose names begin with `RS457_ID` or `SR_ID`, connects with LE transport, discovers all services, and locates characteristics by UUID suffix rather than by a hardcoded service UUID.
+The OEM app is a conventional Android BLE central. It scans for devices whose names contain the substring `RS457_ID` or `SR_ID` (case-insensitive via `Locale.ROOT` upper-casing, then `String.contains`), connects with LE transport, discovers all services, and locates characteristics by UUID suffix rather than by a hardcoded service UUID.
 
-RideBuddy intentionally accepts only the RS 457/Tuono 457 name families for now. The OEM app uses a separate SR telemetry parser, so accepting SR/MIA advertisements without a model-specific decoder could record plausible-looking but incorrect ride data.
+RideBuddy intentionally accepts only the RS 457/Tuono 457 name family for now. The OEM app uses a separate SR telemetry parser, so accepting SR family advertisements without a model-specific decoder could record plausible-looking but incorrect ride data.
 
 The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. The dashboard first requires an Android Bluetooth bond. For a first-time protected connection it enables indications on `8610`, handles the challenge in its characteristic-change callback, writes the corresponding six-byte response to `8620`, and persists a protection-accepted flag. Later connections with that flag bypass `8610` and enable the normal subscription set directly. Generic read callback code exists elsewhere in the APK, but the India dashboard connection path does not proactively read `8610`, the VIN, or the software version.
 
@@ -33,10 +33,10 @@ The CCCD used for notification/indication subscription is the standard descripto
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
 | `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`. |
-| `8210` | phone → bike | current/next navigation pictogram | Contains current icon, roundabout exit, next icon, and a three-byte distance field. |
+| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceField[3], 0x2E]` (9 bytes total). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. |
 | `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x2E]`. |
 | `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, timeField[3], distanceField[3], 0x2E]`; the exact field interpretation needs TFT validation. |
-| `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, length, ASCII bytes..., 0x2E]`; row IDs are 0, 1, and 2 and the OEM limits each row to 16 characters. |
+| `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4 (i.e. the total packet size including the four framing bytes), capped at 20 for the 16-character row limit. |
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x2E]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x2E]`; observed state values include 80, 82, 83, and 87. |
 | `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x2E]`; `132` is emitted by the OEM flow for a status-style update. |

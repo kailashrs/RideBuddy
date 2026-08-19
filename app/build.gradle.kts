@@ -27,8 +27,8 @@ android {
         // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36
-        versionCode = 100
-        versionName = "0.1.0"
+        versionCode = 101
+        versionName = "0.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -89,9 +89,9 @@ android {
         animationsDisabled = true
         managedDevices {
             localDevices {
-                create("pixel2api35") {
+                create("pixel2api36") {
                     device = "Pixel 2"
-                    apiLevel = 35
+                    apiLevel = 36
                     systemImageSource = "aosp-atd"
                 }
             }

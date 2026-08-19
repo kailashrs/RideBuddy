@@ -6,10 +6,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.Manifest
@@ -109,7 +107,7 @@ class BikeConnectionService : Service() {
                     )
                     rememberBike(address, name)
                     container.bikeConnection.connect(
-                        BikeConnectionTarget(address = address, deviceName = name, device = intent.bluetoothDeviceExtra()),
+                        BikeConnectionTarget(address = address, deviceName = name),
                     )
                 } else {
                     container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
@@ -187,13 +185,6 @@ class BikeConnectionService : Service() {
     private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
         BluetoothAddress.fromBytes(getByteArrayExtra(ExtraAddressBytes))
 
-    @Suppress("DEPRECATION")
-    private fun Intent.bluetoothDeviceExtra(): BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33) {
-        getParcelableExtra(ExtraDevice, BluetoothDevice::class.java)
-    } else {
-        getParcelableExtra(ExtraDevice)
-    }
-
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(ChannelId, "Bike connection", NotificationManager.IMPORTANCE_LOW),
@@ -247,7 +238,6 @@ class BikeConnectionService : Service() {
         private const val ActionEnableLocation = "enable_location"
         private const val ActionRestartConnect = "restart_connect"
         private const val ExtraAddressBytes = "address_bytes"
-        private const val ExtraDevice = "device"
         private const val ExtraName = "name"
         private const val ExtraVisibleActivityLaunch = "visible_activity_launch"
 
@@ -257,7 +247,7 @@ class BikeConnectionService : Service() {
                 Intent(context, BikeConnectionService::class.java).setAction(ActionDisconnect),
             )
             if (!started) {
-                context.appContainer.bikeConnection?.disconnect()
+                context.appContainer.bikeConnection.disconnect()
             }
             return started
         }
@@ -276,7 +266,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
             if (!started) {
-                context.appContainer.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -305,7 +295,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
             )
             if (!started) {
-                context.appContainer.bikeConnection?.notifyStartFailed(
+                context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
                 )
             }
@@ -320,7 +310,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraAddressBytes, address.toByteArray()),
             )
             if (!started && AssociatedBikeStore(context).read()?.bluetoothAddress == address) {
-                context.appContainer.bikeConnection?.disconnect()
+                context.appContainer.bikeConnection.disconnect()
             }
             return started
         }

@@ -3,11 +3,8 @@ package com.spaceboy.ridebuddy.core.location
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
-import android.os.Build
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -20,21 +17,16 @@ class RideLocationLabeler(context: Context) {
         if (latitude == null || longitude == null) return null
         val address = try {
             withTimeoutOrNull(GeocoderTimeoutMillis.milliseconds) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    suspendCancellableCoroutine { continuation ->
-                        geocoder.getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
-                            override fun onGeocode(addresses: MutableList<Address>) {
-                                if (continuation.isActive) continuation.resume(addresses.firstOrNull())
-                            }
+                suspendCancellableCoroutine<Address?> { continuation ->
+                    geocoder.getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<Address>) {
+                            if (continuation.isActive) continuation.resume(addresses.firstOrNull())
+                        }
 
-                            override fun onError(errorMessage: String?) {
-                                if (continuation.isActive) continuation.resume(null)
-                            }
-                        })
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    withContext(Dispatchers.IO) { geocoder.getFromLocation(latitude, longitude, 1)?.firstOrNull() }
+                        override fun onError(errorMessage: String?) {
+                            if (continuation.isActive) continuation.resume(null)
+                        }
+                    })
                 }
             }
         } catch (cancelled: CancellationException) {

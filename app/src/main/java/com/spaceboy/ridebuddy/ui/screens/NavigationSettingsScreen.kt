@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Toll
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -194,7 +195,7 @@ fun NavigationSettingsScreen(
                 ) {
                     if (state.isSaving) {
                         CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 10.dp),
+                            modifier = Modifier.padding(end = 12.dp),
                             strokeWidth = 2.dp,
                         )
                     }
@@ -204,13 +205,17 @@ fun NavigationSettingsScreen(
             if (state.isConfigured) {
                 Row(modifier = Modifier.align(Alignment.End)) {
                     TextButton(onClick = onTest, enabled = !state.isSaving) { Text("Test setup") }
-                    TextButton(
+                    androidx.compose.material3.Button(
                         onClick = {
                             apiKey = ""
                             showApiKey = false
                             onRemove()
                         },
                         enabled = !state.isSaving,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
                     ) { Text("Remove key") }
                 }
             }
@@ -264,7 +269,7 @@ private fun PreferenceSwitch(
         headlineContent = { Text(title) },
         supportingContent = { Text(supporting) },
         leadingContent = {
-            Box(modifier = Modifier.padding(top = 2.dp)) {
+            Box(modifier = Modifier.padding(top = 4.dp)) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,

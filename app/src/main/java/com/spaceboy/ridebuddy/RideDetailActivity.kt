@@ -18,6 +18,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.LazyListPrefetchScope
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.LocationOn
@@ -32,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -41,17 +47,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import android.content.ComponentCallbacks2
-import android.content.res.Configuration
 import androidx.lifecycle.lifecycleScope
 import androidx.core.net.toUri
 import com.spaceboy.ridebuddy.data.Ride
@@ -73,6 +73,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMapOptions
 import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
@@ -138,7 +139,9 @@ class RideDetailActivity : ComponentActivity() {
         loadRide(rideId)
         setContent {
             Rs457Theme(themeMode = appSettings.themeMode, dynamicColor = appSettings.dynamicColor, highContrast = appSettings.highContrast) {
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 Scaffold(
+                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
                     topBar = {
                         TopAppBar(
                             title = { Text("Ride details") },
@@ -147,6 +150,7 @@ class RideDetailActivity : ComponentActivity() {
                                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
                                 }
                             },
+                            scrollBehavior = scrollBehavior,
                         )
                     },
                 ) { padding ->
@@ -318,7 +322,31 @@ private const val MaxChartPoints = 600
 private const val MaxRoutePoints = 1_000
 private const val MaxVisibleEvents = 20
 
+/**
+ * No-op prefetch strategy used to bypass the LazyColumn prefetch scheduler.
+ *
+ * The AndroidView that hosts a Google Maps `MapView` inside [RouteCard] is expensive
+ * to instantiate (loads the Maps SDK, allocates a GL surface) and races with
+ * `AndroidPrefetchScheduler`'s cancellation path when the user scrolls. The race
+ * throws `IllegalArgumentException: Cannot disable reuse from root if it was caused
+ * by other groups` from `GapComposer.endReuseFromRoot$runtime` and crashes the
+ * activity. Disabling prefetch via `rememberLazyListState(prefetchStrategy = …)`
+ * is the documented Compose mitigation when an `AndroidView` cannot tolerate
+ * being constructed inside a paused prefetch composition.
+ *
+ * We override only the callback hooks (not `prefetchScheduler`) — the default
+ * scheduler is attached internally, but with no-op callbacks it never receives
+ * any candidate index to schedule.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private val NoOpLazyListPrefetchStrategy = object : LazyListPrefetchStrategy {
+    override fun LazyListPrefetchScope.onScroll(delta: Float, layoutInfo: LazyListLayoutInfo) = Unit
+    override fun LazyListPrefetchScope.onVisibleItemsUpdated(layoutInfo: LazyListLayoutInfo) = Unit
+    override fun NestedPrefetchScope.onNestedPrefetch(firstVisibleItemIndex: Int) = Unit
+}
+
 @androidx.compose.runtime.Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun RideDetailContent(
     data: RideDetailUiData,
     units: DistanceUnits,
@@ -330,17 +358,25 @@ private fun RideDetailContent(
 ) {
     val ride = data.ride
     val locale = LocalConfiguration.current.locales[0]
+    // Prefetch is disabled because the RouteCard item hosts an AndroidView(MapView)
+    // that races with AndroidPrefetchScheduler's cancellation (see NoOpLazyListPrefetchStrategy).
+    val listState = rememberLazyListState(prefetchStrategy = NoOpLazyListPrefetchStrategy)
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
+        item(key = "header_info", contentType = "header") {
             Text(UnitFormatter.formatDateTime(ride.startedAtMillis), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text("${UnitFormatter.distance(ride.distanceKilometres, units, locale)} • ${formatDuration(ride.durationMillis)} • ${UnitFormatter.speed(ride.averageSpeedKph, units, locale)} average", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (data.routePoints.size > 1) item { RouteCard(data.routePoints) }
-        item {
+        if (data.routePoints.size > 1) {
+            item(key = "route_card", contentType = "route_map") {
+                RouteCard(data.routePoints)
+            }
+        }
+        item(key = "ride_summary", contentType = "summary_card") {
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride summary", style = MaterialTheme.typography.titleMedium)
@@ -352,11 +388,19 @@ private fun RideDetailContent(
                 }
             }
         }
-        item { TelemetryChart("Speed", UnitFormatter.speedUnit(units), data.speedValues) }
-        item { TelemetryChart("Engine speed", "rpm", data.rpmValues) }
-        item { TelemetryChart("Throttle", "%", data.throttleValues) }
-        item { TelemetryChart("Mileage", UnitFormatter.mileageUnit(units), data.mileageValues) }
-        item {
+        item(key = "chart_speed", contentType = "telemetry_chart") {
+            TelemetryChart("Speed", UnitFormatter.speedUnit(units), data.speedValues)
+        }
+        item(key = "chart_rpm", contentType = "telemetry_chart") {
+            TelemetryChart("Engine speed", "rpm", data.rpmValues)
+        }
+        item(key = "chart_throttle", contentType = "telemetry_chart") {
+            TelemetryChart("Throttle", "%", data.throttleValues)
+        }
+        item(key = "chart_mileage", contentType = "telemetry_chart") {
+            TelemetryChart("Mileage", UnitFormatter.mileageUnit(units), data.mileageValues)
+        }
+        item(key = "ride_events", contentType = "events_card") {
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride events", style = MaterialTheme.typography.titleMedium)
@@ -368,13 +412,13 @@ private fun RideDetailContent(
                 }
             }
         }
-        item {
+        item(key = "export_buttons", contentType = "action_buttons") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onExportCsv, modifier = Modifier.weight(1f), enabled = data.hasSamples) { Text("Export CSV") }
                 Button(onClick = onExportGpx, modifier = Modifier.weight(1f), enabled = data.hasLocations) { Text("Export GPX") }
             }
         }
-        item {
+        item(key = "share_buttons", contentType = "action_buttons") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Outlined.Share, contentDescription = null)
@@ -393,97 +437,52 @@ private fun RideDetailContent(
 @Suppress("DEPRECATION")
 private fun RouteCard(points: List<Pair<Double, Double>>) {
     val color = MaterialTheme.colorScheme.primary
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val mapState = rememberSaveable { Bundle() }
-    val mapView = remember { MapView(context).apply { onCreate(mapState) } }
-    DisposableEffect(mapView, lifecycleOwner) {
-        var started = false
-        var resumed = false
-        var destroyed = false
-        fun start() {
-            if (!started && !destroyed) {
-                mapView.onStart()
-                started = true
-            }
-        }
-        fun resume() {
-            start()
-            if (!resumed && !destroyed) {
-                mapView.onResume()
-                resumed = true
-            }
-        }
-        fun pause() {
-            if (resumed && !destroyed) {
-                mapView.onPause()
-                resumed = false
-            }
-        }
-        fun stop() {
-            pause()
-            if (started && !destroyed) {
-                mapView.onStop()
-                started = false
-            }
-        }
-        fun destroy() {
-            if (destroyed) return
-            stop()
-            mapView.onSaveInstanceState(mapState)
-            mapView.onDestroy()
-            destroyed = true
-        }
-
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> start()
-                Lifecycle.Event.ON_RESUME -> resume()
-                Lifecycle.Event.ON_PAUSE -> pause()
-                Lifecycle.Event.ON_STOP -> stop()
-                Lifecycle.Event.ON_DESTROY -> destroy()
-                else -> Unit
-            }
-        }
-        val memoryCallbacks = object : ComponentCallbacks2 {
-            override fun onTrimMemory(level: Int) {
-                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) mapView.onLowMemory()
-            }
-
-            @Suppress("OVERRIDE_DEPRECATION")
-            override fun onLowMemory() = mapView.onLowMemory()
-            override fun onConfigurationChanged(newConfig: Configuration) = Unit
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        context.applicationContext.registerComponentCallbacks(memoryCallbacks)
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) start()
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resume()
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            context.applicationContext.unregisterComponentCallbacks(memoryCallbacks)
-            destroy()
-        }
-    }
+    val polylineColor = remember(color) { color.toArgb() }
+    val cameraPaddingPx = with(LocalDensity.current) { 64.dp.toPx().toInt() }
+    // Hoist the route + bounds so update() does not redo the projection on every recomposition.
+    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
+    val bounds = remember(route) { LatLngBounds.builder().apply { route.forEach(::include) }.build() }
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Text("Recorded route", style = MaterialTheme.typography.titleMedium)
             AndroidView(
-                factory = { mapView },
+                // Lite Mode avoids the OpenGL surface spin-up that the full map performs on
+                // every scroll, and is the documented best practice for MapView embedded in a
+                // scrollable list.
+                factory = {
+                    MapView(it, GoogleMapOptions().liteMode(true)).apply { onCreate(null) }
+                },
                 modifier = Modifier.fillMaxWidth().height(240.dp).padding(top = 12.dp)
                     .semantics { contentDescription = "Interactive map of the recorded ride" },
                 update = { view ->
                     view.getMapAsync { map ->
                         map.clear()
-                        val route = points.map { LatLng(it.first, it.second) }
-                        map.addPolyline(PolylineOptions().addAll(route).color(color.toArgb()).width(7f))
+                        map.addPolyline(PolylineOptions().addAll(route).color(polylineColor).width(7f))
                         map.addMarker(MarkerOptions().position(route.first()).title("Start"))
                         map.addMarker(MarkerOptions().position(route.last()).title("Parking location"))
-                        val bounds = LatLngBounds.builder().apply { route.forEach(::include) }.build()
                         map.setOnMapLoadedCallback {
-                            val update = CameraUpdateFactory.newLatLngBounds(bounds, 64)
-                            map.moveCamera(update)
+                            // Guard against the 0x0 size trap: newLatLngBounds throws
+                            // IllegalStateException when the view has not been laid out yet
+                            // (common during prefetch or initial measure).
+                            if (view.width > 0 && view.height > 0) {
+                                map.moveCamera(
+                                    CameraUpdateFactory.newLatLngBounds(
+                                        bounds,
+                                        view.width,
+                                        view.height,
+                                        cameraPaddingPx,
+                                    ),
+                                )
+                            }
                         }
                     }
+                },
+                onRelease = { view ->
+                    // Documented Compose 1.4+ cleanup hook for AndroidView in lazy lists:
+                    // destroys the underlying MapView when the item is recycled by the
+                    // LazyColumn. The Lite Mode snapshot is fully rebuilt from `points` on
+                    // every inflation, so we do not need to persist map state.
+                    view.onDestroy()
                 },
             )
         }
@@ -495,7 +494,7 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double>) {
     val color = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(20.dp)) {
             val maximum = values.maxOrNull() ?: 0.0
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text("Peak %.1f %s".format(maximum, unit), color = MaterialTheme.colorScheme.onSurfaceVariant)

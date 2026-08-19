@@ -300,7 +300,7 @@ internal class AndroidBikeConnection(
         }
 
         val device = try {
-            target.device ?: adapter.getRemoteDevice(target.address.toByteArray())
+            adapter.getRemoteDevice(target.address.toByteArray())
         } catch (error: SecurityException) {
             log("Bluetooth device access failed: ${error.javaClass.simpleName}")
             fail("Allow Nearby devices to connect to the motorcycle")
@@ -473,25 +473,11 @@ internal class AndroidBikeConnection(
             handleProtectionAction(protectionSession?.begin() ?: ProtectionAction.Fail("Authentication session is missing"))
         }
 
-        @Deprecated("Deprecated in API 33")
-        @Suppress("DEPRECATION")
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            onNotification(gatt, characteristic.uuid, characteristic.value?.copyOf() ?: return)
-        }
-
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
         ) = onNotification(gatt, characteristic.uuid, value.copyOf())
-
-        @Deprecated("Deprecated in API 33")
-        @Suppress("DEPRECATION")
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int,
-        ) = onRead(gatt, characteristic.uuid, characteristic.value?.copyOf() ?: byteArrayOf(), status)
 
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,

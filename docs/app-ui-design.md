@@ -37,7 +37,7 @@ Keep setup linear and explain why each permission is needed.
 2. Bluetooth permission and explanation.
 3. Location permission and explanation for routes and ride recording.
 4. Optional notification access and legacy call-compatibility permission.
-5. Scan for a bike.
+5. Associate the bike via the system CompanionDeviceManager picker.
 6. Confirm the detected bike name and last four address characters.
 7. Pair and authenticate.
 8. If no Google Navigation API key is configured, offer an optional “Set up navigation” step. Bike connection and telemetry remain usable without it.
@@ -355,7 +355,7 @@ Priority order:
 
 Use Kotlin with Jetpack Compose and Material 3 for the new app. Keep these modules separate:
 
-- `ble`: scanning, pairing, protection handshake, GATT scheduling, packet codecs.
+- `ble`: CDM-driven pairing, protection handshake, GATT scheduling, packet codecs.
 - `telemetry`: frame parsing and derived ride metrics.
 - `navigation`: destination sharing, Google Navigation SDK, maneuver mapping.
 - `ride`: automatic lifecycle and local persistence.

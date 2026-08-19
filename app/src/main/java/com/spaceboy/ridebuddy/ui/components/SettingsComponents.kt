@@ -52,7 +52,7 @@ internal fun SettingsSliderRow(
             supportingContent = { Text(supportingText) },
             leadingContent = icon?.let {
                 {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -90,7 +90,7 @@ internal fun <T> SettingsChoiceRow(
             headlineContent = { Text(title) },
             leadingContent = icon?.let {
                 {
-                    Box(modifier = Modifier.padding(top = 2.dp)) {
+                    Box(modifier = Modifier.padding(top = 4.dp)) {
                         Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -130,7 +130,7 @@ internal fun SettingsSwitchRow(
         supportingContent = { Text(supportingText) },
         leadingContent = icon?.let {
             {
-                Box(modifier = Modifier.padding(top = 2.dp)) {
+                Box(modifier = Modifier.padding(top = 4.dp)) {
                     Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -200,7 +200,7 @@ internal fun SettingsRow(
         headlineContent = { Text(title) },
         supportingContent = { Text(supportingText) },
         leadingContent = {
-            Box(modifier = Modifier.padding(top = 2.dp)) {
+            Box(modifier = Modifier.padding(top = 4.dp)) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
         },

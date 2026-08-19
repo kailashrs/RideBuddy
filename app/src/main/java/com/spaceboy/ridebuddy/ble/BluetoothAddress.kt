@@ -1,7 +1,5 @@
 package com.spaceboy.ridebuddy.ble
 
-import android.bluetooth.BluetoothDevice
-
 /** Immutable 48-bit Bluetooth address used internally without string round-trips. */
 class BluetoothAddress private constructor(private val packed: Long) {
     fun toLong(): Long = packed
@@ -63,9 +61,13 @@ class BluetoothAddress private constructor(private val packed: Long) {
     }
 }
 
-/** Connection-only target. [device] is the exact object supplied by a fresh scan when available. */
+/**
+ * Connection-only target resolved from a Companion Device Manager association. The
+ * target carries the packed [address] and the user-visible [deviceName]; the platform
+ * [android.bluetooth.BluetoothDevice] is looked up on demand from the adapter when a
+ * connection is established.
+ */
 data class BikeConnectionTarget(
     val address: BluetoothAddress,
     val deviceName: String,
-    val device: BluetoothDevice? = null,
 )

@@ -39,6 +39,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +68,8 @@ import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.ui.theme.TelemetryHero
+import com.spaceboy.ridebuddy.ui.theme.statusColors
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
@@ -191,7 +195,7 @@ fun LiveScreen(
                                 Text(
                                     text = "${UnitFormatter.distance(metres / 1000.0, units, locale)} left",
                                     style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 )
                             }
                         }
@@ -204,7 +208,7 @@ fun LiveScreen(
                                 Text(
                                     text = "ETA $etaStr",
                                     style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 )
                             }
                         }
@@ -220,7 +224,7 @@ fun LiveScreen(
                                     ),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 )
                             }
                         }
@@ -230,15 +234,18 @@ fun LiveScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        OutlinedButton(
+                        Button(
                             onClick = onStopNavigation,
                             modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.large,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            ),
                         ) {
-                            Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Outlined.Close, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("End Route", color = MaterialTheme.colorScheme.error)
+                            Text("End Route")
                         }
                         Button(
                             onClick = onOpenActiveNavigation,
@@ -251,7 +258,7 @@ fun LiveScreen(
                         }
                     }
                 } else {
-                    androidx.compose.material3.TextField(
+                    TextField(
                         value = destination,
                         onValueChange = { value ->
                             if (sharedDestinationError != null) onSharedDestinationHandled()
@@ -346,7 +353,7 @@ fun LiveScreen(
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
-            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Navigate to?", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
                 Text(sharedDestination, maxLines = 3, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(
@@ -381,10 +388,11 @@ private fun ConnectionCard(
     onDisconnectBike: () -> Unit,
 ) {
     val connected = state is BikeConnectionState.Connected
+    val statusColors = MaterialTheme.statusColors
     val statusColor = when (state) {
-        is BikeConnectionState.Connected -> Color(0xFF4CAF50)
-        is BikeConnectionState.Connecting, is BikeConnectionState.Authenticating -> Color(0xFFFF9800)
-        is BikeConnectionState.Failed -> MaterialTheme.colorScheme.error
+        is BikeConnectionState.Connected -> statusColors.connected
+        is BikeConnectionState.Connecting, is BikeConnectionState.Authenticating -> statusColors.inProgress
+        is BikeConnectionState.Failed -> statusColors.error
         else -> MaterialTheme.colorScheme.outline
     }
 
@@ -509,12 +517,9 @@ private fun TelemetryCard(
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             displayedSpeed.toString(),
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = 72.sp,
-                                lineHeight = 80.sp
-                            ),
+                            style = com.spaceboy.ridebuddy.ui.theme.TelemetryHero,
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             UnitFormatter.speedUnit(units),
                             style = MaterialTheme.typography.titleMedium,
