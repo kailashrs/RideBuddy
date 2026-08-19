@@ -46,7 +46,7 @@ class AppContainer(context: Context) {
     val rideLocationTracker = RideLocationTracker(context)
     val rideRepository = RideRepository(context)
     val appSettings = AppSettingsRepository(context)
-    val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore)
+    val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, applicationScope)
     private val rideLocationLabeler = RideLocationLabeler(context)
     val rideRecorder = RideRecorder(
         bikeConnection,
@@ -87,7 +87,13 @@ class AppContainer(context: Context) {
                 .distinctUntilChanged()
                 .collect(bleCaptureRecorder::setEnabled)
         }
-        navigationApiKeyStore.load()?.let(navigationSdkGateway::configureIfNeeded)
+        // Defer Keystore decrypt off Application.onCreate — the slow path is the
+        // first KeyStore.getInstance() call (cold-cache Binder IPC, ~20-50ms on
+        // older chipsets). The gateway only needs the key when navigation is used,
+        // which won't happen until MainViewModel is created and the user navigates.
+        applicationScope.launch(Dispatchers.IO) {
+            navigationApiKeyStore.load()?.let(navigationSdkGateway::configureIfNeeded)
+        }
         navigationFeed.acceptTerminalNavInfo = navigationGuidanceLifecycle::acceptAndMarkTerminalFeed
         navigationFeed.onNavInfo = { info ->
             when (navigationFeedOutputAction(info.navState)) {
@@ -99,13 +105,6 @@ class AppContainer(context: Context) {
         rideRecorder.start()
         ridingAlertMonitor.start()
         weatherAlertProvider.start()
-    }
-
-    /** Cancels the process-scoped coroutine scope so integration tests can
-     *  start from a clean slate. Not called in production — the scope is
-     *  intentionally process-lifetime. */
-    internal fun releaseForTesting() {
-        applicationScope.cancel()
     }
 }
 

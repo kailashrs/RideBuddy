@@ -300,8 +300,14 @@ class MainActivity : ComponentActivity() {
         backgroundLocationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
         val container = appContainer
-        container.bikeCompanionManager.refresh()
-        container.bikeCompanionManager.ensurePresenceObservation()
+        // CDM Binder IPCs are not safe to run inline on Main: each call costs
+        // ~10-50ms on cold-cache devices and onResume runs on every resume.
+        // lifecycleScope cancels the work when the activity is destroyed, so the
+        // late state update never lands on a dead view tree.
+        lifecycleScope.launch(Dispatchers.IO) {
+            container.bikeCompanionManager.refresh()
+            container.bikeCompanionManager.ensurePresenceObservation()
+        }
         if (viewModel.connectionState.value !is BikeConnectionState.Disconnected &&
             viewModel.connectionState.value !is BikeConnectionState.Failed
         ) {

@@ -15,10 +15,13 @@ import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.ble.hasUnsupportedTelemetryLayout
 import com.spaceboy.ridebuddy.ble.isApriliaBikeName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class AssociatedBike(
     val bluetoothAddress: BluetoothAddress,
@@ -41,6 +44,7 @@ data class BikeAssociationState(
 class BikeCompanionManager internal constructor(
     context: Context,
     private val protectionAcceptanceStore: ProtectionAcceptanceStore,
+    applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
     private val deviceStore = AssociatedBikeStore(appContext)
@@ -57,8 +61,14 @@ class BikeCompanionManager internal constructor(
     val state: StateFlow<BikeAssociationState> = mutableState.asStateFlow()
 
     init {
-        refresh()
-        ensurePresenceObservation()
+        // Defer CDM Binder IPCs off the constructor so AppContainer creation
+        // (and therefore Application.onCreate) doesn't block on a slow CDM call.
+        // The synchronous deviceStore.read() above already populates the initial
+        // state, so callers reading state.value get useful data immediately.
+        applicationScope.launch(Dispatchers.IO) {
+            refresh()
+            ensurePresenceObservation()
+        }
     }
 
     fun associate(
@@ -240,10 +250,12 @@ class BikeCompanionManager internal constructor(
         }
     }
 
-    fun associatedBike(associationId: Int? = null): AssociatedBike? {
-        refresh()
-        return state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
-    }
+    fun associatedBike(associationId: Int? = null): AssociatedBike? =
+        // Return the cached state; callers (BikeCompanionDeviceService,
+        // MainActivity.onResume) invoke refresh() explicitly when they need fresh data.
+        // This makes the getter safe to call from Main-thread callbacks without
+        // blocking on a CDM Binder IPC.
+        state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
 
     private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
         val scanResult = associationInfo.associatedDevice?.bleDevice
