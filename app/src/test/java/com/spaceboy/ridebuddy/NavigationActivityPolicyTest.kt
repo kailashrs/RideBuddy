@@ -70,7 +70,7 @@ class NavigationActivityPolicyTest {
         ownership.register(1L)
         ownership.register(2L)
 
-        assertFalse(ownership.claimIfUnowned(1L))
+        assertFalse(ownership.claim(1L))
         assertFalse(ownership.claim(1L))
         assertTrue(ownership.claim(2L))
         assertTrue(ownership.isOwner(2L))

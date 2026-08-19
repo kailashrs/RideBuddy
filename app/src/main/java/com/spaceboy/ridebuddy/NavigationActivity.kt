@@ -230,7 +230,8 @@ class NavigationActivity : ComponentActivity() {
                 override fun onNavigatorReady(readyNavigator: Navigator) {
                     if (isFinishing || isDestroyed) {
                         if ((navigationEndedByUser || !readyNavigator.isGuidanceRunning) &&
-                            NavigationSessionOwners.claimIfUnowned(navigationSessionId)
+                            // Cleanup path: only release if no live session has taken ownership.
+                            NavigationSessionOwners.claim(navigationSessionId)
                         ) {
                             releaseNavigationSession(readyNavigator, stopGuidance = navigationEndedByUser)
                         }
@@ -543,13 +544,6 @@ internal class NavigationSessionOwnership {
 
     @Synchronized
     fun claim(sessionId: Long): Boolean {
-        if (newestSessionId != sessionId || ownerId != null) return false
-        ownerId = sessionId
-        return true
-    }
-
-    @Synchronized
-    fun claimIfUnowned(sessionId: Long): Boolean {
         if (newestSessionId != sessionId || ownerId != null) return false
         ownerId = sessionId
         return true

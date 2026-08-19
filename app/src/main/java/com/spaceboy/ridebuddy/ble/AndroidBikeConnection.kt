@@ -526,7 +526,12 @@ internal class AndroidBikeConnection(
     }
 
     private fun discoverServices(gatt: BluetoothGatt) {
-        if (!gatt.discoverServices()) fail("Could not start service discovery")
+        try {
+            if (!gatt.discoverServices()) fail("Could not start service discovery")
+        } catch (e: RuntimeException) {
+            // Closed gatt can throw IllegalStateException from native on some OEM stacks.
+            fail("Service discovery threw: ${e.message}")
+        }
     }
 
     private fun onNotification(callbackGatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
@@ -827,7 +832,14 @@ internal class AndroidBikeConnection(
         )
         // GATT I/O must be performed outside the scheduler lock: BluetoothGatt methods may
         // synchronously invoke callbacks on the binder thread, which also use the scheduler.
-        val started = operationExecutor.start(currentGatt, operation)
+        val started = try {
+            operationExecutor.start(currentGatt, operation)
+        } catch (e: RuntimeException) {
+            // Closed gatt can throw IllegalStateException from native on some OEM stacks.
+            // Treat as a synchronous failure so the existing timeout/failure path runs.
+            log("Could not start ${operation.label}: ${e.message}")
+            false
+        }
         when (gattStartAction(started)) {
             GattStartAction.AwaitCallback -> Unit
             GattStartAction.HandleSynchronousFailure -> {
@@ -981,10 +993,17 @@ internal class AndroidBikeConnection(
 
     private val rssiRunnable = object : Runnable {
         override fun run() {
-            if (connectionMonitoringActive) {
+            if (!connectionMonitoringActive) return
+            try {
                 gatt?.readRemoteRssi()
-                mainHandler.postDelayed(this, RssiIntervalMillis)
+            } catch (e: RuntimeException) {
+                // Closed gatt can throw IllegalStateException from native on some OEM stacks.
+                // Stop polling rather than crashing the main handler.
+                connectionMonitoringActive = false
+                log("RSSI read threw, monitoring disabled: ${e.message}")
+                return
             }
+            mainHandler.postDelayed(this, RssiIntervalMillis)
         }
     }
 

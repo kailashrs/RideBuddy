@@ -336,7 +336,7 @@ private object ContextCompatBridge {
         context.startService(intent)
     }
 
-    private inline fun start(kind: String, intent: Intent, block: () -> Unit): Boolean = runCatching {
+    private fun start(kind: String, intent: Intent, block: () -> Unit): Boolean = runCatching {
         block()
         true
     }.onFailure { error ->
