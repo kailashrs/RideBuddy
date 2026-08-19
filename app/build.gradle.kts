@@ -27,8 +27,8 @@ android {
         // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36
-        versionCode = 102
-        versionName = "0.2.2"
+        versionCode = 103
+        versionName = "0.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

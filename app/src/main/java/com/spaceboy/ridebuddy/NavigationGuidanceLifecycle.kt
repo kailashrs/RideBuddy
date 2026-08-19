@@ -118,7 +118,7 @@ internal class NavigationGuidanceLifecycle(
                 routeVersion = current.routeVersion,
             )
         }
-        if (runCatching { candidate.session.isGuidanceRunning }.getOrDefault(true)) return false
+        if (candidate.session.isGuidanceRunning) return false
 
         return synchronized(lock) {
             if (pendingSessions.isNotEmpty()) return false
@@ -135,11 +135,6 @@ internal class NavigationGuidanceLifecycle(
             true
         }
     }
-
-    fun release(sessionId: Long, navigator: Navigator): Boolean =
-        release(sessionId, navigator as Any)
-
-    fun release(navigator: Navigator): Boolean = release(navigator as Any)
 
     internal fun release(sessionId: Long, identity: Any): Boolean {
         val released = synchronized(lock) {

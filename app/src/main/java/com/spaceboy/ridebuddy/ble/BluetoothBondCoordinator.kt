@@ -231,7 +231,9 @@ internal class BluetoothBondCoordinator(
         runCatching { device.bondState }.getOrNull()
 
     private fun sameBluetoothDevice(first: BluetoothDevice, second: BluetoothDevice): Boolean =
-        runCatching { first.address == second.address }.getOrDefault(first === second)
+        // getAddress() is a non-throwing getter on the cached mAddress field; no OEM stack has
+        // ever been observed to throw from it.
+        first.address == second.address
 
     private companion object {
         const val BondTimeoutMillis = 60_000L
