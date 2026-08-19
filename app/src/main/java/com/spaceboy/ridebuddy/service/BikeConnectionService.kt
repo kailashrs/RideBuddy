@@ -315,9 +315,6 @@ class BikeConnectionService : Service() {
             return started
         }
 
-        fun deviceAbsent(context: Context, address: String): Boolean =
-            BluetoothAddress.parse(address)?.let { deviceAbsent(context, it) } ?: false
-
         fun enableLocation(context: Context): Boolean {
             return ContextCompatBridge.startService(
                 context,

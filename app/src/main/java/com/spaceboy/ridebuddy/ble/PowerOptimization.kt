@@ -12,9 +12,5 @@ import android.os.PowerManager
  */
 internal fun isRideBuddyIgnoringBatteryOptimizations(context: Context): Boolean {
     val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
-    // API 35+ requires a package name; we want the app-wide exemption status, so use the
-    // package whose allowlist state is being queried. PowerManager.isIgnoringBatteryOptimizations
-    // without arguments is deprecated but still functional on supported Android versions.
-    @Suppress("DEPRECATION")
     return pm.isIgnoringBatteryOptimizations(context.packageName)
 }

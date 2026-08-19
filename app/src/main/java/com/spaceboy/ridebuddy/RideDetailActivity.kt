@@ -83,7 +83,6 @@ import com.google.android.gms.maps.model.PolylineOptions
 class RideDetailActivity : ComponentActivity() {
     private var loadState by mutableStateOf<RideDetailLoadState>(RideDetailLoadState.Loading)
     private var units by mutableStateOf(DistanceUnits.Metric)
-    private lateinit var appSettings: com.spaceboy.ridebuddy.data.AppSettings
     private val createCsvDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         uri?.let { exportRideToUri(it, RideExportFormat.Csv) }
     }
@@ -134,7 +133,7 @@ class RideDetailActivity : ComponentActivity() {
         enableEdgeToEdge()
         val rideId = intent.getLongExtra(ExtraRideId, -1)
         val container = appContainer
-        appSettings = container.appSettings.settings.value
+        val appSettings = container.appSettings.settings.value
         units = appSettings.distanceUnits
         loadRide(rideId)
         setContent {
@@ -434,7 +433,6 @@ private fun RideDetailContent(
 }
 
 @androidx.compose.runtime.Composable
-@Suppress("DEPRECATION")
 private fun RouteCard(points: List<Pair<Double, Double>>) {
     val color = MaterialTheme.colorScheme.primary
     val polylineColor = remember(color) { color.toArgb() }

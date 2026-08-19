@@ -91,9 +91,6 @@ class BikeCompanionManager internal constructor(
             .setSingleDevice(false)
             .build()
         val callback = object : CompanionDeviceManager.Callback() {
-            @Deprecated("Used by Android 8-12L", ReplaceWith("launchApproval(intentSender)"))
-            override fun onDeviceFound(intentSender: IntentSender) = launchApproval(intentSender)
-
             override fun onAssociationPending(intentSender: IntentSender) = launchApproval(intentSender)
 
             override fun onAssociationCreated(associationInfo: AssociationInfo) {

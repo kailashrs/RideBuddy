@@ -9,7 +9,6 @@ import android.content.IntentFilter
 import android.os.Handler
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
-import androidx.core.content.IntentCompat
 
 internal enum class BondPreparationAction {
     ConnectGatt,
@@ -85,8 +84,7 @@ internal class BluetoothBondCoordinator(
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
-            val device = IntentCompat.getParcelableExtra(
-                intent,
+            val device = intent.getParcelableExtra(
                 BluetoothDevice.EXTRA_DEVICE,
                 BluetoothDevice::class.java,
             ) ?: return
