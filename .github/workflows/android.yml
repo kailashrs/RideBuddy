@@ -39,7 +39,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Verify debug build
-        run: ./gradlew testDebugUnitTest assembleDebug assembleBenchmark --stacktrace
+        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
 
       - name: Run lint
         run: ./gradlew lintDebug --stacktrace

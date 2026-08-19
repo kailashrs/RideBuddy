@@ -27,8 +27,8 @@ android {
         // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36
-        versionCode = 101
-        versionName = "0.2.1"
+        versionCode = 102
+        versionName = "0.2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -54,13 +54,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-        }
-        create("benchmark") {
-            initWith(getByName("release"))
-            applicationIdSuffix = ".benchmark"
-            versionNameSuffix = "-benchmark"
-            signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += listOf("release")
         }
     }
 
