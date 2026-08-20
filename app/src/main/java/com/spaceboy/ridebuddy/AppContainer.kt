@@ -68,7 +68,8 @@ class AppContainer(context: Context) {
     )
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     val callNotificationBridge = CallNotificationBridge(context, bikeConnection, appSettings, applicationScope)
-    val tftPriorityCoordinator = TftPriorityCoordinator(navigationFeed, callNotificationBridge, tftNavigationBridge, applicationScope)
+    val tftPriorityCoordinator =
+        TftPriorityCoordinator(navigationFeed, callNotificationBridge, tftNavigationBridge, applicationScope)
     val ridingAlertMonitor = RidingAlertMonitor(context, bikeConnection, rideRecorder, appSettings, applicationScope)
     val weatherAlertProvider = WeatherAlertProvider(
         rideLocationTracker,

@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.core.companion
 
 import android.app.Activity
+import android.bluetooth.le.ScanFilter
 import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothLeDeviceFilter
@@ -10,10 +11,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
+import android.os.ParcelUuid
 import androidx.core.content.edit
+import com.spaceboy.ridebuddy.ble.BikeHogpServiceUuidString
+import com.spaceboy.ridebuddy.ble.BikeNameFilter
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
-import com.spaceboy.ridebuddy.ble.hasUnsupportedTelemetryLayout
 import com.spaceboy.ridebuddy.ble.isApriliaBikeName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,14 +85,33 @@ class BikeCompanionManager internal constructor(
             return
         }
         mutableState.update { it.copy(associationInProgress = true, errorMessage = null) }
+
+        // The CDM picker is scoped by both the bike's name family and the
+        // SIG-standard HID-over-GATT service UUID. The combination is what
+        // disambiguates the bike (HOGP, advertises 0x1812) from the same-name
+        // classic-BT headset (`20:72:1B:28:C8:5C` uses HFP and does not
+        // advertise 0x1812 over BLE).
+        //
+        // ParcelUuid is constructed here rather than as a top-level constant
+        // because Robolectric's stub of android.os.ParcelUuid is partial and
+        // can't be safely initialized from a JVM unit-test classloader.
+        val hogpServiceUuid: ParcelUuid =
+            requireNotNull(ParcelUuid.fromString(BikeHogpServiceUuidString)) {
+                "SIG-standard HID UUID constant could not be parsed"
+            }
+        val scanFilter = ScanFilter.Builder()
+            .setServiceUuid(hogpServiceUuid)
+            .build()
         val request = AssociationRequest.Builder()
             .addDeviceFilter(
                 BluetoothLeDeviceFilter.Builder()
-                    .setNamePattern(com.spaceboy.ridebuddy.ble.CdmAcceptAllBikeNames)
+                    .setNamePattern(BikeNameFilter)
+                    .setScanFilter(scanFilter)
                     .build(),
             )
             .setSingleDevice(false)
             .build()
+
         val callback = object : CompanionDeviceManager.Callback() {
             override fun onAssociationPending(intentSender: IntentSender) = launchApproval(intentSender)
 
@@ -133,11 +155,17 @@ class BikeCompanionManager internal constructor(
             } ?: associations.singleOrNull()
             selected?.let { association ->
                 val address = association.bluetoothAddress() ?: return@let null
+                // The picker writes a non-blank displayName for every successful
+                // pick, so the only way we end up with a blank `name` here is a
+                // CDM regression or a stored entry from an older schema. Surface
+                // that as a blank UI label rather than silently substituting a
+                // placeholder — `isApriliaBikeName` would otherwise reject any
+                // such entry anyway.
                 AssociatedBike(
                     bluetoothAddress = address,
                     name = association.displayName?.toString()?.takeIf(String::isNotBlank)
                         ?: stored?.name
-                        ?: DefaultBikeName,
+                        ?: "",
                     associationId = association.id,
                 )
             }
@@ -257,14 +285,22 @@ class BikeCompanionManager internal constructor(
     private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
         val scanResult = associationInfo.associatedDevice?.bleDevice
         val address = associationInfo.bluetoothAddress() ?: return null
+        // No sentinel fallback: if both the scan-record and the CDM displayName
+        // are blank, the device has no readable name and we must reject it. The
+        // picker filters by name regex + 0x1812 UUID, so reaching `accept()` with
+        // a blank name means the CDM is mis-reporting and we should not trust it.
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
-            ?: DefaultBikeName
-        if (!isAcceptableAssociationName(name)) {
-            rejectAssociation(name)
+            ?: ""
+        if (!isApriliaFamilyName(name)) {
+            rejectBikeName(name)
             return null
         }
-        val bike = AssociatedBike(address, name, associationInfo.id)
+        val bike = AssociatedBike(
+            bluetoothAddress = address,
+            name = name,
+            associationId = associationInfo.id,
+        )
         storeAssociation(bike)
         mutableState.update {
             it.copy(
@@ -288,18 +324,19 @@ class BikeCompanionManager internal constructor(
     }
 
     /**
-     * After the user picks a device from the CDM picker, validate that it matches an
-     * RS 457/Tuono 457 name family and is not in the SR family whose telemetry layout
-     * is intentionally unsupported. MIA is intentionally not matched either way (the
-     * OEM app does not recognise it).
+     * Defensive name check after the CDM picker returns an [AssociationInfo].
+     *
+     * The picker already filters by [BikeNameFilter] (and a `0x1812` ScanFilter on
+     * Android 16+), so this is a sanity check rather than the primary gate. It is
+     * intentionally strict: an empty `name` is rejected here rather than silently
+     * accepted via a sentinel, because no Aprilia RS 457 / Tuono 457 firmware ever
+     * advertises an empty name and a blank acceptance would let the picker
+     * silently associate with anything that loses its scan-record between
+     * connect and callback.
      */
-    private fun isAcceptableAssociationName(name: String): Boolean {
-        if (name == DefaultBikeName) return true // System gave us only the generic display name.
-        if (name.hasUnsupportedTelemetryLayout()) return false
-        return name.isApriliaBikeName()
-    }
+    private fun isApriliaFamilyName(name: String): Boolean = name.isApriliaBikeName()
 
-    private fun rejectAssociation(name: String) {
+    private fun rejectBikeName(name: String) {
         val message = "The selected device '$name' is not a supported Aprilia RS 457 / Tuono 457"
         mutableState.update {
             it.copy(associationInProgress = false, errorMessage = message)
@@ -310,10 +347,6 @@ class BikeCompanionManager internal constructor(
         protectionAcceptanceToClear(deviceStore.read(), bike)
             ?.let(protectionAcceptanceStore::clear)
         deviceStore.write(bike)
-    }
-
-    private companion object {
-        const val DefaultBikeName = "Motorcycle"
     }
 }
 
@@ -345,7 +378,15 @@ class AssociatedBikeStore(context: Context, preferencesName: String = Name) {
             ?: return null
         val address = BluetoothAddress.fromLong(packedAddress) ?: return null
         val id = preferences.getInt(KeyAssociationId, MissingAssociationId).takeUnless { it == MissingAssociationId }
-        return AssociatedBike(address, preferences.getString(KeyName, null) ?: "Motorcycle", id)
+        // Legacy entries written before the 0x1812 picker tightening may have no
+        // `KeyName` set. The address is still authoritative; surface a blank label
+        // so the UI knows the entry needs a refresh instead of trusting a sentinel
+        // placeholder.
+        return AssociatedBike(
+            bluetoothAddress = address,
+            name = preferences.getString(KeyName, null).orEmpty(),
+            associationId = id,
+        )
     }
 
     fun write(bike: AssociatedBike) {

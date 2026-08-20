@@ -446,7 +446,15 @@ private fun ConnectionCard(
                 )
                 Text(
                     text = when (state) {
-                        is BikeConnectionState.Connecting -> "Connecting"
+                        is BikeConnectionState.Connecting -> {
+                            val attempt = state.reconnectAttempt
+                            val max = state.maxAttempts
+                            if (attempt != null && max != null) {
+                                "Reconnecting (${attempt}/$max)"
+                            } else {
+                                "Connecting"
+                            }
+                        }
                         is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
                         is BikeConnectionState.Failed -> "Connection Failed"
                         else -> "Disconnected"
@@ -465,7 +473,15 @@ private fun ConnectionCard(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = when (state) {
-                    is BikeConnectionState.Connecting -> "Connecting…"
+                    is BikeConnectionState.Connecting -> {
+                        val attempt = state.reconnectAttempt
+                        val max = state.maxAttempts
+                        if (attempt != null && max != null) {
+                            "Reconnecting (${attempt}/$max)…"
+                        } else {
+                            "Connecting…"
+                        }
+                    }
                     is BikeConnectionState.Authenticating -> "Verifying motorcycle link…"
                     is BikeConnectionState.Failed -> "Connection failed"
                     else -> "Bike not connected"

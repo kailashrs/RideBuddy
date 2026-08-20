@@ -8,10 +8,13 @@ import java.util.regex.Pattern
 /**
  * Locks in bike-name policy parity with the OEM Aprilia India app
  * (`com.piaggio.apriliaindia`, version 1.3). The OEM upper-cases the advertised name
- * with `Locale.ROOT` and asks `String.contains("RS457_ID")` /
- * `String.contains("SR_ID")`; we mirror that primitive exactly. If a future change
- * tightens the filter (e.g. `startsWith` instead of `contains`), update these tests
- * alongside the implementation rather than letting them drift.
+ * with `Locale.ROOT` and asks `String.contains("RS457_ID")`; we mirror that primitive
+ * exactly. If a future change tightens the filter (e.g. `startsWith` instead of
+ * `contains`), update these tests alongside the implementation rather than letting
+ * them drift.
+ *
+ * SR-family support was intentionally dropped — the app only knows the RS 457 /
+ * Tuono 457 telemetry layout.
  */
 class BikeNamePolicyTest {
     @Test
@@ -28,8 +31,8 @@ class BikeNamePolicyTest {
 
     @Test
     fun rejectsNonRs457NameVariants() {
-        // Speculative variants the old regex used to accept; the OEM does not pair
-        // with these because the bike firmware does not broadcast them.
+        // Speculative variants the OEM does not pair with because the bike firmware
+        // does not broadcast them.
         assertFalse("RS 457".isApriliaBikeName())
         assertFalse("RS457".isApriliaBikeName())
         assertFalse("RS-457".isApriliaBikeName())
@@ -43,26 +46,12 @@ class BikeNamePolicyTest {
     }
 
     @Test
-    fun acceptsSubstringMatchesIncludingHeadsets() {
-        // The OEM uses `contains`, so anything that *contains* `RS457_ID` matches.
-        // A headset named `HEADSET_RS457_ID` would pass the name check at the CDM
-        // picker layer; downstream GATT service discovery (and the protection
-        // handshake) is the gate that actually rejects non-bike devices. We pin
-        // this substring semantics so a future tightening cannot regress silently.
-        assertTrue("HEADSET_RS457_ID".isApriliaBikeName())
-        assertFalse("HEADSET_RS457_ID".hasUnsupportedTelemetryLayout())
-    }
-
-    @Test
-    fun rejectsSrFamilyButNotOtherApriliaNames() {
-        // Only `SR_ID` triggers the unsupported-telemetry bail.
+    fun rejectsSrFamilyAndOtherApriliaNames() {
+        // The OEM never recognised `SR_*`; matching the app's policy, SR names must
+        // not be associated. The same goes for MIA (which the OEM never matches either).
         assertFalse("SR_ID_ABCD".isApriliaBikeName())
-        assertTrue("SR_ID_ABCD".hasUnsupportedTelemetryLayout())
-        // The OEM never recognised `APRILIA_MIA_*` or `MIA_*`; we match that.
         assertFalse("APRILIA_MIA_1234".isApriliaBikeName())
-        assertFalse("APRILIA_MIA_1234".hasUnsupportedTelemetryLayout())
         assertFalse("MIA_457_1234".isApriliaBikeName())
-        assertFalse("MIA_457_1234".hasUnsupportedTelemetryLayout())
     }
 
     @Test
@@ -81,14 +70,25 @@ class BikeNamePolicyTest {
     }
 
     @Test
-    fun cdmShowAllPatternMatchesEverything() {
-        // The CDM filter pattern must accept every name; post-pick validation rejects
-        // anything that isn't an RS 457 family name. This guarantees the system device
-        // picker is never empty on OEM forks that apply setNamePattern with full-string semantics.
-        val pattern: Pattern = CdmAcceptAllBikeNames
+    fun cdmPickerPatternAcceptsRs457FamilyAndRejectsEverythingElse() {
+        // The CDM `setNamePattern` filter must scope the picker to the RS 457 name
+        // family so that the classic-BT `RS457_IDE1B7` headset can't masquerade
+        // as the bike. Authoritative service-UUID filtering happens after a
+        // successful pair (see BikeCompanionManager.associate()).
+        val pattern: Pattern = BikeNameFilter
+        // Family names with the per-bike hex suffix. The hex suffix is required —
+        // a bare `RS457_ID` is not a real advertisement and never reaches the picker.
         assertTrue(pattern.matcher("RS457_IDE1B7").matches())
-        assertTrue(pattern.matcher("Galaxy Buds2 Pro").matches())
-        assertTrue(pattern.matcher("").matches())
-        assertTrue(pattern.matcher("SR_ID_ABCD").matches())
+        assertTrue(pattern.matcher("rs457_id1234abcd").matches())
+        assertTrue(pattern.matcher("RS457_ID-AB").matches())
+        // Anything that doesn't start with `RS457_ID` is excluded.
+        assertFalse(pattern.matcher("SR_ID_ABCD").matches())
+        assertFalse(pattern.matcher("Galaxy Buds2 Pro").matches())
+        assertFalse(pattern.matcher("AB Shutter3").matches())
+        assertFalse(pattern.matcher("").matches())
+        // Same-name peripheral: classic-BT headset sharing the displayed name on
+        // vivo does not advertise its name through this pattern — the CDM regex
+        // is anchored to the family prefix.
+        assertFalse(pattern.matcher("HEADSET_RS457_ID").matches())
     }
 }

@@ -73,7 +73,16 @@ interface BikeConnection {
 sealed interface BikeConnectionState {
     data object Disconnected : BikeConnectionState
     data object Scanning : BikeConnectionState
-    data class Connecting(val deviceName: String?) : BikeConnectionState
+    /**
+     * GATT transport is being established. The optional [reconnectAttempt] / [maxAttempts]
+     * pair is non-null only on the exponential-backoff retry path so the UI can render a
+     * "Reconnecting (3/6)" indicator; the initial connect attempt leaves both null.
+     */
+    data class Connecting(
+        val deviceName: String?,
+        val reconnectAttempt: Int? = null,
+        val maxAttempts: Int? = null,
+    ) : BikeConnectionState
     data class Authenticating(val deviceName: String) : BikeConnectionState
     data class Connected(val deviceName: String, val rssi: Int?) : BikeConnectionState
     data class Failed(val message: String) : BikeConnectionState

@@ -122,10 +122,6 @@ internal class AndroidBikeConnection(
 
     override fun connect(target: BikeConnectionTarget) {
         mainHandler.post {
-            if (target.deviceName.hasUnsupportedTelemetryLayout()) {
-                fail("This motorcycle model uses an unsupported telemetry format")
-                return@post
-            }
             connectionGeneration++
             intentionalDisconnect = true
             disconnectInternal(closeOnly = false)
@@ -401,8 +397,11 @@ internal class AndroidBikeConnection(
                 BluetoothProfile.STATE_CONNECTED -> {
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         log("GATT connection failed, status $status")
+                        val wasIntentional = intentionalDisconnect
                         disconnectInternal(closeOnly = true)
-                        if (!intentionalDisconnect) scheduleReconnect()
+                        if (!wasIntentional) {
+                            scheduleReconnect()
+                        }
                         return
                     }
                     this@AndroidBikeConnection.gatt = gatt
@@ -412,8 +411,11 @@ internal class AndroidBikeConnection(
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     log("GATT disconnected, status $status")
+                    val wasIntentional = intentionalDisconnect
                     disconnectInternal(closeOnly = true)
-                    if (!intentionalDisconnect) scheduleReconnect()
+                    if (!wasIntentional) {
+                        scheduleReconnect()
+                    }
                 }
             }
         }
@@ -1021,7 +1023,7 @@ internal class AndroidBikeConnection(
             return
         }
         reconnectAttempt++
-        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
+        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName, reconnectAttempt, MaxReconnectAttempts)
         log("Reconnecting in ${delay / 1_000}s")
         mainHandler.postAtTime(
             { if (!intentionalDisconnect) connectGatt() },

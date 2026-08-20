@@ -149,7 +149,8 @@ private class RecordingConnection(
     data class Write(val characteristic: UUID, val payload: ByteArray, val mode: BikeWriteMode)
 
     val writes = mutableListOf<Write>()
-    override val connectionState: StateFlow<BikeConnectionState> = MutableStateFlow(BikeConnectionState.Connected("RS 457", null))
+    override val connectionState: StateFlow<BikeConnectionState> =
+        MutableStateFlow(BikeConnectionState.Connected("RS 457", null))
     override val rawTelemetry: SharedFlow<TelemetryReading> = MutableSharedFlow()
     override val telemetry: StateFlow<TelemetryFrame?> = MutableStateFlow(null)
     private val mutableLatestTelemetryReading = MutableStateFlow<TelemetryReading?>(

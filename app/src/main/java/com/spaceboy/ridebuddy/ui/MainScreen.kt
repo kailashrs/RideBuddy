@@ -234,7 +234,12 @@ fun MainScreen(
                                 modifier = Modifier.testTag("top-level-${item.destination.name}"),
                                 selected = selected,
                                 onClick = { onDestinationSelected(item.destination) },
-                                icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
+                                icon = {
+                                    Icon(
+                                        if (selected) item.selectedIcon else item.unselectedIcon,
+                                        contentDescription = null
+                                    )
+                                },
                                 label = { Text(item.label) },
                             )
                         }
@@ -262,7 +267,12 @@ fun MainScreen(
                                         modifier = Modifier.testTag("top-level-${item.destination.name}"),
                                         selected = selected,
                                         onClick = { onDestinationSelected(item.destination) },
-                                        icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
+                                        icon = {
+                                            Icon(
+                                                if (selected) item.selectedIcon else item.unselectedIcon,
+                                                contentDescription = null
+                                            )
+                                        },
                                         label = { Text(item.label) },
                                     )
                                 }
@@ -337,6 +347,7 @@ private fun ScreenContent(
                 onStopNavigation = onStopNavigation,
                 onSharedDestinationHandled = onSharedDestinationHandled,
             )
+
             TopLevelDestination.History -> HistoryScreen(modifier, rides, settings.distanceUnits, onRideSelected)
             TopLevelDestination.Insights -> InsightsScreen(
                 modifier = modifier,
@@ -346,6 +357,7 @@ private fun ScreenContent(
                 selectedPeriod = insightPeriod,
                 onPeriodSelected = onInsightPeriodSelected,
             )
+
             TopLevelDestination.Info -> InfoScreen(
                 modifier = modifier,
                 navigationConfigured = uiState.navigationKey.isConfigured,
@@ -357,6 +369,7 @@ private fun ScreenContent(
                 notificationAccessEnabled = notificationAccessEnabled,
                 onReconnect = onReconnect,
             )
+
             TopLevelDestination.More -> SettingsScreen(
                 modifier = modifier,
                 navigationKey = uiState.navigationKey,

@@ -243,7 +243,15 @@ class MainViewModel(
         }
     }
 
+    private val autoConnectGate = MainViewModelAutoConnectGate()
+
     fun disconnectBike() = bikeConnection.disconnect()
+
+    /**
+     * Delegates to [MainViewModelAutoConnectGate.consume]; see that class for the
+     * one-shot semantics.
+     */
+    fun consumeAutoConnectAttempt(): Boolean = autoConnectGate.consume()
 
     fun selectInsightPeriod(period: InsightPeriod) {
         insightPeriod.value = period

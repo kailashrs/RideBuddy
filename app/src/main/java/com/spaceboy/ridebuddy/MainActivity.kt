@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
                     onBleCaptureEnabledChanged = viewModel::setBleCaptureEnabled,
                 )
             }
+            LaunchedEffect(Unit) { maybeAutoConnect() }
 
             Rs457Theme(
                 themeMode = settings.themeMode,
@@ -763,6 +764,21 @@ class MainActivity : ComponentActivity() {
                         .show()
                 }
             }
+        }
+    }
+
+    private fun maybeAutoConnect() {
+        val settings = appContainer.appSettings.settings.value
+        if (!settings.onboardingComplete) return
+        if (!nearbyDeviceAccessGranted) return
+        val bike = appContainer.bikeCompanionManager.state.value.bike ?: return
+        val state = viewModel.connectionState.value
+        if (state !is BikeConnectionState.Disconnected && state !is BikeConnectionState.Failed) return
+        // Only burn the one-shot gate once every precondition is satisfied; otherwise
+        // a cold start with missing permissions would permanently disable auto-connect.
+        if (!viewModel.consumeAutoConnectAttempt()) return
+        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
+            viewModel.showMessage("Unable to start connection service")
         }
     }
 

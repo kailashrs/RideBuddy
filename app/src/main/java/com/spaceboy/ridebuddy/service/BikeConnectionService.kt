@@ -219,7 +219,15 @@ class BikeConnectionService : Service() {
     private fun BikeConnectionState.label(): String {
         val connectionLabel = when (this) {
             is BikeConnectionState.Connected -> "Connected to $deviceName"
-            is BikeConnectionState.Connecting -> "Connecting to ${deviceName ?: "bike"}"
+            is BikeConnectionState.Connecting -> {
+                val attempt = reconnectAttempt
+                val max = maxAttempts
+                if (attempt != null && max != null) {
+                    "Reconnecting (${attempt}/$max)"
+                } else {
+                    "Connecting to ${deviceName ?: "bike"}"
+                }
+            }
             is BikeConnectionState.Authenticating -> "Authenticating $deviceName"
             is BikeConnectionState.Failed -> message
             BikeConnectionState.Scanning -> "Scanning"
