@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.remember
 import androidx.lifecycle.lifecycleScope
 import androidx.core.net.toUri
@@ -72,13 +71,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.compose.rememberMarkerState
+import androidx.compose.runtime.LaunchedEffect
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMapOptions
-import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
-import com.google.android.gms.maps.model.MarkerOptions
-import com.google.android.gms.maps.model.PolylineOptions
 
 class RideDetailActivity : ComponentActivity() {
     private var loadState by mutableStateOf<RideDetailLoadState>(RideDetailLoadState.Loading)
@@ -434,55 +438,64 @@ private fun RideDetailContent(
 
 @androidx.compose.runtime.Composable
 private fun RouteCard(points: List<Pair<Double, Double>>) {
-    val color = MaterialTheme.colorScheme.primary
-    val polylineColor = remember(color) { color.toArgb() }
+    if (points.size < 2) return
+    
+    val routeColor = MaterialTheme.colorScheme.primary
     val cameraPaddingPx = with(LocalDensity.current) { 64.dp.toPx().toInt() }
-    // Hoist the route + bounds so update() does not redo the projection on every recomposition.
+    
     val route = remember(points) { points.map { LatLng(it.first, it.second) } }
-    val bounds = remember(route) { LatLngBounds.builder().apply { route.forEach(::include) }.build() }
+    val bounds = remember(route) { 
+        LatLngBounds.builder().apply { route.forEach(::include) }.build() 
+    }
+    val cameraPositionState = rememberCameraPositionState()
+
+    // Move camera to bounds once layout and bounds are ready
+    LaunchedEffect(bounds) {
+        cameraPositionState.move(CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx))
+    }
+
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp)) {
             Text("Recorded route", style = MaterialTheme.typography.titleMedium)
-            AndroidView(
-                // Lite Mode avoids the OpenGL surface spin-up that the full map performs on
-                // every scroll, and is the documented best practice for MapView embedded in a
-                // scrollable list.
-                factory = {
-                    MapView(it, GoogleMapOptions().liteMode(true)).apply { onCreate(null) }
-                },
-                modifier = Modifier.fillMaxWidth().height(240.dp).padding(top = 12.dp)
-                    .semantics { contentDescription = "Interactive map of the recorded ride" },
-                update = { view ->
-                    view.getMapAsync { map ->
-                        map.clear()
-                        map.addPolyline(PolylineOptions().addAll(route).color(polylineColor).width(7f))
-                        map.addMarker(MarkerOptions().position(route.first()).title("Start"))
-                        map.addMarker(MarkerOptions().position(route.last()).title("Parking location"))
-                        map.setOnMapLoadedCallback {
-                            // Guard against the 0x0 size trap: newLatLngBounds throws
-                            // IllegalStateException when the view has not been laid out yet
-                            // (common during prefetch or initial measure).
-                            if (view.width > 0 && view.height > 0) {
-                                map.moveCamera(
-                                    CameraUpdateFactory.newLatLngBounds(
-                                        bounds,
-                                        view.width,
-                                        view.height,
-                                        cameraPaddingPx,
-                                    ),
-                                )
-                            }
-                        }
-                    }
-                },
-                onRelease = { view ->
-                    // Documented Compose 1.4+ cleanup hook for AndroidView in lazy lists:
-                    // destroys the underlying MapView when the item is recycled by the
-                    // LazyColumn. The Lite Mode snapshot is fully rebuilt from `points` on
-                    // every inflation, so we do not need to persist map state.
-                    view.onDestroy()
-                },
-            )
+            GoogleMap(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(240.dp)
+                    .padding(top = 12.dp)
+                    .semantics { contentDescription = "Map of the recorded ride" },
+                cameraPositionState = cameraPositionState,
+                // Keep Lite Mode for lightweight static rendering inside LazyColumn
+                googleMapOptionsFactory = { GoogleMapOptions().liteMode(true) },
+                properties = MapProperties(isMyLocationEnabled = false),
+                uiSettings = MapUiSettings(
+                    zoomControlsEnabled = false,
+                    mapToolbarEnabled = false,
+                    compassEnabled = false,
+                    myLocationButtonEnabled = false,
+                    scrollGesturesEnabled = false,
+                    zoomGesturesEnabled = false,
+                    rotationGesturesEnabled = false,
+                    tiltGesturesEnabled = false,
+                ),
+            ) {
+                Polyline(
+                    points = route,
+                    color = routeColor,
+                    width = 7f,
+                )
+                // rememberMarkerState with key is deprecated in Maps Compose 7.0.0 but still required
+                // for proper state management in LazyColumn (rememberUpdatedMarkerState doesn't exist in 7.0.0)
+                @Suppress("DEPRECATION")
+                Marker(
+                    state = rememberMarkerState(key = "start_${route.first()}", position = route.first()),
+                    title = "Start",
+                )
+                @Suppress("DEPRECATION")
+                Marker(
+                    state = rememberMarkerState(key = "end_${route.last()}", position = route.last()),
+                    title = "Parking location",
+                )
+            }
         }
     }
 }

@@ -119,6 +119,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
 
     implementation("com.google.android.libraries.navigation:navigation:7.8.0")
+    // Maps Compose 7.x is compatible with Maps SDK 19.0.0 (from Navigation SDK 7.8.0)
+    // v8.x requires Maps SDK 20.0.0; Navigation SDK 7.9.0 only provides 19.2.0
+    implementation("com.google.maps.android:maps-compose:7.0.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
