@@ -197,8 +197,12 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { confirmTest = false },
             title = { Text("Test the TFT?") },
-            text = { Text("Keep the motorcycle stationary. The test writes a maneuver, trip distance, text, speed limit and clear state. It is a diagnostic check and does not change feature availability.") },
-            confirmButton = { TextButton(onClick = { confirmTest = false; onRunStationaryTest() }) { Text("Run test") } },
+            text = { Text("Keep the motorcycle stationary. The test writes a maneuver, trip distance, text, speed limit and clear state.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmTest = false; onRunStationaryTest()
+                }) { Text("Run test") }
+            },
             dismissButton = { TextButton(onClick = { confirmTest = false }) { Text("Cancel") } },
         )
     }
@@ -246,8 +250,8 @@ fun SettingsScreen(
             text = {
                 Text(
                     "Version ${BuildConfig.VERSION_NAME}\n\n" +
-                        "RideBuddy is a third-party companion app for your motorcycle.\n\n" +
-                        "It brings turn-by-turn navigation, speed limits, incoming call controls, and safety alerts directly to your motorcycle's display, while automatically logging your rides and trip statistics privately on your phone.",
+                            "RideBuddy is a third-party companion app for your motorcycle.\n\n" +
+                            "It brings turn-by-turn navigation, speed limits, incoming call controls, and safety alerts directly to your motorcycle's display, while automatically logging your rides and trip statistics privately on your phone.",
                 )
             },
             confirmButton = { TextButton(onClick = { showAbout = false }) { Text("Close") } },
@@ -308,8 +312,16 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                                        Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            app.label,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            app.packageName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     Switch(
                                         checked = enabled,
@@ -390,7 +402,13 @@ fun SettingsScreen(
                 ListItem(
                     headlineContent = { Text("Bluetooth Pairing") },
                     supportingContent = { Text("${bikeAssociation.bike.address.takeLast(5)} • Paired via Bluetooth") },
-                    leadingContent = { Icon(Icons.Outlined.BluetoothConnected, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    leadingContent = {
+                        Icon(
+                            Icons.Outlined.BluetoothConnected,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
                     trailingContent = { TextButton(onClick = { confirmForget = true }) { Text("Forget") } },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
@@ -438,13 +456,32 @@ fun SettingsScreen(
                 onClick = onOpenNotificationAccess,
             )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Message alerts", "Messages and WhatsApp icons on the TFT", settings.messageAlerts, icon = Icons.AutoMirrored.Outlined.Chat, onCheckedChange = onMessageAlertsChanged)
+            SettingsSwitchRow(
+                "Message alerts",
+                "Messages and WhatsApp icons on the TFT",
+                settings.messageAlerts,
+                icon = Icons.AutoMirrored.Outlined.Chat,
+                onCheckedChange = onMessageAlertsChanged
+            )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Social alerts", "Instagram, Facebook and X icons on the TFT", settings.socialAlerts, icon = Icons.Outlined.Public, onCheckedChange = onSocialAlertsChanged)
+            SettingsSwitchRow(
+                "Social alerts",
+                "Instagram, Facebook and X icons on the TFT",
+                settings.socialAlerts,
+                icon = Icons.Outlined.Public,
+                onCheckedChange = onSocialAlertsChanged
+            )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Email alerts", "Gmail and Outlook icons on the TFT", settings.emailAlerts, icon = Icons.Outlined.Mail, onCheckedChange = onEmailAlertsChanged)
+            SettingsSwitchRow(
+                "Email alerts",
+                "Gmail and Outlook icons on the TFT",
+                settings.emailAlerts,
+                icon = Icons.Outlined.Mail,
+                onCheckedChange = onEmailAlertsChanged
+            )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            val enabledInstalledCount = installedSupportedApps.count { it.packageName in settings.enabledNotificationPackages }
+            val enabledInstalledCount =
+                installedSupportedApps.count { it.packageName in settings.enabledNotificationPackages }
             ListItem(
                 headlineContent = { Text("Supported apps") },
                 supportingContent = {
@@ -470,11 +507,21 @@ fun SettingsScreen(
                 onClick = onEnableCallControls,
             )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Caller display", "Show incoming caller name and number on the motorcycle display", settings.callerDisplay, icon = Icons.Outlined.ContactPage) {
+            SettingsSwitchRow(
+                "Caller display",
+                "Show incoming caller name and number on the motorcycle display",
+                settings.callerDisplay,
+                icon = Icons.Outlined.ContactPage
+            ) {
                 settingsActions.onCallerDisplayChanged(it)
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("TFT call controls", "Accept or decline incoming phone calls using handlebar controls", settings.tftCallControls, icon = Icons.Outlined.Call) {
+            SettingsSwitchRow(
+                "TFT call controls",
+                "Accept or decline incoming phone calls using handlebar controls",
+                settings.tftCallControls,
+                icon = Icons.Outlined.Call
+            ) {
                 settingsActions.onTftCallControlsChanged(it)
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
@@ -530,7 +577,12 @@ fun SettingsScreen(
             )
         }
         SettingsSection("Safety & Speed Alerts") {
-            SettingsSwitchRow("Overspeed", "Alert above ${speedLabel(settings.overspeedThresholdKph.toDouble())}", settings.overspeedAlerts, icon = Icons.Outlined.Speed) {
+            SettingsSwitchRow(
+                "Overspeed",
+                "Alert above ${speedLabel(settings.overspeedThresholdKph.toDouble())}",
+                settings.overspeedAlerts,
+                icon = Icons.Outlined.Speed
+            ) {
                 settingsActions.onOverspeedAlertsChanged(it)
             }
             if (settings.overspeedAlerts) {
@@ -545,25 +597,50 @@ fun SettingsScreen(
                 ) { value -> settingsActions.onOverspeedThresholdChanged(storedSpeedKph(value).roundToInt()) }
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("High RPM", "Alert above ${settings.rpmThreshold} rpm", settings.rpmAlerts, icon = Icons.Outlined.Tune) {
+            SettingsSwitchRow(
+                "High RPM",
+                "Alert above ${settings.rpmThreshold} rpm",
+                settings.rpmAlerts,
+                icon = Icons.Outlined.Tune
+            ) {
                 settingsActions.onRpmAlertsChanged(it)
             }
             if (settings.rpmAlerts) {
                 HorizontalDivider(Modifier.padding(start = 56.dp))
                 SettingsSliderRow(
-                    "RPM threshold", "${settings.rpmThreshold} rpm", settings.rpmThreshold.toFloat(), 3_000f..12_000f, 17, icon = Icons.Outlined.Tune,
+                    "RPM threshold",
+                    "${settings.rpmThreshold} rpm",
+                    settings.rpmThreshold.toFloat(),
+                    3_000f..12_000f,
+                    17,
+                    icon = Icons.Outlined.Tune,
                 ) { settingsActions.onRpmThresholdChanged(it.toInt()) }
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Hard acceleration", "Notify when acceleration exceeds the event threshold", settings.accelerationAlerts, icon = Icons.AutoMirrored.Outlined.TrendingUp) {
+            SettingsSwitchRow(
+                "Hard acceleration",
+                "Notify when acceleration exceeds the event threshold",
+                settings.accelerationAlerts,
+                icon = Icons.AutoMirrored.Outlined.TrendingUp
+            ) {
                 settingsActions.onAccelerationAlertsChanged(it)
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Hard braking", "Notify when braking exceeds the event threshold", settings.brakingAlerts, icon = Icons.Outlined.ReportProblem) {
+            SettingsSwitchRow(
+                "Hard braking",
+                "Notify when braking exceeds the event threshold",
+                settings.brakingAlerts,
+                icon = Icons.Outlined.ReportProblem
+            ) {
                 settingsActions.onBrakingAlertsChanged(it)
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Weather", "Rain, storm and high-wind warnings on the phone and, when enabled, the TFT", settings.weatherAlerts, icon = Icons.Outlined.Cloud) {
+            SettingsSwitchRow(
+                "Weather",
+                "Rain, storm and high-wind warnings on the phone and, when enabled, the TFT",
+                settings.weatherAlerts,
+                icon = Icons.Outlined.Cloud
+            ) {
                 settingsActions.onWeatherAlertsChanged(it)
             }
             if (settings.weatherAlerts) {
@@ -622,11 +699,21 @@ fun SettingsScreen(
                 onSelected = settingsActions.onThemeModeChanged,
             )
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("Dynamic color", "Use your device's Material You palette", settings.dynamicColor, icon = Icons.Outlined.ColorLens) {
+            SettingsSwitchRow(
+                "Dynamic color",
+                "Use your device's Material You palette",
+                settings.dynamicColor,
+                icon = Icons.Outlined.ColorLens
+            ) {
                 settingsActions.onDynamicColorChanged(it)
             }
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSwitchRow("High contrast", "Use stronger surface and text contrast", settings.highContrast, icon = Icons.Outlined.Contrast) {
+            SettingsSwitchRow(
+                "High contrast",
+                "Use stronger surface and text contrast",
+                settings.highContrast,
+                icon = Icons.Outlined.Contrast
+            ) {
                 settingsActions.onHighContrastChanged(it)
             }
         }
@@ -680,7 +767,11 @@ fun SettingsScreen(
                 },
                 leadingContent = {
                     Box(modifier = Modifier.padding(top = 4.dp)) {
-                        Icon(Icons.AutoMirrored.Outlined.ReceiptLong, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ReceiptLong,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 },
                 trailingContent = { TextButton(onClick = { showBleCapture = true }) { Text("View") } },
@@ -691,7 +782,7 @@ fun SettingsScreen(
             ListItem(
                 headlineContent = { Text("Stationary TFT validation") },
                 supportingContent = {
-                    Text("Send diagnostic display writes while the motorcycle is parked. This does not change feature availability.")
+                    Text("Send diagnostic display writes while the motorcycle is parked.")
                 },
                 leadingContent = {
                     Box(modifier = Modifier.padding(top = 4.dp)) {
@@ -730,7 +821,11 @@ fun SettingsScreen(
                 supportingContent = { Text("$rideCount saved rides stored on this device") },
                 leadingContent = {
                     Box(modifier = Modifier.padding(top = 4.dp)) {
-                        Icon(Icons.Outlined.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Outlined.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 },
                 trailingContent = {
