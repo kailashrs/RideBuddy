@@ -674,6 +674,18 @@ internal class AndroidBikeConnection(
         }
         postAuthenticationGate = PostAuthenticationGate(BleCharacteristics.PostAuthenticationSubscriptions)
         enqueueAll(subscriptions)
+
+        // Read-only identity characteristics on the RS457 (no NOTIFY/INDICATE) are
+        // queued as explicit reads so the Info screen actually receives values.
+        val identityReads = BleCharacteristics.PostAuthenticationIdentityReads.mapNotNull { uuid ->
+            val characteristic = characteristics[uuid] ?: return@mapNotNull null
+            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) null
+            else GattOperation.Read(characteristic)
+        }
+        if (identityReads.isNotEmpty()) {
+            log("Queuing ${identityReads.size} post-auth identity read(s)")
+            enqueueAll(identityReads)
+        }
     }
 
     private fun onSubscriptionCompleted(operation: GattOperation.Subscribe) {
@@ -1099,10 +1111,18 @@ internal class AndroidBikeConnection(
     private fun ByteArray.cleanText(): String = toString(Charsets.UTF_8).trim('\u0000', ' ', '\r', '\n')
 
     private fun ByteArray.decodeVin(): String? {
-        if (size != FramedVinLength) return null
-        val vinBytes = copyOfRange(1, size - 1)
-        if (vinBytes.any { (it.toInt() and 0xFF) !in PrintableAsciiRange }) return null
-        return vinBytes.toString(Charsets.US_ASCII).takeIf { it.length == VinLength }
+        // Some firmwares return the raw 17‑byte VIN; others still wrap it in the
+        // 19‑byte OEM frame.
+        if (size == VinLength) {
+            if (any { (it.toInt() and 0xFF) !in PrintableAsciiRange }) return null
+            return toString(Charsets.US_ASCII)
+        }
+        if (size == FramedVinLength) {
+            val vinBytes = copyOfRange(1, size - 1)
+            if (vinBytes.any { (it.toInt() and 0xFF) !in PrintableAsciiRange }) return null
+            return vinBytes.toString(Charsets.US_ASCII).takeIf { it.length == VinLength }
+        }
+        return null
     }
 
     private fun UUID.shortName(): String = toString().takeLast(4)
