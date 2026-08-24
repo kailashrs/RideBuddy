@@ -1,22 +1,35 @@
 package com.spaceboy.ridebuddy.data
 
-import java.util.Calendar
+import java.time.Clock
+import java.time.ZoneId
 
 object InsightsCalculator {
     fun calculate(
         rides: List<Ride>,
         period: InsightPeriod,
-        nowMillis: Long = System.currentTimeMillis(),
+        clock: Clock = Clock.systemDefaultZone(),
+    ): RideInsights = calculate(rides, period, clock.millis(), clock.zone)
+
+    fun calculate(
+        rides: List<Ride>,
+        period: InsightPeriod,
+        nowMillis: Long,
+    ): RideInsights = calculate(rides, period, nowMillis, ZoneId.systemDefault())
+
+    fun calculate(
+        rides: List<Ride>,
+        period: InsightPeriod,
+        nowMillis: Long,
+        zone: ZoneId,
     ): RideInsights {
         val (currentStart, previousStart) = when (period) {
             InsightPeriod.Today -> {
-                val todayStart = Calendar.getInstance().apply {
-                    timeInMillis = nowMillis
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
+                val todayStart = java.time.Instant.ofEpochMilli(nowMillis)
+                    .atZone(zone)
+                    .toLocalDate()
+                    .atStartOfDay(zone)
+                    .toInstant()
+                    .toEpochMilli()
                 Pair(todayStart, todayStart - MillisPerDay)
             }
 

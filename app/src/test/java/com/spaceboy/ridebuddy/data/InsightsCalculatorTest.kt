@@ -1,11 +1,17 @@
 package com.spaceboy.ridebuddy.data
 
-import java.util.Calendar
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class InsightsCalculatorTest {
+    private val fixedZone: ZoneOffset = ZoneOffset.UTC
+
+    private fun clockAt(millis: Long): Clock = Clock.fixed(Instant.ofEpochMilli(millis), fixedZone)
+
     @Test
     fun aggregatesCurrentPeriodAndComparesPreviousDistance() {
         val day = 86_400_000L
@@ -16,7 +22,7 @@ class InsightsCalculatorTest {
             ride(start = now - 8 * day, distance = 25.0, durationHours = 1, speed = 25.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.SevenDays, now)
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.SevenDays, clockAt(now))
 
         assertEquals(2, result.rideCount)
         assertEquals(50.0, result.totalDistanceKilometres, 0.001)
@@ -26,25 +32,47 @@ class InsightsCalculatorTest {
 
     @Test
     fun calculatesTodayPeriodCorrectly() {
-        val now = System.currentTimeMillis()
-        val todayStart = Calendar.getInstance().apply {
-            timeInMillis = now
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+        // Pin to 12:00 UTC so "today" is unambiguous regardless of host timezone.
+        val now = Instant.parse("2026-08-24T12:00:00Z").toEpochMilli()
+        val todayStart = Instant.parse("2026-08-24T00:00:00Z").toEpochMilli()
 
         val rides = listOf(
             ride(start = todayStart + 3_600_000L, distance = 40.0, durationHours = 1, speed = 40.0),
             ride(start = todayStart - 10_000L, distance = 20.0, durationHours = 1, speed = 20.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.Today, now)
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.Today, clockAt(now))
 
         assertEquals(1, result.rideCount)
         assertEquals(40.0, result.totalDistanceKilometres, 0.001)
         assertEquals(100.0, result.distanceChangePercent ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun calculatesTodayPeriodHonoursExplicitZone() {
+        // 23:30 UTC on 24 Aug is the very start of 25 Aug in +05:30.
+        val now = Instant.parse("2026-08-24T23:30:00Z").toEpochMilli()
+
+        // Both rides happen to fall on 24 Aug in UTC (the rides themselves are
+        // stored as UTC instants) but on 25 Aug in +05:30.
+        val rides = listOf(
+            ride(start = Instant.parse("2026-08-24T19:00:00Z").toEpochMilli(), distance = 40.0, durationHours = 1, speed = 40.0),
+            ride(start = Instant.parse("2026-08-24T15:00:00Z").toEpochMilli(), distance = 20.0, durationHours = 1, speed = 20.0),
+        )
+
+        val utcClock = clockAt(now)
+        val istClock = Clock.fixed(Instant.ofEpochMilli(now), ZoneOffset.ofHoursMinutes(5, 30))
+
+        assertEquals(
+            "From a UTC clock today is 24 Aug and both rides are in scope",
+            2,
+            InsightsCalculator.calculate(rides, InsightPeriod.Today, utcClock).rideCount,
+        )
+        assertEquals(
+            "From an +05:30 clock today is 25 Aug; only the 00:30 IST ride is in scope",
+            1,
+            InsightsCalculator.calculate(rides, InsightPeriod.Today, istClock).rideCount,
+        )
     }
 
     @Test
