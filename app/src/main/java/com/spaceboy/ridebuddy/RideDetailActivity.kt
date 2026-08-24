@@ -78,9 +78,10 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMapOptions
+import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 
@@ -439,20 +440,25 @@ private fun RideDetailContent(
 @androidx.compose.runtime.Composable
 private fun RouteCard(points: List<Pair<Double, Double>>) {
     if (points.size < 2) return
-    
+
     val routeColor = MaterialTheme.colorScheme.primary
     val cameraPaddingPx = with(LocalDensity.current) { 64.dp.toPx().toInt() }
-    
-    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
-    val bounds = remember(route) { 
-        LatLngBounds.builder().apply { route.forEach(::include) }.build() 
-    }
-    val cameraPositionState = rememberCameraPositionState()
 
-    // Move camera to bounds once layout and bounds are ready
-    LaunchedEffect(bounds) {
-        cameraPositionState.move(CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx))
+    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
+    val bounds = remember(route) {
+        LatLngBounds.builder().apply { route.forEach(::include) }.build()
     }
+
+    // Compose key() keeps camera state stable when the LazyColumn recycles this
+    // item, and seeds the camera at the bounds centre so the map doesn't flash at
+    // (0, 0) before onMapLoaded fires. Using key() instead of the deprecated
+    // rememberCameraPositionState(key = …) parameter silences the deprecation.
+    val cameraPositionState = androidx.compose.runtime.key(bounds) {
+        rememberCameraPositionState {
+            position = CameraPosition.fromLatLngZoom(bounds.center, 12f)
+        }
+    }
+    val scope = rememberCoroutineScope()
 
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp)) {
@@ -477,6 +483,20 @@ private fun RouteCard(points: List<Pair<Double, Double>>) {
                     rotationGesturesEnabled = false,
                     tiltGesturesEnabled = false,
                 ),
+                onMapLoaded = {
+                    // onMapLoaded only fires once the MapView is measured and the
+                    // Maps SDK is ready, so newLatLngBounds is guaranteed safe.
+                    // Fall back to newLatLngZoom when bounds collapse to a point
+                    // (zero-area bounds can throw IllegalArgumentException).
+                    scope.launch {
+                        val update = if (bounds.southwest == bounds.northeast) {
+                            CameraUpdateFactory.newLatLngZoom(bounds.center, 15f)
+                        } else {
+                            CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx)
+                        }
+                        cameraPositionState.move(update)
+                    }
+                },
             ) {
                 Polyline(
                     points = route,
