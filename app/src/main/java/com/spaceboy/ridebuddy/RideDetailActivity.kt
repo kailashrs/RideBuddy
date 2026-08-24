@@ -80,7 +80,6 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.GoogleMapOptions
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
@@ -470,8 +469,10 @@ private fun RouteCard(points: List<Pair<Double, Double>>) {
                     .padding(top = 12.dp)
                     .semantics { contentDescription = "Map of the recorded ride" },
                 cameraPositionState = cameraPositionState,
-                // Keep Lite Mode for lightweight static rendering inside LazyColumn
-                googleMapOptionsFactory = { GoogleMapOptions().liteMode(true) },
+                // The Maps SDK shipped via the Navigation SDK is the compile-time
+                // stub; Lite mode throws UnsupportedOperationException there. The
+                // surrounding uiSettings disables every gesture anyway, so the
+                // default full GoogleMap renders statically inside LazyColumn.
                 properties = MapProperties(isMyLocationEnabled = false),
                 uiSettings = MapUiSettings(
                     zoomControlsEnabled = false,
