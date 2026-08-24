@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -73,7 +72,7 @@ android {
     }
 
     lint {
-        // Gradle 8.13 is intentionally paired with AGP 8.13.2 and Navigation SDK 7.8.0.
+        // Updated to AGP 9.3.1 and Navigation SDK 7.9.0.
         disable += "AndroidGradlePluginVersion"
         sarifReport = true
     }
@@ -92,11 +91,6 @@ android {
     }
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
-}
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
