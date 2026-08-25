@@ -123,6 +123,7 @@ data class MoreSettingsActions(
     val onDynamicColorChanged: (Boolean) -> Unit,
     val onHighContrastChanged: (Boolean) -> Unit,
     val onBleCaptureEnabledChanged: (Boolean) -> Unit,
+    val onPersistConnectionDiagnosticsChanged: (Boolean) -> Unit,
 )
 
 @Composable
@@ -739,6 +740,18 @@ fun SettingsScreen(
                 title = "Connection details",
                 supportingText = "Connection state, GATT services, and recent activity",
                 onClick = onOpenDiagnostics,
+            )
+            HorizontalDivider(Modifier.padding(start = 56.dp))
+            SettingsSwitchRow(
+                title = "Save diagnostic history",
+                supportingText = if (settings.persistConnectionDiagnostics) {
+                    "Recent connection activity is saved across app restarts"
+                } else {
+                    "Off — connection activity is kept only for this app session"
+                },
+                icon = Icons.Outlined.History,
+                checked = settings.persistConnectionDiagnostics,
+                onCheckedChange = settingsActions.onPersistConnectionDiagnosticsChanged,
             )
             HorizontalDivider()
             DeveloperToolsGroupLabel("Protocol capture")

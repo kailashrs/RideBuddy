@@ -176,6 +176,7 @@ class MainActivity : ComponentActivity() {
                     onDynamicColorChanged = viewModel::setDynamicColor,
                     onHighContrastChanged = viewModel::setHighContrast,
                     onBleCaptureEnabledChanged = viewModel::setBleCaptureEnabled,
+                    onPersistConnectionDiagnosticsChanged = viewModel::setPersistConnectionDiagnostics,
                 )
             }
             LaunchedEffect(Unit) { maybeAutoConnect() }

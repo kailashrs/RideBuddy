@@ -3,6 +3,8 @@ package com.spaceboy.ridebuddy
 import android.content.Context
 import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
+import com.spaceboy.ridebuddy.ble.ConnectionEventJournal
+import com.spaceboy.ridebuddy.ble.SharedPreferencesConnectionEventStore
 import com.spaceboy.ridebuddy.ble.SharedPreferencesProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
@@ -38,14 +40,20 @@ class AppContainer(context: Context) {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val bleCaptureRecorder = BleCaptureRecorder()
     private val protectionAcceptanceStore = SharedPreferencesProtectionAcceptanceStore(context)
+    val appSettings = AppSettingsRepository(context)
+    internal val connectionEventJournal = ConnectionEventJournal(
+        store = SharedPreferencesConnectionEventStore(context),
+        scope = applicationScope,
+        initialPersistenceEnabled = appSettings.settings.value.persistConnectionDiagnostics,
+    )
     val bikeConnection: BikeConnection = AndroidBikeConnection(
         context,
         bleCaptureRecorder,
         protectionAcceptanceStore,
+        connectionEventJournal,
     )
     val rideLocationTracker = RideLocationTracker(context)
     val rideRepository = RideRepository(context)
-    val appSettings = AppSettingsRepository(context)
     val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, applicationScope)
     private val rideLocationLabeler = RideLocationLabeler(context)
     val rideRecorder = RideRecorder(
@@ -87,6 +95,12 @@ class AppContainer(context: Context) {
                 .map { it.bleCaptureEnabled }
                 .distinctUntilChanged()
                 .collect(bleCaptureRecorder::setEnabled)
+        }
+        applicationScope.launch {
+            appSettings.settings
+                .map { it.persistConnectionDiagnostics }
+                .distinctUntilChanged()
+                .collect(connectionEventJournal::setPersistenceEnabled)
         }
         // Defer Keystore decrypt off Application.onCreate — the slow path is the
         // first KeyStore.getInstance() call (cold-cache Binder IPC, ~20-50ms on

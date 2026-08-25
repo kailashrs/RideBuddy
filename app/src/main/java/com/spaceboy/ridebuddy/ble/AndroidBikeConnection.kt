@@ -36,13 +36,13 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
-import java.time.LocalTime
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -51,6 +51,26 @@ import kotlin.time.Duration.Companion.milliseconds
 internal fun reconnectDelayMillis(attempt: Int): Long? {
     if (attempt !in 0 until MaxReconnectAttempts) return null
     return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(attempt, 5))
+}
+
+internal fun shouldStartConnection(
+    currentTarget: BikeConnectionTarget?,
+    requestedTarget: BikeConnectionTarget,
+    state: BikeConnectionState,
+): Boolean = currentTarget?.address != requestedTarget.address ||
+    state is BikeConnectionState.Disconnected ||
+    state is BikeConnectionState.Failed
+
+internal fun gattConnectionStatusLabel(status: Int): String = when (status) {
+    BluetoothGatt.GATT_SUCCESS -> "success"
+    0x08 -> "link supervision timeout"
+    0x13 -> "peer terminated connection"
+    0x16 -> "local host terminated connection"
+    0x3E -> "connection failed to establish"
+    0x85 -> "generic GATT error"
+    BluetoothGatt.GATT_CONNECTION_TIMEOUT -> "GATT connection timeout"
+    BluetoothGatt.GATT_FAILURE -> "GATT failure"
+    else -> "unknown"
 }
 
 private const val MaxReconnectAttempts = 6
@@ -62,6 +82,7 @@ internal class AndroidBikeConnection(
     context: Context,
     private val captureRecorder: BleCaptureRecorder,
     private val protectionAcceptanceStore: ProtectionAcceptanceStore,
+    private val connectionEventJournal: ConnectionEventJournal,
 ) : BikeConnection {
     private val appContext = context.applicationContext
     private val bluetoothManager = appContext.getSystemService(android.bluetooth.BluetoothManager::class.java)
@@ -88,6 +109,7 @@ internal class AndroidBikeConnection(
     private var reconnectAttempt = 0
     private var connectionGeneration = 0L
     private var connectionMonitoringActive = false
+    private var gattConnectedAtElapsedRealtime: Long? = null
     private val nextWriteRequestId = AtomicLong()
     private val telemetryTimestamps = ArrayDeque<Long>()
     private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -100,7 +122,9 @@ internal class AndroidBikeConnection(
         extraBufferCapacity = RawTelemetryBufferCapacity,
     )
     private val mutableIdentity = MutableStateFlow(BikeIdentity())
-    private val mutableDiagnostics = MutableStateFlow(BleDiagnostics())
+    private val mutableDiagnostics = MutableStateFlow(
+        BleDiagnostics(recentEvents = connectionEventJournal.events.value),
+    )
     private val mutableControls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)
     private val sampledTelemetry = mutableTelemetry
         .sample(TelemetrySampleIntervalMillis.milliseconds)
@@ -109,6 +133,15 @@ internal class AndroidBikeConnection(
     init {
         telemetryScope.launch {
             for (reading in rawTelemetryChannel) mutableRawTelemetry.emit(reading)
+        }
+        telemetryScope.launch {
+            connectionEventJournal.events.collect { events ->
+                mainHandler.post {
+                    mutableDiagnostics.update { diagnostics ->
+                        diagnostics.copy(recentEvents = events)
+                    }
+                }
+            }
         }
     }
 
@@ -122,6 +155,10 @@ internal class AndroidBikeConnection(
 
     override fun connect(target: BikeConnectionTarget) {
         mainHandler.post {
+            if (!shouldStartConnection(connectionTarget, target, mutableConnectionState.value)) {
+                log("Ignored duplicate connection request for ${target.deviceName}; connection already active")
+                return@post
+            }
             connectionGeneration++
             intentionalDisconnect = true
             disconnectInternal(closeOnly = false)
@@ -151,7 +188,7 @@ internal class AndroidBikeConnection(
             mainHandler.removeCallbacksAndMessages(ReconnectToken)
             disconnectInternal(closeOnly = false)
             mutableConnectionState.value = BikeConnectionState.Disconnected
-            log("Disconnected")
+            log("Disconnected by app request")
         }
     }
 
@@ -405,12 +442,19 @@ internal class AndroidBikeConnection(
                         return
                     }
                     this@AndroidBikeConnection.gatt = gatt
+                    gattConnectedAtElapsedRealtime = SystemClock.elapsedRealtime()
                     log("GATT connected")
                     discoverServices(gatt)
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    log("GATT disconnected, status $status")
+                    val linkAgeSeconds = gattConnectedAtElapsedRealtime?.let { connectedAt ->
+                        (SystemClock.elapsedRealtime() - connectedAt).coerceAtLeast(0L) / 1_000L
+                    }
+                    log(
+                        "GATT disconnected, status $status (${gattConnectionStatusLabel(status)})" +
+                            linkAgeSeconds?.let { ", link age ${it}s" }.orEmpty(),
+                    )
                     val wasIntentional = intentionalDisconnect
                     disconnectInternal(closeOnly = true)
                     if (!wasIntentional) {
@@ -674,18 +718,6 @@ internal class AndroidBikeConnection(
         }
         postAuthenticationGate = PostAuthenticationGate(BleCharacteristics.PostAuthenticationSubscriptions)
         enqueueAll(subscriptions)
-
-        // Read-only identity characteristics on the RS457 (no NOTIFY/INDICATE) are
-        // queued as explicit reads so the Info screen actually receives values.
-        val identityReads = BleCharacteristics.PostAuthenticationIdentityReads.mapNotNull { uuid ->
-            val characteristic = characteristics[uuid] ?: return@mapNotNull null
-            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) null
-            else GattOperation.Read(characteristic)
-        }
-        if (identityReads.isNotEmpty()) {
-            log("Queuing ${identityReads.size} post-auth identity read(s)")
-            enqueueAll(identityReads)
-        }
     }
 
     private fun onSubscriptionCompleted(operation: GattOperation.Subscribe) {
@@ -1046,6 +1078,7 @@ internal class AndroidBikeConnection(
 
     private fun disconnectInternal(closeOnly: Boolean) {
         connectionMonitoringActive = false
+        gattConnectedAtElapsedRealtime = null
         mainHandler.removeCallbacks(rssiRunnable)
         bondCoordinator.cancel()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
@@ -1102,10 +1135,7 @@ internal class AndroidBikeConnection(
     private fun isCurrent(callbackGatt: BluetoothGatt): Boolean = callbackGatt === gatt
 
     private fun log(message: String) {
-        val timestamped = "${LocalTime.now().withNano(0)}  $message"
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-            recentEvents = (listOf(timestamped) + mutableDiagnostics.value.recentEvents).take(MaxLogEntries),
-        )
+        connectionEventJournal.record(message)
     }
 
     private fun ByteArray.cleanText(): String = toString(Charsets.UTF_8).trim('\u0000', ' ', '\r', '\n')
@@ -1155,7 +1185,6 @@ internal class AndroidBikeConnection(
         const val VinLength = 17
         val PrintableAsciiRange = 0x20..0x7E
         const val MaxOperationRetries = 2
-        const val MaxLogEntries = 40
         const val MaxFrameEntries = 30
     }
 }

@@ -293,6 +293,8 @@ class MainViewModel(
     fun setTftCallControls(value: Boolean) = updateSettings { it.copy(tftCallControls = value) }
     fun setTftNavigationOutput(value: Boolean) = updateSettings { it.copy(tftNavigationOutputEnabled = value) }
     fun setBleCaptureEnabled(value: Boolean) = updateSettings { it.copy(bleCaptureEnabled = value) }
+    fun setPersistConnectionDiagnostics(value: Boolean) =
+        updateSettings { it.copy(persistConnectionDiagnostics = value) }
     fun completeOnboarding() = updateSettings { it.copy(onboardingComplete = true) }
     fun resetOnboarding() = updateSettings { it.copy(onboardingComplete = false) }
     fun setRideStartSpeed(value: Double) = updateSettings { it.copy(rideStartSpeedKph = value.coerceIn(1.0, 15.0)) }

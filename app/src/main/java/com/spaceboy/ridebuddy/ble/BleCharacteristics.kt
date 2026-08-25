@@ -32,10 +32,6 @@ object BleCharacteristics {
         CallEvent,
         CallControl,
         Telemetry,
-    )
-
-    /** Read-only identity characteristics queried once after authentication. */
-    val PostAuthenticationIdentityReads: List<UUID> = listOf(
         ClusterSoftwareVersion,
         Vin,
     )

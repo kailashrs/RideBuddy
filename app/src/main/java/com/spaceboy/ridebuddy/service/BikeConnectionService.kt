@@ -84,19 +84,6 @@ class BikeConnectionService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ActionDeviceAbsent -> {
-                val address = intent.bluetoothAddressExtra()
-                val remembered = AssociatedBikeStore(this).read()
-                if (remembered != null && remembered.bluetoothAddress == address) {
-                    container.bikeConnection.disconnect()
-                    stopSelf()
-                } else if (container.bikeConnection.connectionState.value is BikeConnectionState.Disconnected) {
-                    // A stale presence event can start a fresh service after the association has
-                    // changed. There is no active connection to own in that case.
-                    stopSelf()
-                }
-                return START_NOT_STICKY
-            }
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
             ActionRestartConnect -> {
                 val address = intent.bluetoothAddressExtra()
@@ -242,7 +229,6 @@ class BikeConnectionService : Service() {
         private const val ChannelId = "bike_connection"
         private const val NotificationId = 457
         private const val ActionDisconnect = "disconnect"
-        private const val ActionDeviceAbsent = "device_absent"
         private const val ActionEnableLocation = "enable_location"
         private const val ActionRestartConnect = "restart_connect"
         private const val ExtraAddressBytes = "address_bytes"
@@ -306,19 +292,6 @@ class BikeConnectionService : Service() {
                 context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
                 )
-            }
-            return started
-        }
-
-        fun deviceAbsent(context: Context, address: BluetoothAddress): Boolean {
-            val started = ContextCompatBridge.startForegroundService(
-                context,
-                Intent(context, BikeConnectionService::class.java)
-                    .setAction(ActionDeviceAbsent)
-                    .putExtra(ExtraAddressBytes, address.toByteArray()),
-            )
-            if (!started && AssociatedBikeStore(context).read()?.bluetoothAddress == address) {
-                context.appContainer.bikeConnection.disconnect()
             }
             return started
         }

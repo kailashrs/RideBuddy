@@ -37,6 +37,7 @@ data class AppSettings(
     val tftCallControls: Boolean = false,
     val tftNavigationOutputEnabled: Boolean = false,
     val bleCaptureEnabled: Boolean = false,
+    val persistConnectionDiagnostics: Boolean = false,
     val onboardingComplete: Boolean = false,
     val rideStartSpeedKph: Double = 3.0,
     val rideStopSpeedKph: Double = 1.0,
@@ -79,6 +80,7 @@ class AppSettingsRepository(context: Context) {
             putBoolean(KeyTftCallControls, updated.tftCallControls)
             putBoolean(KeyTftNavigationOutput, updated.tftNavigationOutputEnabled)
             putBoolean(KeyBleCaptureEnabled, updated.bleCaptureEnabled)
+            putBoolean(KeyPersistConnectionDiagnostics, updated.persistConnectionDiagnostics)
             putBoolean(KeyOnboarding, updated.onboardingComplete)
             putFloat(KeyRideStart, updated.rideStartSpeedKph.toFloat())
             putFloat(KeyRideStop, updated.rideStopSpeedKph.toFloat())
@@ -120,6 +122,7 @@ class AppSettingsRepository(context: Context) {
             tftCallControls = preferences.getBoolean(KeyTftCallControls, false),
             tftNavigationOutputEnabled = preferences.getBoolean(KeyTftNavigationOutput, false),
             bleCaptureEnabled = preferences.getBoolean(KeyBleCaptureEnabled, false),
+            persistConnectionDiagnostics = preferences.getBoolean(KeyPersistConnectionDiagnostics, false),
             onboardingComplete = preferences.getBoolean(KeyOnboarding, false),
             rideStartSpeedKph = preferences.getFloat(KeyRideStart, 3f).toDouble(),
             rideStopSpeedKph = preferences.getFloat(KeyRideStop, 1f).toDouble(),
@@ -157,6 +160,7 @@ class AppSettingsRepository(context: Context) {
         const val KeyTftCallControls = "tft_call_controls"
         const val KeyTftNavigationOutput = "tft_navigation_output"
         const val KeyBleCaptureEnabled = "ble_capture_enabled"
+        const val KeyPersistConnectionDiagnostics = "persist_connection_diagnostics"
         const val KeyOnboarding = "onboarding_complete"
         const val KeyRideStart = "ride_start_speed"
         const val KeyRideStop = "ride_stop_speed"
