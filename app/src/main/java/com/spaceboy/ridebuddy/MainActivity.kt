@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy
 
 import android.Manifest
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,11 +13,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.viewModels
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
@@ -27,14 +30,24 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
+import com.spaceboy.ridebuddy.ble.BleCaptureState
+import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
+import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
+import com.spaceboy.ridebuddy.data.AppSettings
+import com.spaceboy.ridebuddy.data.InsightPeriod
+import com.spaceboy.ridebuddy.data.LiveRideMetrics
+import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.domain.BikeIdentity
+import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.service.BikeConnectionService
 import com.spaceboy.ridebuddy.ui.MainScreen
 import com.spaceboy.ridebuddy.ui.MainScreenActions
+import com.spaceboy.ridebuddy.ui.MainScreenContent
 import com.spaceboy.ridebuddy.ui.MainScreenState
 import com.spaceboy.ridebuddy.ui.OnboardingScreen
 import com.spaceboy.ridebuddy.ui.labelResource
@@ -110,7 +123,7 @@ class MainActivity : ComponentActivity() {
         val bike = manager.acceptActivityResult(result.resultCode, result.data)
         if (bike != null) {
             connectNewAssociation(bike)
-        } else if (result.resultCode == android.app.Activity.RESULT_CANCELED) {
+        } else if (result.resultCode == Activity.RESULT_CANCELED) {
             viewModel.showMessage("Pairing canceled")
         }
     }
@@ -132,21 +145,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
-            val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
-            val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
-            val identity = viewModel.identity.collectAsStateWithLifecycle().value
-            val diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value
-            val bleCapture = viewModel.bleCapture.collectAsStateWithLifecycle().value
-            val activeRide = viewModel.activeRide.collectAsStateWithLifecycle().value
-            val liveRideSamples = viewModel.liveRideSamples.collectAsStateWithLifecycle().value
-            val rides = viewModel.rides.collectAsStateWithLifecycle().value
-            val insights = viewModel.insights.collectAsStateWithLifecycle().value
-            val insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value
-            val guidance = viewModel.guidance.collectAsStateWithLifecycle().value
             val settings = viewModel.settings.collectAsStateWithLifecycle().value
             val autoStartSharedDestination = uiState.autoStartSharedDestination
-            LaunchedEffect(autoStartSharedDestination?.requestId) {
-                autoStartSharedDestination?.let { request ->
+            LaunchedEffect(autoStartSharedDestination?.requestId, uiState.navigationKey.isLoading) {
+                if (!uiState.navigationKey.isLoading) autoStartSharedDestination?.let { request ->
                     lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                         startNavigation(request.destination, request.requestId)
                     }
@@ -179,6 +181,7 @@ class MainActivity : ComponentActivity() {
                     onPersistConnectionDiagnosticsChanged = viewModel::setPersistConnectionDiagnostics,
                 )
             }
+            val mainScreenActions = remember(settingsActions) { createMainScreenActions(settingsActions) }
             LaunchedEffect(Unit) { maybeAutoConnect() }
 
             Rs457Theme(
@@ -187,105 +190,173 @@ class MainActivity : ComponentActivity() {
                 highContrast = settings.highContrast,
             ) {
                 if (!settings.onboardingComplete) {
-                    OnboardingScreen(
-                        connectionState = connectionState,
-                        bikeAssociated = bikeAssociation.bike != null,
-                        associatedBikeLabel = bikeAssociation.bike?.let { "${it.name} • ${it.address.takeLast(5)}" },
-                        nearbyDeviceAccessGranted = nearbyDeviceAccessGranted,
-                        preciseLocationGranted = preciseLocationGranted,
-                        notificationAccessEnabled = notificationAccessEnabled,
-                        appNotificationPermissionGranted = appNotificationPermissionGranted,
-                        legacyCallPermissionGranted = legacyCallPermissionGranted,
-                        telemetryReceiving = telemetry != null,
-                        authenticated = diagnostics.authenticated,
-                        navigationConfigured = uiState.navigationKey.isConfigured,
-                        onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
-                        onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
-                        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
-                        onOpenNotificationAccess = ::openNotificationAccessSettings,
-                        onRequestAppNotificationPermission = ::requestAppNotificationPermission,
-                        onEnableLegacyCalls = { setLegacyCallControls(true) },
-                        onSetUpNavigation = {
-                            viewModel.completeOnboarding()
-                            viewModel.openNavigationSettings()
-                        },
-                        onComplete = viewModel::completeOnboarding,
-                    )
-                } else MainScreen(
-                    state = MainScreenState(
+                    OnboardingRoute(
                         uiState = uiState,
-                        connectionState = connectionState,
-                        telemetry = telemetry,
-                        identity = identity,
-                        diagnostics = diagnostics,
-                        bleCapture = bleCapture,
-                        activeRide = activeRide,
-                        liveRideSamples = liveRideSamples,
-                        rides = rides,
-                        insights = insights,
-                        insightPeriod = insightPeriod,
-                        guidance = guidance,
-                        settings = settings,
                         bikeAssociation = bikeAssociation,
-                        notificationAccessEnabled = notificationAccessEnabled,
-                        legacyCallPermissionGranted = legacyCallPermissionGranted,
-                        backgroundLocationGranted = backgroundLocationGranted,
-                    ),
-                    actions = MainScreenActions(
-                        onDestinationSelected = viewModel::selectDestination,
-                        onOpenNavigationSettings = viewModel::openNavigationSettings,
-                        onCloseNavigationSettings = viewModel::closeNavigationSettings,
-                        onOpenDiagnostics = viewModel::openDiagnostics,
-                        onCloseDiagnostics = viewModel::closeDiagnostics,
-                        onSaveNavigationApiKey = viewModel::saveNavigationApiKey,
-                        onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
-                        onTestNavigationApiKey = viewModel::testNavigationApiKey,
-                        onReconnect = ::reconnectToSavedBike,
-                        onDisconnectBike = { BikeConnectionService.disconnect(this@MainActivity) },
-                        onStartNavigation = ::startNavigation,
-                        onOpenActiveNavigation = ::openActiveNavigation,
-                        onStopNavigation = ::stopNavigation,
-                        onSharedDestinationHandled = viewModel::clearSharedDestination,
-                        onInsightPeriodSelected = viewModel::selectInsightPeriod,
-                        onClearRideHistory = viewModel::clearRideHistory,
-                        onExportRideHistory = ::exportRideHistory,
-                        onOpenNotificationAccess = ::openNotificationAccessSettings,
-                        onEnableCallControls = {
-                            if (!notificationAccessEnabled) {
-                                openNotificationAccessSettings()
-                            } else {
-                                viewModel.showMessage("Standard call controls are enabled")
-                            }
-                        },
-                        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
-                        onForgetBike = ::forgetBike,
-                        onRideSelected = { ride ->
-                            startActivity(RideDetailActivity.intent(this@MainActivity, ride.id))
-                        },
-                        onDistanceUnitsChanged = viewModel::setDistanceUnits,
-                        onVoiceGuidanceChanged = viewModel::setVoiceGuidance,
-                        onAvoidTollsChanged = viewModel::setAvoidTolls,
-                        onAvoidHighwaysChanged = viewModel::setAvoidHighways,
-                        onAvoidFerriesChanged = viewModel::setAvoidFerries,
-                        onAutoStartSharedChanged = viewModel::setAutoStartSharedDestinations,
-                        onMessageAlertsChanged = viewModel::setMessageAlerts,
-                        onSocialAlertsChanged = viewModel::setSocialAlerts,
-                        onEmailAlertsChanged = viewModel::setEmailAlerts,
-                        settingsActions = settingsActions,
-                        onResetOnboarding = viewModel::resetOnboarding,
-                        onExportDiagnostics = ::exportDiagnostics,
-                        onExportBleCapture = ::exportBleCapture,
-                        onClearBleCapture = viewModel::clearBleCapture,
-                        onRunStationaryTest = ::runStationaryTftTest,
-                        onLegacyCallControlsChanged = ::setLegacyCallControls,
-                        onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
-                        onOpenAppPermissions = ::openAppPermissionSettings,
-                        onMessageShown = viewModel::clearTransientMessage,
-                    ),
-                )
+                    )
+                } else {
+                    MainScreenRoute(uiState, settings, bikeAssociation, mainScreenActions)
+                }
             }
         }
     }
+
+    @Composable
+    private fun OnboardingRoute(uiState: MainUiState, bikeAssociation: BikeAssociationState) {
+        val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
+        val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
+        val diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value
+        OnboardingScreen(
+            connectionState = connectionState,
+            bikeAssociated = bikeAssociation.bike != null,
+            associatedBikeLabel = bikeAssociation.bike?.let { "${it.name} • ${it.address.takeLast(5)}" },
+            nearbyDeviceAccessGranted = nearbyDeviceAccessGranted,
+            preciseLocationGranted = preciseLocationGranted,
+            notificationAccessEnabled = notificationAccessEnabled,
+            appNotificationPermissionGranted = appNotificationPermissionGranted,
+            legacyCallPermissionGranted = legacyCallPermissionGranted,
+            telemetryReceiving = telemetry != null,
+            authenticated = diagnostics.authenticated,
+            navigationConfigured = uiState.navigationKey.isConfigured,
+            onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
+            onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
+            onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
+            onOpenNotificationAccess = ::openNotificationAccessSettings,
+            onRequestAppNotificationPermission = ::requestAppNotificationPermission,
+            onEnableLegacyCalls = { setLegacyCallControls(true) },
+            onSetUpNavigation = {
+                viewModel.completeOnboarding()
+                viewModel.openNavigationSettings()
+            },
+            onComplete = viewModel::completeOnboarding,
+        )
+    }
+
+    @Composable
+    private fun MainScreenRoute(
+        uiState: MainUiState,
+        settings: AppSettings,
+        bikeAssociation: BikeAssociationState,
+        actions: MainScreenActions,
+    ) {
+        MainScreen(uiState = uiState, actions = actions) { modifier ->
+            MainScreenContentRoute(modifier, uiState, settings, bikeAssociation, actions)
+        }
+    }
+
+    @Composable
+    private fun MainScreenContentRoute(
+        modifier: Modifier,
+        uiState: MainUiState,
+        settings: AppSettings,
+        bikeAssociation: BikeAssociationState,
+        actions: MainScreenActions,
+    ) {
+        val showingNavigationSettings = uiState.isNavigationSettingsOpen
+        val showingDiagnostics = uiState.isDiagnosticsOpen
+        val liveVisible = !showingNavigationSettings && !showingDiagnostics &&
+            uiState.selectedDestination == TopLevelDestination.Live
+        val historyVisible = !showingNavigationSettings && !showingDiagnostics &&
+            uiState.selectedDestination == TopLevelDestination.History
+        val insightsVisible = !showingNavigationSettings && !showingDiagnostics &&
+            uiState.selectedDestination == TopLevelDestination.Insights
+        val infoVisible = !showingNavigationSettings && !showingDiagnostics &&
+            uiState.selectedDestination == TopLevelDestination.Info
+        val moreVisible = !showingNavigationSettings && !showingDiagnostics &&
+            uiState.selectedDestination == TopLevelDestination.More
+
+        MainScreenContent(
+            modifier = modifier,
+            state = MainScreenState(
+                uiState = uiState,
+                connectionState = if (liveVisible || infoVisible || showingDiagnostics) {
+                    viewModel.connectionState.collectAsStateWithLifecycle().value
+                } else BikeConnectionState.Disconnected,
+                telemetry = if (liveVisible) viewModel.telemetry.collectAsStateWithLifecycle().value else null,
+                identity = if (infoVisible || showingDiagnostics) {
+                    viewModel.identity.collectAsStateWithLifecycle().value
+                } else BikeIdentity(),
+                diagnostics = if (liveVisible || showingDiagnostics) {
+                    viewModel.diagnostics.collectAsStateWithLifecycle().value
+                } else BleDiagnostics(),
+                bleCapture = if (moreVisible || showingDiagnostics) {
+                    viewModel.bleCapture.collectAsStateWithLifecycle().value
+                } else BleCaptureState(),
+                activeRide = if (liveVisible) viewModel.activeRide.collectAsStateWithLifecycle().value else null,
+                liveRideSamples = if (liveVisible) {
+                    viewModel.liveRideSamples.collectAsStateWithLifecycle().value
+                } else emptyList(),
+                liveRideMetrics = if (liveVisible) {
+                    viewModel.liveRideMetrics.collectAsStateWithLifecycle().value
+                } else LiveRideMetrics(),
+                rides = if (liveVisible || historyVisible || insightsVisible || moreVisible) {
+                    viewModel.rides.collectAsStateWithLifecycle().value
+                } else emptyList(),
+                insights = if (insightsVisible) {
+                    viewModel.insights.collectAsStateWithLifecycle().value
+                } else RideInsights(),
+                insightPeriod = if (insightsVisible) {
+                    viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value
+                } else InsightPeriod.ThirtyDays,
+                guidance = if (liveVisible) {
+                    viewModel.guidance.collectAsStateWithLifecycle().value
+                } else GuidanceState(),
+                settings = settings,
+                bikeAssociation = bikeAssociation,
+                notificationAccessEnabled = notificationAccessEnabled,
+                legacyCallPermissionGranted = legacyCallPermissionGranted,
+                backgroundLocationGranted = backgroundLocationGranted,
+            ),
+            actions = actions,
+        )
+    }
+
+    private fun createMainScreenActions(settingsActions: MoreSettingsActions) = MainScreenActions(
+        onDestinationSelected = viewModel::selectDestination,
+        onOpenNavigationSettings = viewModel::openNavigationSettings,
+        onCloseNavigationSettings = viewModel::closeNavigationSettings,
+        onOpenDiagnostics = viewModel::openDiagnostics,
+        onCloseDiagnostics = viewModel::closeDiagnostics,
+        onSaveNavigationApiKey = viewModel::saveNavigationApiKey,
+        onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
+        onTestNavigationApiKey = viewModel::testNavigationApiKey,
+        onReconnect = ::reconnectToSavedBike,
+        onDisconnectBike = { BikeConnectionService.disconnect(this) },
+        onStartNavigation = ::startNavigation,
+        onOpenActiveNavigation = ::openActiveNavigation,
+        onStopNavigation = ::stopNavigation,
+        onSharedDestinationHandled = viewModel::clearSharedDestination,
+        onInsightPeriodSelected = viewModel::selectInsightPeriod,
+        onClearRideHistory = viewModel::clearRideHistory,
+        onExportRideHistory = ::exportRideHistory,
+        onOpenNotificationAccess = ::openNotificationAccessSettings,
+        onEnableCallControls = {
+            if (!notificationAccessEnabled) openNotificationAccessSettings()
+            else viewModel.showMessage("Standard call controls are enabled")
+        },
+        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
+        onForgetBike = ::forgetBike,
+        onRideSelected = { ride -> startActivity(RideDetailActivity.intent(this, ride.id)) },
+        onDistanceUnitsChanged = viewModel::setDistanceUnits,
+        onVoiceGuidanceChanged = viewModel::setVoiceGuidance,
+        onAvoidTollsChanged = viewModel::setAvoidTolls,
+        onAvoidHighwaysChanged = viewModel::setAvoidHighways,
+        onAvoidFerriesChanged = viewModel::setAvoidFerries,
+        onAutoStartSharedChanged = viewModel::setAutoStartSharedDestinations,
+        onMessageAlertsChanged = viewModel::setMessageAlerts,
+        onSocialAlertsChanged = viewModel::setSocialAlerts,
+        onEmailAlertsChanged = viewModel::setEmailAlerts,
+        settingsActions = settingsActions,
+        onResetOnboarding = viewModel::resetOnboarding,
+        onExportDiagnostics = ::exportDiagnostics,
+        onExportBleCapture = ::exportBleCapture,
+        onClearBleCapture = viewModel::clearBleCapture,
+        onRunStationaryTest = ::runStationaryTftTest,
+        onLegacyCallControlsChanged = ::setLegacyCallControls,
+        onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
+        onOpenAppPermissions = ::openAppPermissionSettings,
+        onMessageShown = viewModel::clearTransientMessage,
+    )
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -495,6 +566,13 @@ class MainActivity : ComponentActivity() {
                 return
             }
             navigationStartAttemptId = viewModel.beginNavigationStart()
+            if (viewModel.uiState.value.navigationKey.isLoading) {
+                autoStartRequestId?.let { requestId ->
+                    viewModel.restoreAutoStartSharedDestination(requestId)
+                }
+                viewModel.showMessage("Navigation setup is still loading")
+                return
+            }
             if (!viewModel.uiState.value.navigationKey.isConfigured) {
                 autoStartRequestId?.let { requestId ->
                     viewModel.restoreAutoStartSharedDestination(requestId)
@@ -626,6 +704,7 @@ class MainActivity : ComponentActivity() {
             appendLine("Characteristic reads: ${value.readsCompleted}")
             appendLine("Characteristic writes: ${value.writesCompleted}")
             appendLine("Malformed frames: ${value.malformedTelemetryFrames}")
+            appendLine("Dropped ride frames: ${value.droppedRawTelemetryFrames}")
             appendLine("VIN: ${identity.vin ?: "unknown"}")
             appendLine("Cluster software: ${identity.clusterSoftwareVersion ?: "unknown"}")
             appendLine(

@@ -1,10 +1,10 @@
 package com.spaceboy.ridebuddy.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -103,14 +104,18 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
 @Composable
 private fun WeeklySummary(rides: List<Ride>, units: DistanceUnits) {
     val locale = LocalConfiguration.current.locales[0]
-    val calendar = Calendar.getInstance().apply {
-        set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
+    val weekStart = remember(rides) {
+        Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
     }
-    val week = rides.filter { it.startedAtMillis >= calendar.timeInMillis }
+    val week = remember(rides, weekStart) {
+        rides.filter { it.startedAtMillis >= weekStart }
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
@@ -137,54 +142,56 @@ private fun RoutePreview(ride: Ride) {
     val color = MaterialTheme.colorScheme.primary
     val outline = MaterialTheme.colorScheme.outlineVariant
     val surfaceColor = MaterialTheme.colorScheme.surface
-    val cachedPath = remember(points) { Path() }
-    Canvas(Modifier.fillMaxWidth().height(100.dp).padding(vertical = 8.dp).semantics { contentDescription = "Route preview from ${ride.startArea ?: "start"} to ${ride.endArea ?: "parking location"}" }) {
+    val normalizedPoints = remember(points) {
         val minLat = points.minOf { it.latitude }
         val maxLat = points.maxOf { it.latitude }
         val minLon = points.minOf { it.longitude }
         val maxLon = points.maxOf { it.longitude }
         val latRange = (maxLat - minLat).takeIf { it > 0.0 } ?: 1.0
         val lonRange = (maxLon - minLon).takeIf { it > 0.0 } ?: 1.0
-
-        // Draw grid
-        repeat(4) { index ->
-            val y = size.height * index / 3f
-            drawLine(outline, Offset(0f, y), Offset(size.width, y), 1f)
+        points.map { point ->
+            Offset(
+                x = ((point.longitude - minLon) / lonRange).toFloat(),
+                y = (1.0 - (point.latitude - minLat) / latRange).toFloat(),
+            )
         }
-
-        if (points.size < 2) return@Canvas
-
-        cachedPath.reset()
-
-        // Calculate all points first
-        val mappedPoints = points.map { point ->
-            val x = ((point.longitude - minLon) / lonRange * size.width).toFloat()
-            val y = (size.height - (point.latitude - minLat) / latRange * size.height).toFloat()
-            Offset(x, y)
-        }
-
-        // Draw path using bezier curves
-        var previous = mappedPoints.first()
-        cachedPath.moveTo(previous.x, previous.y)
-
-        for (i in 1 until mappedPoints.size) {
-            val current = mappedPoints[i]
-            val controlX = previous.x + (current.x - previous.x) / 2f
-            cachedPath.cubicTo(controlX, previous.y, controlX, current.y, current.x, current.y)
-            previous = current
-        }
-
-        drawPath(cachedPath, color, style = Stroke(5f))
-
-        // Draw start point
-        val startPoint = mappedPoints.first()
-        drawCircle(color, radius = 6f, center = startPoint)
-
-        // Draw end point
-        val endPoint = mappedPoints.last()
-        drawCircle(surfaceColor, radius = 6f, center = endPoint)
-        drawCircle(color, radius = 6f, center = endPoint, style = Stroke(3f))
     }
+    Spacer(
+        Modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .padding(vertical = 8.dp)
+            .semantics {
+                contentDescription = "Route preview from ${ride.startArea ?: "start"} to ${ride.endArea ?: "parking location"}"
+            }
+            .drawWithCache {
+                val mappedPoints = normalizedPoints.map { point ->
+                    Offset(point.x * size.width, point.y * size.height)
+                }
+                val path = Path().apply {
+                    var previous = mappedPoints.first()
+                    moveTo(previous.x, previous.y)
+                    for (index in 1..mappedPoints.lastIndex) {
+                        val current = mappedPoints[index]
+                        val controlX = previous.x + (current.x - previous.x) / 2f
+                        cubicTo(controlX, previous.y, controlX, current.y, current.x, current.y)
+                        previous = current
+                    }
+                }
+                val startPoint = mappedPoints.first()
+                val endPoint = mappedPoints.last()
+                onDrawBehind {
+                    repeat(4) { index ->
+                        val y = size.height * index / 3f
+                        drawLine(outline, Offset(0f, y), Offset(size.width, y), 1f)
+                    }
+                    drawPath(path, color, style = Stroke(5f))
+                    drawCircle(color, radius = 6f, center = startPoint)
+                    drawCircle(surfaceColor, radius = 6f, center = endPoint)
+                    drawCircle(color, radius = 6f, center = endPoint, style = Stroke(3f))
+                }
+            },
+    )
 }
 
 @Composable

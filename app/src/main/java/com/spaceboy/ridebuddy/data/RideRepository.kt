@@ -2,8 +2,10 @@ package com.spaceboy.ridebuddy.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.database.sqlite.SQLiteStatement
 import androidx.core.database.sqlite.transaction
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -121,20 +123,22 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 ride.zeroToSixtyMillis?.let { put("zero_to_sixty", it) }
                 ride.zeroToHundredMillis?.let { put("zero_to_hundred", it) }
             })
-            samples.forEach { sample ->
-                db.insertOrThrow(SamplesTable, null, ContentValues().apply {
-                    put("ride_id", rideId)
-                    put("timestamp", sample.timestampMillis)
-                    put("speed", sample.speedKph)
-                    put("rpm", sample.rpm)
-                    put("throttle", sample.throttlePercent)
-                    sample.mileageKilometresPerLitre?.let { put("mileage_km_per_litre", it) }
-                    put("acceleration", sample.accelerationMetresPerSecondSquared)
-                    sample.latitude?.let { put("latitude", it) }
-                    sample.longitude?.let { put("longitude", it) }
-                    sample.accuracyMetres?.let { put("accuracy", it) }
-                    sample.altitudeMetres?.let { put("altitude", it) }
-                })
+            db.compileStatement(InsertSampleSql).use { statement ->
+                samples.forEach { sample ->
+                    statement.clearBindings()
+                    statement.bindLong(1, rideId)
+                    statement.bindLong(2, sample.timestampMillis)
+                    statement.bindDouble(3, sample.speedKph)
+                    statement.bindLong(4, sample.rpm)
+                    statement.bindLong(5, sample.throttlePercent.toLong())
+                    statement.bindNullableDouble(6, sample.mileageKilometresPerLitre)
+                    statement.bindDouble(7, sample.accelerationMetresPerSecondSquared)
+                    statement.bindNullableDouble(8, sample.latitude)
+                    statement.bindNullableDouble(9, sample.longitude)
+                    statement.bindNullableDouble(10, sample.accuracyMetres?.toDouble())
+                    statement.bindNullableDouble(11, sample.altitudeMetres)
+                    statement.executeInsert()
+                }
             }
             rideId
         }
@@ -155,19 +159,29 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
     fun readSamples(rideId: Long): List<RideSample> = readableDatabase.query(
         SamplesTable, null, "ride_id = ?", arrayOf(rideId.toString()), null, null, "timestamp ASC",
     ).use { cursor ->
-        buildList {
+        val timestamp = cursor.getColumnIndexOrThrow("timestamp")
+        val speed = cursor.getColumnIndexOrThrow("speed")
+        val rpm = cursor.getColumnIndexOrThrow("rpm")
+        val throttle = cursor.getColumnIndexOrThrow("throttle")
+        val mileage = cursor.getColumnIndexOrThrow("mileage_km_per_litre")
+        val acceleration = cursor.getColumnIndexOrThrow("acceleration")
+        val latitude = cursor.getColumnIndexOrThrow("latitude")
+        val longitude = cursor.getColumnIndexOrThrow("longitude")
+        val accuracy = cursor.getColumnIndexOrThrow("accuracy")
+        val altitude = cursor.getColumnIndexOrThrow("altitude")
+        buildList(cursor.count) {
             while (cursor.moveToNext()) add(
                 RideSample(
-                    timestampMillis = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
-                    speedKph = cursor.getDouble(cursor.getColumnIndexOrThrow("speed")),
-                    rpm = cursor.getLong(cursor.getColumnIndexOrThrow("rpm")),
-                    throttlePercent = cursor.getInt(cursor.getColumnIndexOrThrow("throttle")),
-                    mileageKilometresPerLitre = cursor.nullableDouble("mileage_km_per_litre"),
-                    accelerationMetresPerSecondSquared = cursor.getDouble(cursor.getColumnIndexOrThrow("acceleration")),
-                    latitude = cursor.nullableDouble("latitude"),
-                    longitude = cursor.nullableDouble("longitude"),
-                    accuracyMetres = cursor.nullableDouble("accuracy")?.toFloat(),
-                    altitudeMetres = cursor.nullableDouble("altitude"),
+                    timestampMillis = cursor.getLong(timestamp),
+                    speedKph = cursor.getDouble(speed),
+                    rpm = cursor.getLong(rpm),
+                    throttlePercent = cursor.getInt(throttle),
+                    mileageKilometresPerLitre = cursor.nullableDouble(mileage),
+                    accelerationMetresPerSecondSquared = cursor.getDouble(acceleration),
+                    latitude = cursor.nullableDouble(latitude),
+                    longitude = cursor.nullableDouble(longitude),
+                    accuracyMetres = cursor.nullableDouble(accuracy)?.toFloat(),
+                    altitudeMetres = cursor.nullableDouble(altitude),
                 ),
             )
         }
@@ -202,29 +216,48 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
         null,
         "started_at DESC",
     ).use { cursor ->
-        buildList {
+        val id = cursor.getColumnIndexOrThrow("id")
+        val startedAt = cursor.getColumnIndexOrThrow("started_at")
+        val endedAt = cursor.getColumnIndexOrThrow("ended_at")
+        val distance = cursor.getColumnIndexOrThrow("distance_km")
+        val averageSpeed = cursor.getColumnIndexOrThrow("average_speed")
+        val maximumSpeed = cursor.getColumnIndexOrThrow("maximum_speed")
+        val averageRpm = cursor.getColumnIndexOrThrow("average_rpm")
+        val maximumRpm = cursor.getColumnIndexOrThrow("maximum_rpm")
+        val averageThrottle = cursor.getColumnIndexOrThrow("average_throttle")
+        val estimatedFuel = cursor.getColumnIndexOrThrow("estimated_fuel_litres")
+        val startArea = cursor.getColumnIndexOrThrow("start_area")
+        val endArea = cursor.getColumnIndexOrThrow("end_area")
+        val startLatitude = cursor.getColumnIndexOrThrow("start_latitude")
+        val startLongitude = cursor.getColumnIndexOrThrow("start_longitude")
+        val endLatitude = cursor.getColumnIndexOrThrow("end_latitude")
+        val endLongitude = cursor.getColumnIndexOrThrow("end_longitude")
+        val routePreview = cursor.getColumnIndexOrThrow("route_preview")
+        val zeroToSixty = cursor.getColumnIndexOrThrow("zero_to_sixty")
+        val zeroToHundred = cursor.getColumnIndexOrThrow("zero_to_hundred")
+        buildList(cursor.count) {
             while (cursor.moveToNext()) {
                 add(
                     Ride(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        startedAtMillis = cursor.getLong(cursor.getColumnIndexOrThrow("started_at")),
-                        endedAtMillis = cursor.getLong(cursor.getColumnIndexOrThrow("ended_at")),
-                        distanceKilometres = cursor.getDouble(cursor.getColumnIndexOrThrow("distance_km")),
-                        averageSpeedKph = cursor.getDouble(cursor.getColumnIndexOrThrow("average_speed")),
-                        maximumSpeedKph = cursor.getDouble(cursor.getColumnIndexOrThrow("maximum_speed")),
-                        averageRpm = cursor.getDouble(cursor.getColumnIndexOrThrow("average_rpm")),
-                        maximumRpm = cursor.getLong(cursor.getColumnIndexOrThrow("maximum_rpm")),
-                        averageThrottlePercent = cursor.getDouble(cursor.getColumnIndexOrThrow("average_throttle")),
-                        estimatedFuelLitres = cursor.nullableDouble("estimated_fuel_litres"),
-                        startArea = cursor.nullableString("start_area"),
-                        endArea = cursor.nullableString("end_area"),
-                        startLatitude = cursor.nullableDouble("start_latitude"),
-                        startLongitude = cursor.nullableDouble("start_longitude"),
-                        endLatitude = cursor.nullableDouble("end_latitude"),
-                        endLongitude = cursor.nullableDouble("end_longitude"),
-                        routePreview = cursor.nullableString("route_preview").decodeRoute(),
-                        zeroToSixtyMillis = cursor.nullableLong("zero_to_sixty"),
-                        zeroToHundredMillis = cursor.nullableLong("zero_to_hundred"),
+                        id = cursor.getLong(id),
+                        startedAtMillis = cursor.getLong(startedAt),
+                        endedAtMillis = cursor.getLong(endedAt),
+                        distanceKilometres = cursor.getDouble(distance),
+                        averageSpeedKph = cursor.getDouble(averageSpeed),
+                        maximumSpeedKph = cursor.getDouble(maximumSpeed),
+                        averageRpm = cursor.getDouble(averageRpm),
+                        maximumRpm = cursor.getLong(maximumRpm),
+                        averageThrottlePercent = cursor.getDouble(averageThrottle),
+                        estimatedFuelLitres = cursor.nullableDouble(estimatedFuel),
+                        startArea = cursor.nullableString(startArea),
+                        endArea = cursor.nullableString(endArea),
+                        startLatitude = cursor.nullableDouble(startLatitude),
+                        startLongitude = cursor.nullableDouble(startLongitude),
+                        endLatitude = cursor.nullableDouble(endLatitude),
+                        endLongitude = cursor.nullableDouble(endLongitude),
+                        routePreview = cursor.nullableString(routePreview).decodeRoute(),
+                        zeroToSixtyMillis = cursor.nullableLong(zeroToSixty),
+                        zeroToHundredMillis = cursor.nullableLong(zeroToHundred),
                     ),
                 )
             }
@@ -235,6 +268,10 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
         const val Table = "rides"
         const val SamplesTable = "ride_samples"
         const val Version = 4
+        private const val InsertSampleSql = """INSERT INTO $SamplesTable (
+            ride_id, timestamp, speed, rpm, throttle, mileage_km_per_litre,
+            acceleration, latitude, longitude, accuracy, altitude
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
     }
 
     private fun recreate(db: SQLiteDatabase) {
@@ -244,18 +281,19 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
     }
 }
 
-private fun android.database.Cursor.nullableDouble(column: String): Double? {
-    val index = getColumnIndexOrThrow(column)
+private fun Cursor.nullableDouble(index: Int): Double? {
     return if (isNull(index)) null else getDouble(index)
 }
 
-private fun android.database.Cursor.nullableLong(column: String): Long? {
-    val index = getColumnIndexOrThrow(column)
+private fun SQLiteStatement.bindNullableDouble(index: Int, value: Double?) {
+    if (value == null) bindNull(index) else bindDouble(index, value)
+}
+
+private fun Cursor.nullableLong(index: Int): Long? {
     return if (isNull(index)) null else getLong(index)
 }
 
-private fun android.database.Cursor.nullableString(column: String): String? {
-    val index = getColumnIndexOrThrow(column)
+private fun Cursor.nullableString(index: Int): String? {
     return if (isNull(index)) null else getString(index)
 }
 

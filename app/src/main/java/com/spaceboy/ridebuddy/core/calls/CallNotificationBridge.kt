@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.core.tft.TftCallEncoder
+import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
@@ -296,7 +297,7 @@ class CallNotificationBridge(
                 PackageManager.PERMISSION_GRANTED,
     )
 
-    private fun com.spaceboy.ridebuddy.data.AppSettings.callFeatureSettings(): CallFeatureSettings =
+    private fun AppSettings.callFeatureSettings(): CallFeatureSettings =
         CallFeatureSettings(callerDisplay, tftCallControls)
 
     private fun Notification.extractCallIntents(): CallIntents {

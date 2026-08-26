@@ -10,10 +10,13 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -315,15 +318,18 @@ fun Rs457Theme(
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
-    val colorScheme = when {
-        highContrast && darkTheme -> HighContrastDarkColors
-        highContrast -> HighContrastLightColors
-        dynamicColor -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val colorScheme = remember(context, configuration, darkTheme, dynamicColor, highContrast) {
+        when {
+            highContrast && darkTheme -> HighContrastDarkColors
+            highContrast -> HighContrastLightColors
+            dynamicColor -> {
+                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            }
+            darkTheme -> DarkColors
+            else -> LightColors
         }
-        darkTheme -> DarkColors
-        else -> LightColors
     }
     val statusColors = when {
         highContrast && darkTheme -> HighContrastDarkStatusColors
@@ -332,7 +338,7 @@ fun Rs457Theme(
         else -> LightStatusColors
     }
 
-    androidx.compose.runtime.CompositionLocalProvider(
+    CompositionLocalProvider(
         LocalRs457StatusColors provides statusColors,
     ) {
         MaterialTheme(

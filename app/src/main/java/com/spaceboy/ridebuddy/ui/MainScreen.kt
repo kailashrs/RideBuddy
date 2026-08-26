@@ -72,9 +72,10 @@ private val destinations = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    state: MainScreenState,
+    uiState: MainUiState,
     actions: MainScreenActions,
-) = with(state) {
+    content: @Composable (Modifier) -> Unit,
+) {
     with(actions) {
         val snackbarHostState = remember { SnackbarHostState() }
         val destinationStateHolder = rememberSaveableStateHolder()
@@ -130,11 +131,7 @@ fun MainScreen(
 
         val screenContent: @Composable (PaddingValues) -> Unit = { padding ->
             destinationStateHolder.SaveableStateProvider(uiState.saveableContentKey()) {
-                ScreenContent(
-                    modifier = Modifier.padding(padding),
-                    state = state,
-                    actions = actions,
-                )
+                content(Modifier.padding(padding))
             }
         }
 
@@ -212,7 +209,7 @@ private fun MainUiState.saveableContentKey(): String = when {
 }
 
 @Composable
-private fun ScreenContent(
+internal fun MainScreenContent(
     modifier: Modifier,
     state: MainScreenState,
     actions: MainScreenActions,
@@ -257,6 +254,7 @@ private fun ScreenContent(
                 telemetry = telemetry,
                 activeRide = activeRide,
                 liveSamples = liveRideSamples,
+                liveMetrics = liveRideMetrics,
                 diagnostics = diagnostics,
                 lastRide = rides.firstOrNull(),
                 guidance = guidance,
@@ -292,7 +290,6 @@ private fun ScreenContent(
                 modifier = modifier,
                 navigationKey = uiState.navigationKey,
                 onOpenNavigationSettings = onOpenNavigationSettings,
-                diagnostics = diagnostics,
                 bleCapture = bleCapture,
                 rideCount = rides.size,
                 onClearRideHistory = onClearRideHistory,

@@ -10,6 +10,7 @@ import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
+import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.RideSample
@@ -27,6 +28,7 @@ data class MainScreenState(
     val bleCapture: BleCaptureState,
     val activeRide: ActiveRide?,
     val liveRideSamples: List<RideSample>,
+    val liveRideMetrics: LiveRideMetrics,
     val rides: List<Ride>,
     val insights: RideInsights,
     val insightPeriod: InsightPeriod,

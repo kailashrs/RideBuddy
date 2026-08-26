@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,5 +182,5 @@ class AppSettingsRepository(context: Context) {
     }
 }
 
-private inline fun <reified T : Enum<T>> android.content.SharedPreferences.enum(key: String, fallback: T): T =
+private inline fun <reified T : Enum<T>> SharedPreferences.enum(key: String, fallback: T): T =
     getString(key, null)?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

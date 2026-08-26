@@ -3,32 +3,52 @@ package com.spaceboy.ridebuddy.ble
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.ArrayDeque
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-
-import kotlinx.coroutines.flow.update
 
 /**
  * An opt-in, in-memory record of GATT traffic. Capture data can include identifiers and
  * notification text, so it is never written to disk and is cleared when the app process exits.
  */
-class BleCaptureRecorder {
+class BleCaptureRecorder internal constructor(
+    private val scope: CoroutineScope? = null,
+    private val publishIntervalMillis: Long = DefaultPublishIntervalMillis,
+) {
+    private val lock = Any()
+    private val entries = ArrayDeque<BleCaptureEntry>(MaxEntries)
     private val mutableState = MutableStateFlow(BleCaptureState())
+    private var enabled = false
+    private var droppedEntries = 0
+    private var publishJob: Job? = null
     val state: StateFlow<BleCaptureState> = mutableState.asStateFlow()
 
     fun setEnabled(enabled: Boolean) {
-        mutableState.update { it.copy(enabled = enabled) }
+        val snapshot = synchronized(lock) {
+            this.enabled = enabled
+            snapshotLocked()
+        }
+        mutableState.value = snapshot
     }
 
     fun clear() {
-        mutableState.update { it.copy(entries = emptyList(), droppedEntries = 0) }
+        val snapshot = synchronized(lock) {
+            entries.clear()
+            droppedEntries = 0
+            snapshotLocked()
+        }
+        mutableState.value = snapshot
     }
 
     fun record(direction: BleCaptureDirection, characteristic: UUID, payload: ByteArray, outcome: String? = null) {
-        mutableState.update { current ->
-            if (!current.enabled) return@update current
+        val immediateSnapshot = synchronized(lock) {
+            if (!enabled) return
             val entry = BleCaptureEntry(
                 timestampMillis = System.currentTimeMillis(),
                 direction = direction,
@@ -36,17 +56,18 @@ class BleCaptureRecorder {
                 payload = payload.copyOf(),
                 outcome = outcome,
             )
-            val entries = current.entries + entry
-            val overflow = (entries.size - MaxEntries).coerceAtLeast(0)
-            current.copy(
-                entries = if (overflow == 0) entries else entries.drop(overflow),
-                droppedEntries = current.droppedEntries + overflow,
-            )
+            if (entries.size == MaxEntries) {
+                entries.removeFirst()
+                droppedEntries++
+            }
+            entries.addLast(entry)
+            scheduleSnapshotLocked()
         }
+        immediateSnapshot?.let { mutableState.value = it }
     }
 
     fun exportText(): String = buildString {
-        val current = mutableState.value
+        val current = synchronized(lock) { snapshotLocked() }
         appendLine("RideBuddy BLE capture")
         appendLine("Entries: ${current.entries.size}; dropped: ${current.droppedEntries}")
         appendLine("Payloads are raw GATT bytes and may contain personal data.")
@@ -54,8 +75,35 @@ class BleCaptureRecorder {
         current.entries.forEach { appendLine(it.format()) }
     }
 
+    private fun scheduleSnapshotLocked(): BleCaptureState? {
+        val publisher = scope
+        if (publisher == null || publishIntervalMillis <= 0L) return snapshotLocked()
+        if (publishJob?.isActive != true) {
+            publishJob = publisher.launch {
+                delay(publishIntervalMillis)
+                publishSnapshot()
+            }
+        }
+        return null
+    }
+
+    private fun publishSnapshot() {
+        val snapshot = synchronized(lock) {
+            publishJob = null
+            snapshotLocked()
+        }
+        mutableState.value = snapshot
+    }
+
+    private fun snapshotLocked(): BleCaptureState = BleCaptureState(
+        enabled = enabled,
+        entries = entries.toList(),
+        droppedEntries = droppedEntries,
+    )
+
     private companion object {
         const val MaxEntries = 500
+        const val DefaultPublishIntervalMillis = 250L
     }
 }
 

@@ -5,12 +5,15 @@ import android.location.Address
 import android.location.Geocoder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
@@ -23,7 +26,11 @@ class DestinationParser(context: Context) {
     suspend fun parse(rawValue: String): Result<NavigationDestination> = try {
         val value = rawValue.trim()
         val destination = directNavigationDestination(value) ?: run {
-            val expanded = if (isGoogleShortLink(value)) expand(value) else value
+            val expanded = if (isGoogleShortLink(value)) {
+                expandWithinDeadline(value)
+            } else {
+                value
+            }
             directNavigationDestination(expanded) ?: geocode(expanded).getOrThrow()
         }
         Result.success(destination)
@@ -37,16 +44,24 @@ class DestinationParser(context: Context) {
         URI(value).host?.lowercase(Locale.ROOT) in ShortLinkHosts
     }.getOrDefault(false)
 
-    private suspend fun expand(value: String): String = withContext(Dispatchers.IO) {
+    private suspend fun expandWithinDeadline(value: String): String =
+        withTimeoutOrNull(MaxExpansionMillis) {
+            expand(value, System.nanoTime() + MaxExpansionMillis * NanosecondsPerMillisecond)
+        } ?: throw DestinationExpansionTimeoutException()
+
+    private suspend fun expand(value: String, deadlineNanos: Long): String = withContext(Dispatchers.IO) {
         var current = URL(value)
         repeat(MaxRedirects) {
+            currentCoroutineContext().ensureActive()
             val connection = current.openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = TimeoutMillis
-            connection.readTimeout = TimeoutMillis
+            connection.connectTimeout = remainingExpansionTimeoutMillis(deadlineNanos)
+            connection.readTimeout = connection.connectTimeout
             connection.setRequestProperty("User-Agent", "RideBuddy/1")
             val location = try {
                 connection.connect()
+                currentCoroutineContext().ensureActive()
+                connection.readTimeout = remainingExpansionTimeoutMillis(deadlineNanos)
                 connection.getHeaderField("Location")
             } finally {
                 connection.disconnect()
@@ -87,7 +102,24 @@ class DestinationParser(context: Context) {
         val ShortLinkHosts = setOf("maps.app.goo.gl", "goo.gl")
         const val MaxRedirects = 5
         const val TimeoutMillis = 8_000
+        const val MaxExpansionMillis = 15_000L
+        const val NanosecondsPerMillisecond = 1_000_000L
     }
+}
+
+internal class DestinationExpansionTimeoutException : IllegalArgumentException(
+    "Timed out while opening that shared Maps link",
+)
+
+internal fun remainingExpansionTimeoutMillis(
+    deadlineNanos: Long,
+    nowNanos: Long = System.nanoTime(),
+    maximumMillis: Int = 8_000,
+): Int {
+    val remainingNanos = deadlineNanos - nowNanos
+    if (remainingNanos <= 0L) throw DestinationExpansionTimeoutException()
+    val roundedUpMillis = (remainingNanos + 999_999L) / 1_000_000L
+    return roundedUpMillis.coerceAtMost(maximumMillis.toLong()).toInt().coerceAtLeast(1)
 }
 
 internal fun directNavigationDestination(value: String): NavigationDestination? =
@@ -110,7 +142,7 @@ private fun extractNavigationQuery(value: String): String = runCatching {
     val uri = URI(value)
     val rawQuery = uri.rawQuery.orEmpty().split('&').associate {
         val parts = it.split('=', limit = 2)
-        parts.first() to java.net.URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
+        parts.first() to URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
     }
     rawQuery["destination"] ?: rawQuery["query"] ?: rawQuery["q"] ?: value
 }.getOrDefault(value)

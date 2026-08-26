@@ -110,4 +110,33 @@ class LineChartGeometryTest {
         assertEquals(0f, segments[0].single().x, 0.001f)
         assertEquals(100f, segments[1].single().x, 0.001f)
     }
+
+    @Test
+    fun singleAvailableValueAmongGapsIsCenteredVertically() {
+        val segments = lineChartSegments(
+            values = listOf(null, 7.0, null),
+            width = 100f,
+            height = 100f,
+            scalePolicy = LineChartScalePolicy.AutoRange,
+            clampNegativeValues = false,
+        )
+
+        assertEquals(1, segments.size)
+        assertEquals(50f, segments.single().single().x, 0.001f)
+        assertEquals(50f, segments.single().single().y, 0.001f)
+    }
 }
+
+private fun lineChartPoints(
+    values: List<Double?>,
+    width: Float,
+    height: Float,
+    scalePolicy: LineChartScalePolicy,
+    clampNegativeValues: Boolean,
+): List<LineChartPoint> = lineChartSegments(
+    values = values,
+    width = width,
+    height = height,
+    scalePolicy = scalePolicy,
+    clampNegativeValues = clampNegativeValues,
+).flatten()

@@ -109,6 +109,7 @@ data class BleDiagnostics(
     val readsCompleted: Long = 0,
     val activeGattOperation: String? = null,
     val malformedTelemetryFrames: Long = 0,
+    val droppedRawTelemetryFrames: Long = 0,
     val lastFrameAtMillis: Long? = null,
     val rssi: Int? = null,
     val telemetryHz: Double = 0.0,

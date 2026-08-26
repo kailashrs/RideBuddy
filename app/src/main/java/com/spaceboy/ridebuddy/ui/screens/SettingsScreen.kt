@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import android.content.pm.PackageManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -67,8 +68,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -90,11 +94,11 @@ import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.DistanceUnits
+import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationApps
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.ui.components.SettingsChoiceRow
 import com.spaceboy.ridebuddy.ui.components.SettingsRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSection
@@ -107,7 +111,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     navigationKey: NavigationKeyUiState,
     onOpenNavigationSettings: () -> Unit,
-    diagnostics: BleDiagnostics,
     bleCapture: BleCaptureState,
     rideCount: Int,
     onClearRideHistory: () -> Unit,
@@ -147,13 +150,22 @@ fun SettingsScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val installedSupportedApps = remember(context, installedAppsRefresh) {
-        SupportedNotificationApps.filter { app ->
-            try {
-                context.packageManager.getPackageInfo(app.packageName, 0)
-                true
-            } catch (_: Exception) {
-                false
+    val installedSupportedApps by produceState<List<SupportedNotificationApp>>(
+        initialValue = emptyList(),
+        context,
+        installedAppsRefresh,
+    ) {
+        value = withContext(Dispatchers.IO) {
+            SupportedNotificationApps.filter { app ->
+                try {
+                    context.packageManager.getPackageInfo(
+                        app.packageName,
+                        PackageManager.PackageInfoFlags.of(0),
+                    )
+                    true
+                } catch (_: Exception) {
+                    false
+                }
             }
         }
     }
@@ -410,7 +422,11 @@ fun SettingsScreen(
             SettingsRow(
                 icon = Icons.Outlined.Directions,
                 title = "Navigation",
-                supportingText = navigationKey.maskedKey ?: "API key not configured",
+                supportingText = when {
+                    navigationKey.isLoading -> "Checking encrypted API key"
+                    navigationKey.maskedKey != null -> navigationKey.maskedKey
+                    else -> "API key not configured"
+                },
                 onClick = onOpenNavigationSettings,
             )
             HorizontalDivider(Modifier.padding(start = 56.dp))

@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.core.navigation
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class DestinationParserTest {
@@ -22,5 +23,32 @@ class DestinationParserTest {
                 "https://www.google.com/maps/search/?api=1&query=91.0%2C181.0",
             ),
         )
+    }
+
+    @Test
+    fun redirectTimeoutUsesOnlyTheRemainingDeadline() {
+        assertEquals(
+            2_500,
+            remainingExpansionTimeoutMillis(
+                deadlineNanos = 3_500_000_000L,
+                nowNanos = 1_000_000_000L,
+            ),
+        )
+        assertEquals(
+            8_000,
+            remainingExpansionTimeoutMillis(
+                deadlineNanos = 20_000_000_000L,
+                nowNanos = 1_000_000_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun expiredRedirectDeadlineFailsWithAUserFacingError() {
+        val error = assertThrows(DestinationExpansionTimeoutException::class.java) {
+            remainingExpansionTimeoutMillis(deadlineNanos = 1L, nowNanos = 2L)
+        }
+
+        assertEquals("Timed out while opening that shared Maps link", error.message)
     }
 }

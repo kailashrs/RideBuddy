@@ -129,7 +129,9 @@ class NavigationActivity : ComponentActivity() {
                                     )
                                     Button(
                                         onClick = {
-                                            if (hasRequiredLocationPermissions()) {
+                                            if (!appContainer.navigationSdkGateway.isConfiguredInProcess) {
+                                                awaitNavigationKeyAndInitialize()
+                                            } else if (hasRequiredLocationPermissions()) {
                                                 if (intent.getBooleanExtra(ExtraAttachExistingGuidance, false)) {
                                                     navigator?.takeUnless { it.isGuidanceRunning }?.let { currentNavigator ->
                                                         currentNavigator.removeReroutingListener(reroutingListener)
@@ -178,7 +180,7 @@ class NavigationActivity : ComponentActivity() {
 
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
-        requestLocationOrInitialize()
+        awaitNavigationKeyAndInitialize()
 
         lifecycleScope.launch {
             appContainer.bikeConnection.controls.collect { event ->
@@ -196,6 +198,21 @@ class NavigationActivity : ComponentActivity() {
                     is BikeControlEvent.CallAction -> Unit
                 }
             }
+        }
+    }
+
+    private fun awaitNavigationKeyAndInitialize() {
+        lifecycleScope.launch {
+            val result = appContainer.navigationKeyBootstrap.await()
+            if (isFinishing || isDestroyed) return@launch
+            if (appContainer.navigationSdkGateway.isConfiguredInProcess) {
+                requestLocationOrInitialize()
+                return@launch
+            }
+            val message = result.exceptionOrNull()?.message
+                ?: result.getOrNull()?.errorMessage
+                ?: "Navigation API key is not configured"
+            showError(message)
         }
     }
 

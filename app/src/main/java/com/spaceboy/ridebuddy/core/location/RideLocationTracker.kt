@@ -7,7 +7,9 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.LocationRequest
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,20 +31,36 @@ class RideLocationTracker(context: Context) : LocationListener {
     private var activeProvider: String? = null
 
     @SuppressLint("MissingPermission")
-    fun start() {
+    fun start(): Boolean {
         stop()
-        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return false
+        }
         val provider = when {
             manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
             manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> return
+            else -> return false
         }
-        manager.requestLocationUpdates(provider, 2_000L, 3f, this)
-        activeProvider = provider
+        return runCatching {
+            val request = LocationRequest.Builder(LocationUpdateIntervalMillis)
+                .setMinUpdateDistanceMeters(MinimumLocationDistanceMetres)
+                .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+                .build()
+            manager.requestLocationUpdates(provider, request, appContext.mainExecutor, this)
+            activeProvider = provider
+            runCatching { manager.getLastKnownLocation(provider) }
+                .onSuccess { location -> location?.let(::onLocationChanged) }
+                .onFailure { error -> Log.d(LogTag, "No cached ride location available", error) }
+            true
+        }.onFailure { error ->
+            Log.w(LogTag, "Could not start ride location updates", error)
+            activeProvider = null
+        }.getOrDefault(false)
     }
 
     fun stop() {
-        manager.removeUpdates(this)
+        runCatching { manager.removeUpdates(this) }
+            .onFailure { error -> Log.w(LogTag, "Could not stop ride location updates", error) }
         activeProvider = null
         mutableLocation.value = null
     }
@@ -68,6 +86,9 @@ class RideLocationTracker(context: Context) : LocationListener {
     }
 
     private companion object {
+        const val LogTag = "RideLocationTracker"
+        const val LocationUpdateIntervalMillis = 2_000L
+        const val MinimumLocationDistanceMetres = 3f
         const val NanosecondsPerMillisecond = 1_000_000L
     }
 }

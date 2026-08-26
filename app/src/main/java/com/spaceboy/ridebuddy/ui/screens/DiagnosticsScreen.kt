@@ -104,6 +104,7 @@ fun DiagnosticsScreen(
                 "Telemetry rate" to "%.1f Hz".format(diagnostics.telemetryHz),
                 "Last frame" to (diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
                 "Estimated malformed frames" to diagnostics.malformedTelemetryFrames.toString(),
+                "Dropped ride frames" to diagnostics.droppedRawTelemetryFrames.toString(),
                 "BLE capture" to if (bleCapture.enabled) {
                     "On • ${bleCapture.entries.size} packets"
                 } else {

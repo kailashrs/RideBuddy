@@ -10,6 +10,7 @@ import com.spaceboy.ridebuddy.ble.SharedPreferencesBikeIdentityStore
 import com.spaceboy.ridebuddy.ble.SharedPreferencesProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedOutputAction
 import com.spaceboy.ridebuddy.core.navigation.navigationFeedOutputAction
@@ -39,7 +40,7 @@ class AppContainer(context: Context) {
      *  foreground services that keep the application process alive. Coroutines
      *  launched here are bound to the process, not to any individual Activity. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val bleCaptureRecorder = BleCaptureRecorder()
+    val bleCaptureRecorder = BleCaptureRecorder(applicationScope)
     private val protectionAcceptanceStore = SharedPreferencesProtectionAcceptanceStore(context)
     private val bikeIdentityRepository = BikeIdentityRepository(
         store = SharedPreferencesBikeIdentityStore(context),
@@ -77,6 +78,11 @@ class AppContainer(context: Context) {
     )
     val navigationApiKeyStore = SecureNavigationApiKeyStore(context)
     val navigationSdkGateway = GoogleNavigationSdkGateway()
+    internal val navigationKeyBootstrap = NavigationKeyBootstrap(
+        scope = applicationScope,
+        loadKey = navigationApiKeyStore::load,
+        configureKey = navigationSdkGateway::configureIfNeeded,
+    )
     val destinationParser = DestinationParser(context)
     val navigationFeed = NavigationFeedRepository()
     internal val navigationStartStopGuard = NavigationStartStopGuard()
@@ -112,13 +118,6 @@ class AppContainer(context: Context) {
                 .map { it.persistConnectionDiagnostics }
                 .distinctUntilChanged()
                 .collect(connectionEventJournal::setPersistenceEnabled)
-        }
-        // Defer Keystore decrypt off Application.onCreate — the slow path is the
-        // first KeyStore.getInstance() call (cold-cache Binder IPC, ~20-50ms on
-        // older chipsets). The gateway only needs the key when navigation is used,
-        // which won't happen until MainViewModel is created and the user navigates.
-        applicationScope.launch(Dispatchers.IO) {
-            navigationApiKeyStore.load()?.let(navigationSdkGateway::configureIfNeeded)
         }
         navigationFeed.acceptTerminalNavInfo = navigationGuidanceLifecycle::acceptAndMarkTerminalFeed
         navigationFeed.onNavInfo = { info ->

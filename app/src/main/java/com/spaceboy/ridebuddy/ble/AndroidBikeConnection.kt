@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
@@ -49,7 +50,7 @@ internal class AndroidBikeConnection(
     private val bikeIdentityRepository: BikeIdentityRepository,
 ) : BikeConnection {
     private val appContext = context.applicationContext
-    private val bluetoothManager = appContext.getSystemService(android.bluetooth.BluetoothManager::class.java)
+    private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bondCoordinator = BluetoothBondCoordinator(
         context = appContext,
@@ -368,7 +369,7 @@ internal class AndroidBikeConnection(
                 disconnectInternal(closeOnly = true)
                 scheduleReconnect()
             }
-        }, ConnectionTimeoutToken, android.os.SystemClock.uptimeMillis() + ConnectionTimeoutMillis)
+        }, ConnectionTimeoutToken, SystemClock.uptimeMillis() + ConnectionTimeoutMillis)
     }
 
     private val callback = AndroidBikeGattCallback(
@@ -544,7 +545,10 @@ internal class AndroidBikeConnection(
                     elapsedRealtime = SystemClock::elapsedRealtime,
                 )
                 mutableDiagnostics.update { diagnostics ->
-                    diagnostics.copy(telemetryHz = acceptance.telemetryHz)
+                    diagnostics.copy(
+                        telemetryHz = acceptance.telemetryHz,
+                        droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
+                    )
                 }
                 if (!acceptance.valid) {
                     mutableDiagnostics.update { diagnostics ->
@@ -729,7 +733,7 @@ internal class AndroidBikeConnection(
         mainHandler.postAtTime(
             { if (!intentionalDisconnect) connectGatt() },
             ReconnectToken,
-            android.os.SystemClock.uptimeMillis() + delay
+            SystemClock.uptimeMillis() + delay
         )
     }
 
@@ -752,6 +756,7 @@ internal class AndroidBikeConnection(
             lastFrameAtMillis = null,
             rssi = null,
             telemetryHz = 0.0,
+            droppedRawTelemetryFrames = 0,
             activeGattOperation = null,
         )
         gatt?.let { current ->

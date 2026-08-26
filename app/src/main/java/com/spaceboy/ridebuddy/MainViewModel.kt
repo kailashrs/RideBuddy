@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.InsightsCalculator
+import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -18,10 +19,12 @@ import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
+import com.spaceboy.ridebuddy.data.calculateLiveRideMetrics
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
 import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKeyPolicy
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CancellationException
@@ -31,16 +34,19 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
-class MainViewModel(
+class MainViewModel internal constructor(
     savedStateHandle: SavedStateHandle,
     private val apiKeyStore: SecureNavigationApiKeyStore,
     private val navigationSdkGateway: GoogleNavigationSdkGateway,
+    private val navigationKeyBootstrap: NavigationKeyBootstrap,
     private val bikeConnection: BikeConnection,
     private val bleCaptureRecorder: BleCaptureRecorder,
     private val rideRecorder: RideRecorder,
@@ -55,13 +61,9 @@ class MainViewModel(
         restoredSharedDestinationState.autoStartSharedDestination?.requestId ?: 0L,
     )
     private val navigationStartAttemptIds = AtomicLong()
-    private val storedKey = apiKeyStore.load()
     private val mutableUiState = MutableStateFlow(
         restoredSharedDestinationState.copy(
-            navigationKey = NavigationKeyUiState(
-                isConfigured = storedKey != null,
-                maskedKey = storedKey?.let(NavigationApiKeyPolicy::mask),
-            ),
+            navigationKey = NavigationKeyUiState(isLoading = true),
         ),
     )
 
@@ -73,6 +75,10 @@ class MainViewModel(
     val bleCapture = bleCaptureRecorder.state
     val activeRide = rideRecorder.activeRide
     val liveRideSamples = rideRecorder.liveSamples
+    val liveRideMetrics: StateFlow<LiveRideMetrics> = liveRideSamples
+        .map(::calculateLiveRideMetrics)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveRideMetrics())
     val rides = rideRepository.rides
     val guidance = navigationFeed.guidance
     val settings = appSettings.settings
@@ -81,6 +87,20 @@ class MainViewModel(
     val insights: StateFlow<RideInsights> = combine(rides, insightPeriod) { currentRides, period ->
         InsightsCalculator.calculate(currentRides, period)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
+    init {
+        viewModelScope.launch {
+            try {
+                val bootstrapResult = navigationKeyBootstrap.await()
+                mutableUiState.update { state ->
+                    if (!state.navigationKey.isLoading) state else state.copy(
+                        navigationKey = navigationKeyStateForBootstrap(bootstrapResult),
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            }
+        }
+    }
 
     fun selectDestination(destination: TopLevelDestination) {
         mutableUiState.update { state ->
@@ -132,7 +152,10 @@ class MainViewModel(
             val outcome = withContext(Dispatchers.IO) {
                 try {
                     navigationSdkGateway.configureIfNeeded(apiKey).also { result ->
-                        if (result !is ConfigureResult.Failed) apiKeyStore.save(apiKey)
+                        if (result !is ConfigureResult.Failed) {
+                            apiKeyStore.save(apiKey)
+                            navigationKeyBootstrap.recordSavedKey(apiKey, result)
+                        }
                     }
                         .let { Result.success(it) }
                 } catch (cancelled: CancellationException) {
@@ -168,6 +191,9 @@ class MainViewModel(
             val outcome = withContext(Dispatchers.IO) {
                 try {
                     apiKeyStore.clear()
+                    navigationKeyBootstrap.recordRemovedKey(
+                        restartRequired = navigationSdkGateway.isConfiguredInProcess,
+                    )
                     Result.success(Unit)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -216,9 +242,16 @@ class MainViewModel(
     }
 
     private fun runNavigationKeyOperation(operation: suspend () -> Unit) {
+        if (mutableUiState.value.navigationKey.isLoading) return
         if (!navigationKeyOperationGuard.tryAcquire()) return
         mutableUiState.update { state ->
-            state.copy(navigationKey = state.navigationKey.copy(isSaving = true, errorMessage = null))
+            state.copy(
+                navigationKey = state.navigationKey.copy(
+                    isLoading = false,
+                    isSaving = true,
+                    errorMessage = null,
+                ),
+            )
         }
         viewModelScope.launch {
             try {
@@ -361,6 +394,7 @@ class MainViewModel(
                     savedStateHandle = createSavedStateHandle(),
                     apiKeyStore = container.navigationApiKeyStore,
                     navigationSdkGateway = container.navigationSdkGateway,
+                    navigationKeyBootstrap = container.navigationKeyBootstrap,
                     bikeConnection = container.bikeConnection,
                     bleCaptureRecorder = container.bleCaptureRecorder,
                     rideRecorder = container.rideRecorder,

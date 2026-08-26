@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -53,16 +54,20 @@ fun InsightsScreen(
     onPeriodSelected: (InsightPeriod) -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
-    val periodStart = when (selectedPeriod) {
-        InsightPeriod.Today -> Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        else -> selectedPeriod.days?.let { System.currentTimeMillis() - it * 86_400_000L }
+    val periodStart = remember(rides, selectedPeriod) {
+        when (selectedPeriod) {
+            InsightPeriod.Today -> Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            else -> selectedPeriod.days?.let { System.currentTimeMillis() - it * 86_400_000L }
+        }
     }
-    val periodRides = rides.filter { periodStart == null || it.startedAtMillis >= periodStart }
+    val periodRides = remember(rides, periodStart) {
+        rides.filter { periodStart == null || it.startedAtMillis >= periodStart }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -154,8 +159,10 @@ fun InsightsScreen(
 
 @Composable
 private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
-    val values = rides.sortedBy(Ride::startedAtMillis).takeLast(14).map {
-        if (units == DistanceUnits.Metric) it.distanceKilometres else it.distanceKilometres * 0.621371192
+    val values = remember(rides, units) {
+        rides.sortedBy(Ride::startedAtMillis).takeLast(14).map {
+            if (units == DistanceUnits.Metric) it.distanceKilometres else it.distanceKilometres * 0.621371192
+        }
     }
     val hasData = values.any { it > 0.0 }
     val color = MaterialTheme.colorScheme.primary

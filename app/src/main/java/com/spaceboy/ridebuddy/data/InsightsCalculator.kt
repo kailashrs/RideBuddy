@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.data
 
 import java.time.Clock
+import java.time.Instant
 import java.time.ZoneId
 
 object InsightsCalculator {
@@ -24,7 +25,7 @@ object InsightsCalculator {
     ): RideInsights {
         val (currentStart, previousStart) = when (period) {
             InsightPeriod.Today -> {
-                val todayStart = java.time.Instant.ofEpochMilli(nowMillis)
+                val todayStart = Instant.ofEpochMilli(nowMillis)
                     .atZone(zone)
                     .toLocalDate()
                     .atStartOfDay(zone)

@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy
 
 import androidx.lifecycle.SavedStateHandle
 import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrapResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -247,5 +248,37 @@ class MainViewModelNavigationStateTest {
 
         assertTrue(result.isConfigured)
         assertTrue(result.restartRequired)
+    }
+
+    @Test
+    fun `successful process bootstrap exposes the stored key only in masked form`() {
+        val state = navigationKeyStateForBootstrap(
+            Result.success(
+                NavigationKeyBootstrapResult(
+                    maskedKey = "•••• 7890",
+                    isConfigured = true,
+                ),
+            ),
+        )
+
+        assertTrue(state.isConfigured)
+        assertFalse(state.isLoading)
+        assertEquals("•••• 7890", state.maskedKey)
+    }
+
+    @Test
+    fun `failed process bootstrap keeps navigation unavailable with a useful error`() {
+        val state = navigationKeyStateForBootstrap(
+            Result.success(
+                NavigationKeyBootstrapResult(
+                    maskedKey = "•••• 7890",
+                    isConfigured = false,
+                    errorMessage = "SDK configuration failed",
+                ),
+            ),
+        )
+
+        assertFalse(state.isConfigured)
+        assertEquals("SDK configuration failed", state.errorMessage)
     }
 }

@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.ble
 
-import java.util.Locale
 import java.util.UUID
 import java.util.regex.Pattern
 
@@ -48,7 +47,7 @@ const val BikeHogpServiceUuidString: String =
     "00001812-0000-1000-8000-00805f9b34fb"
 
 /** True when the name carries the OEM `RS457_ID` substring (case-insensitive). */
-fun String.isApriliaBikeName(): Boolean = uppercase(Locale.ROOT).contains(RsFamilyPrefix)
+fun String.isApriliaBikeName(): Boolean = contains(RsFamilyPrefix, ignoreCase = true)
 
 internal fun ByteArray.toHex(separator: String = ""): String =
     joinToString(separator) { "%02X".format(it.toInt() and 0xFF) }

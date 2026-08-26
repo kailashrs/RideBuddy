@@ -78,6 +78,7 @@ fun NavigationSettingsScreen(
     var showApiKey by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val keyOperationInProgress = state.isLoading || state.isSaving
 
     DisposableEffect(activity) {
         val window = activity?.window
@@ -111,11 +112,19 @@ fun NavigationSettingsScreen(
                 )
                 Column(modifier = Modifier.padding(start = 16.dp)) {
                     Text(
-                        text = if (state.isConfigured) "API key configured" else "API key required",
+                        text = when {
+                            state.isLoading -> "Checking API key"
+                            state.isConfigured -> "API key configured"
+                            else -> "API key required"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = state.maskedKey ?: "Add a key to enable Google turn-by-turn navigation",
+                        text = when {
+                            state.isLoading -> "Loading encrypted navigation settings"
+                            state.maskedKey != null -> state.maskedKey
+                            else -> "Add a key to enable Google turn-by-turn navigation"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -158,7 +167,7 @@ fun NavigationSettingsScreen(
                 trailingIcon = {
                     IconButton(
                         onClick = { showApiKey = !showApiKey },
-                        enabled = !state.isSaving,
+                        enabled = !keyOperationInProgress,
                     ) {
                         Icon(
                             imageVector = if (showApiKey) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
@@ -172,7 +181,7 @@ fun NavigationSettingsScreen(
                 } else {
                     null
                 },
-                enabled = !state.isSaving,
+                enabled = !keyOperationInProgress,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -186,14 +195,14 @@ fun NavigationSettingsScreen(
                             ""
                         }
                     },
-                    enabled = !state.isSaving,
+                    enabled = !keyOperationInProgress,
                 ) { Text("Paste") }
                 Button(
                     onClick = { onSave(apiKey) },
-                    enabled = apiKey.isNotBlank() && !state.isSaving,
+                    enabled = apiKey.isNotBlank() && !keyOperationInProgress,
                     modifier = Modifier.weight(1f),
                 ) {
-                    if (state.isSaving) {
+                    if (keyOperationInProgress) {
                         CircularProgressIndicator(
                             modifier = Modifier.padding(end = 12.dp),
                             strokeWidth = 2.dp,
@@ -204,14 +213,14 @@ fun NavigationSettingsScreen(
             }
             if (state.isConfigured) {
                 Row(modifier = Modifier.align(Alignment.End)) {
-                    TextButton(onClick = onTest, enabled = !state.isSaving) { Text("Test setup") }
+                    TextButton(onClick = onTest, enabled = !keyOperationInProgress) { Text("Test setup") }
                     androidx.compose.material3.Button(
                         onClick = {
                             apiKey = ""
                             showApiKey = false
                             onRemove()
                         },
-                        enabled = !state.isSaving,
+                        enabled = !keyOperationInProgress,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,

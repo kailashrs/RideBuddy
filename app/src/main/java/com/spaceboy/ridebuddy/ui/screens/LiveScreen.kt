@@ -48,10 +48,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
 import com.spaceboy.ridebuddy.R
@@ -59,6 +61,7 @@ import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.DistanceUnits
+import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.UnitFormatter
@@ -88,6 +91,7 @@ fun LiveScreen(
     telemetry: TelemetryFrame?,
     activeRide: ActiveRide?,
     liveSamples: List<RideSample>,
+    liveMetrics: LiveRideMetrics,
     diagnostics: BleDiagnostics,
     lastRide: Ride?,
     guidance: GuidanceState,
@@ -333,6 +337,7 @@ fun LiveScreen(
                 frame = telemetry,
                 activeRide = activeRide,
                 samples = liveSamples,
+                metrics = liveMetrics,
                 diagnostics = diagnostics,
                 units = units,
                 level = liveDetailLevel,
@@ -364,7 +369,7 @@ fun LiveScreen(
     }
 
     if (isNavigationStarting) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+        Dialog(onDismissRequest = {}) {
             Card {
                 Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.CircularProgressIndicator()
@@ -528,7 +533,7 @@ private fun TelemetryCard(
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             displayedSpeed.toString(),
-                            style = com.spaceboy.ridebuddy.ui.theme.TelemetryHero,
+                            style = TelemetryHero,
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -567,7 +572,7 @@ private fun TelemetryCard(
                         .height(16.dp),
                     color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                    strokeCap = StrokeCap.Round
                 )
             }
 
@@ -593,6 +598,7 @@ private fun LiveDetailsSheet(
     frame: TelemetryFrame?,
     activeRide: ActiveRide?,
     samples: List<RideSample>,
+    metrics: LiveRideMetrics,
     diagnostics: BleDiagnostics,
     units: DistanceUnits,
     level: LiveDetailLevel,
@@ -627,23 +633,24 @@ private fun LiveDetailsSheet(
             activeRide?.let {
                 Text("Current ride • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)} • ${formatDuration(System.currentTimeMillis() - it.startedAtMillis)}")
             } ?: Text("Ride recording will begin when the bike moves.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ConnectionQuality(diagnostics, samples)
-            val accelerationEvents = samples.count { it.accelerationMetresPerSecondSquared >= 3.0 }
-            val brakingEvents = samples.count { it.accelerationMetresPerSecondSquared <= -3.5 }
-            Text("Recent events • $accelerationEvents acceleration • $brakingEvents braking", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ConnectionQuality(diagnostics, metrics.estimatedPacketGapPercent)
+            Text(
+                "Recent events • ${metrics.hardAccelerationEvents} acceleration • ${metrics.hardBrakingEvents} braking",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         if (level == LiveDetailLevel.Charts) {
             Text("Rolling telemetry", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-            LiveChart("Speed", chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) }, UnitFormatter.speedUnit(units))
-            LiveChart("RPM", chartSamples.map { it.rpm.toDouble() }, "rpm")
-            LiveChart("Throttle", chartSamples.map { it.throttlePercent.toDouble() }, "%")
-            LiveChart(
-                "Mileage",
-                chartSamples.map { UnitFormatter.mileageValue(it.mileageKilometresPerLitre, units, locale) },
-                UnitFormatter.mileageUnit(units),
-            )
+            val speedData = remember(chartSamples, units) { chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) } }
+            val rpmData = remember(chartSamples) { chartSamples.map { it.rpm.toDouble() } }
+            val throttleData = remember(chartSamples) { chartSamples.map { it.throttlePercent.toDouble() } }
+            val mileageData = remember(chartSamples, units, locale) { chartSamples.map { UnitFormatter.mileageValue(it.mileageKilometresPerLitre, units, locale) } }
+            LiveChart("Speed", speedData, UnitFormatter.speedUnit(units))
+            LiveChart("RPM", rpmData, "rpm")
+            LiveChart("Throttle", throttleData, "%")
+            LiveChart("Mileage", mileageData, UnitFormatter.mileageUnit(units))
             Text(
-                "${samples.size} recent packets • ${diagnostics.notificationsReceived} notifications received • ${diagnostics.malformedTelemetryFrames} malformed frames",
+                "${samples.size} recent packets • ${diagnostics.notificationsReceived} notifications received • ${diagnostics.malformedTelemetryFrames} malformed • ${diagnostics.droppedRawTelemetryFrames} dropped",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -651,13 +658,15 @@ private fun LiveDetailsSheet(
 }
 
 @Composable
-private fun ConnectionQuality(diagnostics: BleDiagnostics, samples: List<RideSample>) {
-    val loss = packetLossEstimate(samples)
+private fun ConnectionQuality(diagnostics: BleDiagnostics, estimatedPacketGapPercent: Int?) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Connection quality", style = MaterialTheme.typography.titleMedium)
             Text("Signal ${diagnostics.rssi?.let { "$it dBm" } ?: "—"} • %.1f Hz".format(diagnostics.telemetryHz))
-            Text("Estimated packet gaps ${loss?.let { "$it%" } ?: "collecting data"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Estimated packet gaps ${estimatedPacketGapPercent?.let { "$it%" } ?: "collecting data"}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -683,14 +692,6 @@ private fun LiveChart(title: String, values: List<Double?>, unit: String) {
             )
         }
     }
-}
-
-private fun packetLossEstimate(samples: List<RideSample>): Int? {
-    if (samples.size < 4) return null
-    val intervals = samples.zipWithNext { first, second -> (second.timestampMillis - first.timestampMillis).coerceAtLeast(1) }
-    val baseline = intervals.sorted()[intervals.size / 2].coerceAtLeast(1)
-    val expected = ((samples.last().timestampMillis - samples.first().timestampMillis) / baseline + 1).coerceAtLeast(1)
-    return (((expected - samples.size).coerceAtLeast(0) * 100.0) / expected).roundToInt().coerceIn(0, 100)
 }
 
 /** Limits a live chart to a drawable amount of data without losing its beginning or latest sample. */

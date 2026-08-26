@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListPrefetchScope
 import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -340,15 +342,15 @@ private const val MaxVisibleEvents = 20
  * scheduler is attached internally, but with no-op callbacks it never receives
  * any candidate index to schedule.
  */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 private val NoOpLazyListPrefetchStrategy = object : LazyListPrefetchStrategy {
     override fun LazyListPrefetchScope.onScroll(delta: Float, layoutInfo: LazyListLayoutInfo) = Unit
     override fun LazyListPrefetchScope.onVisibleItemsUpdated(layoutInfo: LazyListLayoutInfo) = Unit
     override fun NestedPrefetchScope.onNestedPrefetch(firstVisibleItemIndex: Int) = Unit
 }
 
-@androidx.compose.runtime.Composable
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun RideDetailContent(
     data: RideDetailUiData,
     units: DistanceUnits,
@@ -435,7 +437,7 @@ private fun RideDetailContent(
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun RouteCard(points: List<Pair<Double, Double>>) {
     if (points.size < 2) return
 
@@ -520,7 +522,7 @@ private fun RouteCard(points: List<Pair<Double, Double>>) {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
     val color = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant

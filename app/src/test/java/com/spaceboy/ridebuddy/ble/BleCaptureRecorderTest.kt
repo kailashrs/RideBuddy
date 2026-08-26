@@ -43,4 +43,23 @@ class BleCaptureRecorderTest {
         assertTrue(recorder.state.value.enabled)
         assertTrue(recorder.state.value.entries.isEmpty())
     }
+
+    @Test
+    fun `bounded capture retains the newest five hundred entries`() {
+        val recorder = BleCaptureRecorder()
+        recorder.setEnabled(true)
+
+        repeat(501) { index ->
+            recorder.record(
+                BleCaptureDirection.Notification,
+                characteristic,
+                byteArrayOf((index and 0xFF).toByte()),
+            )
+        }
+
+        assertEquals(500, recorder.state.value.entries.size)
+        assertEquals(1, recorder.state.value.droppedEntries)
+        assertEquals(1, recorder.state.value.entries.first().payload.single().toInt())
+        assertEquals(500 and 0xFF, recorder.state.value.entries.last().payload.single().toInt() and 0xFF)
+    }
 }

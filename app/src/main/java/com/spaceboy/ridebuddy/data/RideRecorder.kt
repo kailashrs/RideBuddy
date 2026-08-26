@@ -7,6 +7,7 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.TelemetryReading
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
+import java.util.ArrayDeque
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +38,7 @@ class RideRecorder(
     private var stopJob: Job? = null
     private val samplesLock = Any()
     private val samples = mutableListOf<RideSample>()
-    private val liveWindow = mutableListOf<RideSample>()
+    private val liveWindow = ArrayDeque<RideSample>()
     private val mutableLiveSamples = MutableStateFlow<List<RideSample>>(emptyList())
     val liveSamples: StateFlow<List<RideSample>> = mutableLiveSamples.asStateFlow()
     private val mutableLiveSampleEvents = MutableSharedFlow<RideSample>(
@@ -85,8 +86,8 @@ class RideRecorder(
         mutableLiveSampleEvents.tryEmit(liveSample)
 
         val snapshotLive = synchronized(samplesLock) {
-            liveWindow += liveSample
-            if (liveWindow.size > MaxLiveSamples) liveWindow.removeAt(0)
+            liveWindow.addLast(liveSample)
+            if (liveWindow.size > MaxLiveSamples) liveWindow.removeFirst()
             if (nowElapsedRealtime - lastLiveEmitAtElapsedRealtime >= LiveSampleEmitIntervalMillis || liveWindow.size <= 1) {
                 lastLiveEmitAtElapsedRealtime = nowElapsedRealtime
                 liveWindow.toList()
@@ -101,7 +102,7 @@ class RideRecorder(
             if (frame.speedKilometresPerHour >= settingsRepository.settings.value.rideStartSpeedKph) {
                 synchronized(samplesLock) {
                     samples.clear()
-                    liveWindow.performancePreRoll(now).forEach(::appendStoredSampleLocked)
+                    liveWindow.toList().performancePreRoll(now).forEach(::appendStoredSampleLocked)
                 }
                 stopCandidate = null
                 mutableActiveRide.value = ActiveRide.started(now, nowElapsedRealtime, frame)
@@ -224,9 +225,13 @@ class RideRecorder(
     private fun appendStoredSampleLocked(sample: RideSample) {
         samples += sample
         if (samples.size <= MaxStoredSamples) return
-        val compacted = samples.filterIndexed { index, _ -> index % 2 == 0 }
-        samples.clear()
-        samples += compacted
+        // In-place compaction keeps every other sample. This avoids allocating a new
+        // 18,000-element list while holding samplesLock during a long ride.
+        var writeIndex = 0
+        for (readIndex in samples.indices step 2) {
+            samples[writeIndex++] = samples[readIndex]
+        }
+        samples.subList(writeIndex, samples.size).clear()
     }
 
     companion object {

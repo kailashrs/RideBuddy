@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import android.Manifest
@@ -27,15 +28,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class BikeConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val container get() = appContainer
     private var stateJob: Job? = null
+    private var locationDemandJob: Job? = null
     private var receivedStartCommand = false
-    private var locationTracking = false
+    private var locationForegroundEnabled = false
+    private var locationTrackerRunning = false
     private var locationPermissionMissing = false
     private var foregroundPromotionSucceeded = false
     private var foregroundPromotionFailed = false
@@ -48,7 +55,7 @@ class BikeConnectionService : Service() {
                 this,
                 NotificationId,
                 notification("Preparing bike connection"),
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
             )
         }.exceptionOrNull()
         if (foregroundFailure != null) {
@@ -61,14 +68,26 @@ class BikeConnectionService : Service() {
         foregroundPromotionSucceeded = true
         stateJob = scope.launch {
             container.bikeConnection.connectionState.collectLatest { state ->
-                runCatching {
-                    getSystemService(NotificationManager::class.java).notify(NotificationId, notification(state.label()))
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        getSystemService(NotificationManager::class.java).notify(NotificationId, notification(state.label()))
+                    }
                 }
                 if (receivedStartCommand && (state is BikeConnectionState.Disconnected || state is BikeConnectionState.Failed)) {
                     if (state is BikeConnectionState.Failed) container.bikeConnection.disconnect()
                     stopSelf()
                 }
             }
+        }
+        locationDemandJob = scope.launch {
+            combine(
+                container.rideRecorder.activeRide,
+                container.navigationFeed.guidance,
+            ) { activeRide, guidance -> activeRide != null || guidance.active }
+                .distinctUntilChanged()
+                .collect {
+                    synchronizeRideLocationTracking()
+                }
         }
     }
 
@@ -117,8 +136,10 @@ class BikeConnectionService : Service() {
 
     override fun onDestroy() {
         stateJob?.cancel()
+        locationDemandJob?.cancel()
+        if (locationTrackerRunning) container.rideLocationTracker.stop()
+        locationTrackerRunning = false
         scope.cancel()
-        if (locationTracking) container.rideLocationTracker.stop()
         if (!foregroundPromotionFailed &&
             container.bikeConnection.connectionState.value !is BikeConnectionState.Disconnected
         ) {
@@ -128,7 +149,10 @@ class BikeConnectionService : Service() {
     }
 
     private fun enableLocationTrackingIfAllowed(launchedFromVisibleActivity: Boolean) {
-        if (locationTracking) return
+        if (locationForegroundEnabled) {
+            synchronizeRideLocationTracking()
+            return
+        }
         val hasFineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
         val hasBackgroundLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
@@ -143,24 +167,41 @@ class BikeConnectionService : Service() {
                 this,
                 NotificationId,
                 notification("Preparing bike connection"),
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
         }.onFailure {
             locationPermissionMissing = true
             updateNotificationSilently()
             return
         }
-        container.rideLocationTracker.start()
-        locationTracking = true
+        locationForegroundEnabled = true
         locationPermissionMissing = false
+        synchronizeRideLocationTracking()
         updateNotificationSilently()
+    }
+
+    private fun synchronizeRideLocationTracking() {
+        val shouldTrack = shouldTrackRideLocation(
+            locationForegroundEnabled = locationForegroundEnabled,
+            hasActiveRide = container.rideRecorder.activeRide.value != null,
+            hasActiveNavigation = container.navigationFeed.guidance.value.active,
+        )
+        if (shouldTrack == locationTrackerRunning) return
+        if (shouldTrack) {
+            locationTrackerRunning = container.rideLocationTracker.start()
+        } else {
+            container.rideLocationTracker.stop()
+            locationTrackerRunning = false
+        }
     }
 
     private fun updateNotificationSilently() {
         val state = container.bikeConnection.connectionState.value
-        runCatching {
-            getSystemService(NotificationManager::class.java).notify(NotificationId, notification(state.label()))
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                getSystemService(NotificationManager::class.java).notify(NotificationId, notification(state.label()))
+            }
         }
     }
 
@@ -276,9 +317,15 @@ class BikeConnectionService : Service() {
     }
 }
 
+internal fun shouldTrackRideLocation(
+    locationForegroundEnabled: Boolean,
+    hasActiveRide: Boolean,
+    hasActiveNavigation: Boolean,
+): Boolean = locationForegroundEnabled && (hasActiveRide || hasActiveNavigation)
+
 private object ContextCompatBridge {
     fun startForegroundService(context: Context, intent: Intent): Boolean = start("foreground", intent) {
-        androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun startService(context: Context, intent: Intent): Boolean = start("service", intent) {

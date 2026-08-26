@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy
 
 import com.google.android.libraries.navigation.Navigator
+import com.google.android.libraries.navigation.SpeedingListener
 
 /**
  * Owns arrival handling independently of the map Activity so final arrival is still processed
@@ -250,7 +251,7 @@ private class NavigatorGuidanceSession(
     override fun setSpeedingHandler(handler: ((Float) -> Unit)?) {
         navigator.setSpeedingListener(
             handler?.let { callback ->
-                com.google.android.libraries.navigation.SpeedingListener { percentageAboveLimit, _ ->
+                SpeedingListener { percentageAboveLimit, _ ->
                     callback(percentageAboveLimit)
                 }
             },

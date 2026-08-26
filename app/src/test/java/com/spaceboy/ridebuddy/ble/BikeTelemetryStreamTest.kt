@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import com.spaceboy.ridebuddy.domain.TelemetryReading
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,6 +56,34 @@ class BikeTelemetryStreamTest {
 
         assertEquals(0.2, next.telemetryHz, 0.0001)
         assertEquals(11_000L, stream.latestReading.value?.receivedAtMillis)
+    }
+
+    @Test
+    fun `bounded raw queue drops the oldest frame and reports the loss`() {
+        val frame = requireNotNull(TelemetryFrame.parse(validTelemetryPayload()))
+        val queue = BoundedTelemetryQueue(capacity = 2)
+
+        queue.offer(TelemetryReading(frame, 1_000L, 2_000L))
+        queue.offer(TelemetryReading(frame, 1_100L, 2_100L))
+        val dropped = queue.offer(TelemetryReading(frame, 1_200L, 2_200L))
+
+        assertEquals(1L, dropped)
+        assertEquals(1_100L, queue.poll()?.receivedAtMillis)
+        assertEquals(1_200L, queue.poll()?.receivedAtMillis)
+        assertNull(queue.poll())
+    }
+
+    @Test
+    fun `reset clears queued telemetry and its drop count`() {
+        val frame = requireNotNull(TelemetryFrame.parse(validTelemetryPayload()))
+        val queue = BoundedTelemetryQueue(capacity = 1)
+        queue.offer(TelemetryReading(frame, 1_000L, 2_000L))
+        queue.offer(TelemetryReading(frame, 1_100L, 2_100L))
+
+        queue.reset()
+
+        assertEquals(0L, queue.droppedCount)
+        assertNull(queue.poll())
     }
 
     private fun validTelemetryPayload(): ByteArray = byteArrayOf(

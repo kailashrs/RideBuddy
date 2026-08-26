@@ -17,6 +17,7 @@ import com.spaceboy.ridebuddy.data.SupportedNotificationAppsByPackage
 
 class BikeNotificationListenerService : NotificationListenerService() {
     private val eventTracker = NotificationEventTracker()
+    private val batteryManager by lazy { getSystemService(Context.BATTERY_SERVICE) as BatteryManager }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -92,7 +93,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
     }
 
     private fun sendEvent(event: Int) {
-        val battery = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
+        val battery = batteryManager
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             .coerceIn(0, 100)
         appContainer.bikeConnection.enqueueWrite(
