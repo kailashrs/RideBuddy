@@ -39,6 +39,27 @@ internal fun gattFailureAction(
     else -> GattFailureAction.CompleteFailure
 }
 
+internal fun GattOperation.isChallengeSubscription(): Boolean =
+    this is GattOperation.Subscribe && characteristic.uuid == BleCharacteristics.ProtectionChallenge
+
+internal fun GattOperation.isPostAuthenticationSubscription(): Boolean =
+    this is GattOperation.Subscribe && characteristic.uuid in BleCharacteristics.PostAuthenticationSubscriptions
+
+internal fun GattOperation.isOptionalIdentityRead(): Boolean =
+    this is GattOperation.Read && characteristic.uuid in BleCharacteristics.PostAuthenticationIdentityReads
+
+internal fun GattOperation.isProtectionResponseWrite(): Boolean =
+    this is GattOperation.Write && characteristic.uuid == BleCharacteristics.ProtectionResponse
+
+internal fun GattOperation.diagnosticLabel(): String {
+    val uuid = when (this) {
+        is GattOperation.Subscribe -> characteristic.uuid
+        is GattOperation.Read -> characteristic.uuid
+        is GattOperation.Write -> characteristic.uuid
+    }
+    return "$label ${uuid.shortName()}"
+}
+
 internal sealed interface GattOperation {
     val label: String
     val attempt: Int

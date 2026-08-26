@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.ble
 
 import java.util.Locale
+import java.util.UUID
 import java.util.regex.Pattern
 
 /**
@@ -51,3 +52,5 @@ fun String.isApriliaBikeName(): Boolean = uppercase(Locale.ROOT).contains(RsFami
 
 internal fun ByteArray.toHex(separator: String = ""): String =
     joinToString(separator) { "%02X".format(it.toInt() and 0xFF) }
+
+internal fun UUID.shortName(): String = toString().takeLast(4)

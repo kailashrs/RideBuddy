@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
-import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
@@ -19,64 +18,29 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import com.spaceboy.ridebuddy.domain.BikeWrite
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
-import com.spaceboy.ridebuddy.domain.TelemetryReading
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.sample
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
-import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.milliseconds
 
-internal fun reconnectDelayMillis(attempt: Int): Long? {
-    if (attempt !in 0 until MaxReconnectAttempts) return null
-    return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(attempt, 5))
-}
-
-internal fun shouldStartConnection(
-    currentTarget: BikeConnectionTarget?,
-    requestedTarget: BikeConnectionTarget,
-    state: BikeConnectionState,
-): Boolean = currentTarget?.address != requestedTarget.address ||
-    state is BikeConnectionState.Disconnected ||
-    state is BikeConnectionState.Failed
-
-internal fun gattConnectionStatusLabel(status: Int): String = when (status) {
-    BluetoothGatt.GATT_SUCCESS -> "success"
-    0x08 -> "link supervision timeout"
-    0x13 -> "peer terminated connection"
-    0x16 -> "local host terminated connection"
-    0x3E -> "connection failed to establish"
-    0x85 -> "generic GATT error"
-    BluetoothGatt.GATT_CONNECTION_TIMEOUT -> "GATT connection timeout"
-    BluetoothGatt.GATT_FAILURE -> "GATT failure"
-    else -> "unknown"
-}
-
-private const val MaxReconnectAttempts = 6
-private const val MaxReconnectDelayMillis = 30_000L
-
 @SuppressLint("MissingPermission")
-@OptIn(FlowPreview::class)
 internal class AndroidBikeConnection(
     context: Context,
     private val captureRecorder: BleCaptureRecorder,
@@ -95,15 +59,11 @@ internal class AndroidBikeConnection(
         onFailure = ::fail,
         log = ::log,
     )
-    private val operationScheduler = GattOperationScheduler()
-    private val operationExecutor = AndroidGattOperationExecutor(captureRecorder)
-    private val characteristics = mutableMapOf<UUID, BluetoothGattCharacteristic>()
+    private val profile = BikeGattProfile()
     private var gatt: BluetoothGatt? = null
     private var connectedDevice: BluetoothDevice? = null
     private var connectionTarget: BikeConnectionTarget? = null
     private var deviceName: String? = null
-    private var protectionSession: ProtectionSession? = null
-    private var postAuthenticationGate: PostAuthenticationGate? = null
     private var connectedDeviceBonded = false
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
@@ -111,29 +71,52 @@ internal class AndroidBikeConnection(
     private var connectionMonitoringActive = false
     private var gattConnectedAtElapsedRealtime: Long? = null
     private val nextWriteRequestId = AtomicLong()
-    private val telemetryTimestamps = ArrayDeque<Long>()
-    private val liveMileageSmoother = LiveMileageSmoother()
     private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val rawTelemetryChannel = Channel<TelemetryReading>(Channel.UNLIMITED)
+    private val telemetryStream = BikeTelemetryStream(telemetryScope)
 
     private val mutableConnectionState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
-    private val mutableTelemetry = MutableStateFlow<TelemetryFrame?>(null)
-    private val mutableLatestTelemetryReading = MutableStateFlow<TelemetryReading?>(null)
-    private val mutableRawTelemetry = MutableSharedFlow<TelemetryReading>(
-        extraBufferCapacity = RawTelemetryBufferCapacity,
-    )
     private val mutableDiagnostics = MutableStateFlow(
         BleDiagnostics(recentEvents = connectionEventJournal.events.value),
     )
     private val mutableControls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)
-    private val sampledTelemetry = mutableTelemetry
-        .sample(TelemetrySampleIntervalMillis.milliseconds)
-        .stateIn(telemetryScope, SharingStarted.Eagerly, null)
+    private val operationCoordinator = GattOperationCoordinator(
+        handler = mainHandler,
+        executor = AndroidGattOperationExecutor(captureRecorder),
+        currentGatt = { gatt },
+        isChallengeResponsePending = ::isChallengeResponsePending,
+        onActiveOperationChanged = { label ->
+            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = label) }
+        },
+        onFailureRecorded = { message ->
+            mutableDiagnostics.update { diagnostics ->
+                diagnostics.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
+            }
+        },
+        onResetRequired = ::resetGattAfterOperationTimeout,
+        onOperationExhausted = ::handleExhaustedOperation,
+        log = ::log,
+    )
+    private val protectionCoordinator = ProtectionCoordinator(
+        handler = mainHandler,
+        currentGeneration = { connectionGeneration },
+        characteristic = { uuid -> profile[uuid] },
+        enqueue = operationCoordinator::enqueue,
+        enqueueAll = operationCoordinator::enqueueAll,
+        isAuthenticated = { mutableDiagnostics.value.authenticated },
+        markAccepted = { connectionTarget?.address?.let(protectionAcceptanceStore::markAccepted) },
+        clearAcceptance = { connectionTarget?.address?.let(protectionAcceptanceStore::clear) },
+        onAuthenticated = ::completeAuthentication,
+        onFailure = ::fail,
+        onReconnectRequired = ::reconnectAfterProtectionFailure,
+        updateDiagnostics = { phase, path ->
+            mutableDiagnostics.update { diagnostics ->
+                diagnostics.copy(protectionPhase = phase, protectionPath = path)
+            }
+        },
+        log = ::log,
+    )
 
     init {
-        telemetryScope.launch {
-            for (reading in rawTelemetryChannel) mutableRawTelemetry.emit(reading)
-        }
         telemetryScope.launch {
             connectionEventJournal.events.collect { events ->
                 mainHandler.post {
@@ -146,9 +129,9 @@ internal class AndroidBikeConnection(
     }
 
     override val connectionState: StateFlow<BikeConnectionState> = mutableConnectionState.asStateFlow()
-    override val rawTelemetry: SharedFlow<TelemetryReading> = mutableRawTelemetry
-    override val telemetry: StateFlow<TelemetryFrame?> = sampledTelemetry
-    override val latestTelemetryReading: StateFlow<TelemetryReading?> = mutableLatestTelemetryReading.asStateFlow()
+    override val rawTelemetry = telemetryStream.rawTelemetry
+    override val telemetry = telemetryStream.telemetry
+    override val latestTelemetryReading = telemetryStream.latestReading
     override val identity = bikeIdentityRepository.identity
     override val diagnostics: StateFlow<BleDiagnostics> = mutableDiagnostics.asStateFlow()
     override val controls: SharedFlow<BikeControlEvent> = mutableControls
@@ -208,12 +191,12 @@ internal class AndroidBikeConnection(
                 completion.complete(false)
                 return@post
             }
-            val target = characteristics[write.characteristic]
+            val target = profile[write.characteristic]
             if (target == null) {
                 completion.complete(false)
                 return@post
             }
-            enqueue(
+            operationCoordinator.enqueue(
                 GattOperation.Write(
                     characteristic = target,
                     value = write.payload.copyOf(),
@@ -241,7 +224,7 @@ internal class AndroidBikeConnection(
         val cancellationComplete = CompletableDeferred<Unit>()
         mainHandler.post {
             if (!completion.isCompleted) {
-                val activeWrite = operationScheduler.active() as? GattOperation.Write
+                val activeWrite = operationCoordinator.activeWrite()
                 when {
                     activeWrite?.requestId == requestId -> {
                         log("Aborting timed-out write")
@@ -251,9 +234,7 @@ internal class AndroidBikeConnection(
                         scheduleReconnect()
                     }
 
-                    operationScheduler.removeQueued { operation ->
-                        (operation as? GattOperation.Write)?.requestId == requestId
-                    }.isNotEmpty() -> completion.complete(false)
+                    operationCoordinator.removeQueuedWrite(requestId) -> completion.complete(false)
 
                     else -> {
                         log("Timed-out write was no longer queued")
@@ -269,8 +250,8 @@ internal class AndroidBikeConnection(
 
     private fun writeInternal(characteristic: UUID, payload: ByteArray) {
         if (mutableDiagnostics.value.authenticated.not()) return
-        val target = characteristics[characteristic] ?: return
-        enqueue(GattOperation.Write(target, payload.copyOf()))
+        val target = profile[characteristic] ?: return
+        operationCoordinator.enqueue(GattOperation.Write(target, payload.copyOf()))
     }
 
     private fun connectGatt() {
@@ -319,7 +300,7 @@ internal class AndroidBikeConnection(
         connectedDevice = device
         if (bondState == BluetoothDevice.BOND_NONE) protectionAcceptanceStore.clear(target.address)
         mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-        mutableTelemetry.value = null
+        telemetryStream.clearUiTelemetry()
         mutableDiagnostics.value = mutableDiagnostics.value.copy(
             authenticated = false,
             protectionPhase = ProtectionPhase.Idle,
@@ -390,152 +371,144 @@ internal class AndroidBikeConnection(
         }, ConnectionTimeoutToken, android.os.SystemClock.uptimeMillis() + ConnectionTimeoutMillis)
     }
 
-    private val callback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            if (!isCurrent(gatt)) {
-                gatt.close()
-                return
-            }
-            when (newState) {
-                BluetoothProfile.STATE_CONNECTED -> {
-                    if (status != BluetoothGatt.GATT_SUCCESS) {
-                        log("GATT connection failed, status $status")
-                        val wasIntentional = intentionalDisconnect
-                        disconnectInternal(closeOnly = true)
-                        if (!wasIntentional) {
-                            scheduleReconnect()
-                        }
-                        return
-                    }
-                    this@AndroidBikeConnection.gatt = gatt
-                    gattConnectedAtElapsedRealtime = SystemClock.elapsedRealtime()
-                    // RideBuddy does not alter the OEM connection sequence with an MTU request.
-                    // Until Android reports a negotiated value, the active ATT bearer uses 23 bytes.
-                    mutableDiagnostics.update { diagnostics -> diagnostics.copy(attMtu = DefaultAttMtu) }
-                    log("GATT connected")
-                    discoverServices(gatt)
-                }
+    private val callback = AndroidBikeGattCallback(
+        handleConnectionStateChanged = ::onConnectionStateChanged,
+        handleMtuChanged = ::onMtuChanged,
+        handleServicesDiscovered = ::onServicesDiscovered,
+        handleNotification = { callbackGatt, characteristic, value ->
+            onNotification(callbackGatt, characteristic.uuid, value)
+        },
+        handleRead = { callbackGatt, characteristic, value, status ->
+            onRead(callbackGatt, characteristic.uuid, value, status)
+        },
+        handleDescriptorWrite = ::onDescriptorWrite,
+        handleWrite = ::onCharacteristicWrite,
+        handleRssiRead = ::onRssiRead,
+    )
 
-                BluetoothProfile.STATE_DISCONNECTED -> {
-                    val linkAgeSeconds = gattConnectedAtElapsedRealtime?.let { connectedAt ->
-                        (SystemClock.elapsedRealtime() - connectedAt).coerceAtLeast(0L) / 1_000L
-                    }
-                    log(
-                        "GATT disconnected, status $status (${gattConnectionStatusLabel(status)})" +
-                            linkAgeSeconds?.let { ", link age ${it}s" }.orEmpty(),
-                    )
+    private fun onConnectionStateChanged(callbackGatt: BluetoothGatt, status: Int, newState: Int) {
+        if (!isCurrent(callbackGatt)) {
+            callbackGatt.close()
+            return
+        }
+        when (newState) {
+            BluetoothProfile.STATE_CONNECTED -> {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    log("GATT connection failed, status $status")
                     val wasIntentional = intentionalDisconnect
                     disconnectInternal(closeOnly = true)
-                    if (!wasIntentional) {
-                        scheduleReconnect()
-                    }
+                    if (!wasIntentional) scheduleReconnect()
+                    return
                 }
+                gatt = callbackGatt
+                gattConnectedAtElapsedRealtime = SystemClock.elapsedRealtime()
+                // RideBuddy does not alter the OEM connection sequence with an MTU request.
+                // Until Android reports a negotiated value, the active ATT bearer uses 23 bytes.
+                mutableDiagnostics.update { diagnostics -> diagnostics.copy(attMtu = DefaultAttMtu) }
+                log("GATT connected")
+                discoverServices(callbackGatt)
             }
-        }
 
-        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
-            if (!isCurrent(gatt)) return
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                mutableDiagnostics.value = mutableDiagnostics.value.copy(attMtu = mtu)
-                log("MTU $mtu")
-            }
-        }
-
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (!isCurrent(gatt)) return
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                fail("Could not discover bike services ($status)")
-                return
-            }
-            characteristics.clear()
-            gatt.services.flatMap { it.characteristics }.forEach { characteristics[it.uuid] = it }
-            mutableDiagnostics.value = mutableDiagnostics.value.copy(
-                servicesDiscovered = gatt.services.size,
-                serviceSnapshot = gatt.services.flatMap { service ->
-                    service.characteristics.map { characteristic ->
-                        "${service.uuid.shortName()}/${characteristic.uuid.shortName()} props=0x${
-                            characteristic.properties.toString(
-                                16
-                            )
-                        }"
-                    }
-                },
-            )
-            val requiredCharacteristics = listOf(
-                BleCharacteristics.ProtectionChallenge,
-                BleCharacteristics.ProtectionResponse,
-            ) + BleCharacteristics.PostAuthenticationSubscriptions
-            val missingCharacteristics = requiredCharacteristics.filterNot(characteristics::containsKey)
-            if (missingCharacteristics.isNotEmpty()) {
-                fail(
-                    "Motorcycle companion profile is incomplete (missing ${
-                        missingCharacteristics.joinToString { it.shortName() }
-                    })",
+            BluetoothProfile.STATE_DISCONNECTED -> {
+                val linkAgeSeconds = gattConnectedAtElapsedRealtime?.let { connectedAt ->
+                    (SystemClock.elapsedRealtime() - connectedAt).coerceAtLeast(0L) / 1_000L
+                }
+                log(
+                    "GATT disconnected, status $status (${gattConnectionStatusLabel(status)})" +
+                        linkAgeSeconds?.let { ", link age ${it}s" }.orEmpty(),
                 )
-                return
-            }
-            mutableConnectionState.value = BikeConnectionState.Authenticating(deviceName ?: "Motorcycle")
-            val address = connectionTarget?.address
-            // Re-read the live bond state so a pair that completed between connectGatt() and the
-            // service discovery callback is still recognised for the stored-acceptance shortcut.
-            val bondState = runCatching { connectedDevice?.bondState }.getOrNull()
-            if (bondState != null) connectedDeviceBonded = bondState == BluetoothDevice.BOND_BONDED
-            val previouslyAccepted =
-                address != null && connectedDeviceBonded && protectionAcceptanceStore.isAccepted(address)
-            protectionSession = ProtectionSession(previouslyAccepted = previouslyAccepted)
-            syncProtectionDiagnostics()
-            log("Services ready; authenticating${if (previouslyAccepted) " with stored acceptance" else ""}")
-            handleProtectionAction(protectionSession?.begin() ?: ProtectionAction.Fail("Authentication session is missing"))
-        }
-
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            value: ByteArray,
-        ) = onNotification(gatt, characteristic.uuid, value.copyOf())
-
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            value: ByteArray,
-            status: Int,
-        ) = onRead(gatt, characteristic.uuid, value.copyOf(), status)
-
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            if (isCurrent(gatt)) {
-                val completed = completeOperation(status, "subscribe ${descriptor.characteristic.uuid.shortName()}") { operation ->
-                    operation is GattOperation.Subscribe && operation.characteristic.uuid == descriptor.characteristic.uuid
-                }
-                if (completed is GattOperation.Subscribe) {
-                    onSubscriptionCompleted(completed)
-                    runNextOperation()
-                }
+                val wasIntentional = intentionalDisconnect
+                disconnectInternal(closeOnly = true)
+                if (!wasIntentional) scheduleReconnect()
             }
         }
+    }
 
-        override fun onCharacteristicWrite(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int,
-        ) {
-            if (!isCurrent(gatt)) return
-            val completed = completeOperation(status, "write ${characteristic.uuid.shortName()}") { operation ->
+    private fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
+        if (!isCurrent(callbackGatt)) return
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            mutableDiagnostics.value = mutableDiagnostics.value.copy(attMtu = mtu)
+            log("MTU $mtu")
+        }
+    }
+
+    private fun onServicesDiscovered(callbackGatt: BluetoothGatt, status: Int) {
+        if (!isCurrent(callbackGatt)) return
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            fail("Could not discover bike services ($status)")
+            return
+        }
+        val snapshot = profile.replace(callbackGatt.services)
+        mutableDiagnostics.value = mutableDiagnostics.value.copy(
+            servicesDiscovered = snapshot.serviceCount,
+            serviceSnapshot = snapshot.characteristicLabels,
+        )
+        if (snapshot.missingRequiredCharacteristics.isNotEmpty()) {
+            fail(
+                "Motorcycle companion profile is incomplete (missing ${
+                    snapshot.missingRequiredCharacteristics.joinToString { it.shortName() }
+                })",
+            )
+            return
+        }
+        mutableConnectionState.value = BikeConnectionState.Authenticating(deviceName ?: "Motorcycle")
+        val address = connectionTarget?.address
+        // Re-read the live bond state so a pair that completed between connectGatt() and the
+        // service discovery callback is still recognised for the stored-acceptance shortcut.
+        val bondState = runCatching { connectedDevice?.bondState }.getOrNull()
+        if (bondState != null) connectedDeviceBonded = bondState == BluetoothDevice.BOND_BONDED
+        val previouslyAccepted =
+            address != null && connectedDeviceBonded && protectionAcceptanceStore.isAccepted(address)
+        protectionCoordinator.begin(previouslyAccepted)
+    }
+
+    private fun onDescriptorWrite(
+        callbackGatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor,
+        status: Int,
+    ) {
+        if (!isCurrent(callbackGatt)) return
+        val uuid = descriptor.characteristic.uuid
+        operationCoordinator.complete(
+            status = status,
+            label = "subscribe ${uuid.shortName()}",
+            matchesActiveOperation = { operation ->
+                operation is GattOperation.Subscribe && operation.characteristic.uuid == uuid
+            },
+        ) { completed ->
+            if (completed is GattOperation.Subscribe) {
+                mutableDiagnostics.update { diagnostics ->
+                    diagnostics.copy(descriptorWritesCompleted = diagnostics.descriptorWritesCompleted + 1)
+                }
+                protectionCoordinator.onSubscriptionCompleted(completed.characteristic.uuid)
+            }
+        }
+    }
+
+    private fun onCharacteristicWrite(
+        callbackGatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        status: Int,
+    ) {
+        if (!isCurrent(callbackGatt)) return
+        operationCoordinator.complete(
+            status = status,
+            label = "write ${characteristic.uuid.shortName()}",
+            matchesActiveOperation = { operation ->
                 operation is GattOperation.Write && operation.characteristic.uuid == characteristic.uuid
-            }
-            if (completed is GattOperation.Write) {
-                onWriteCompleted(completed)
-                runNextOperation()
-            }
+            },
+        ) { completed ->
+            if (completed is GattOperation.Write) onWriteCompleted(completed)
         }
+    }
 
-        override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
-            if (!isCurrent(gatt)) return
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                mutableDiagnostics.value = mutableDiagnostics.value.copy(rssi = rssi)
-                val current = mutableConnectionState.value
-                if (current is BikeConnectionState.Connected) {
-                    mutableConnectionState.value = current.copy(rssi = rssi)
-                }
+    private fun onRssiRead(callbackGatt: BluetoothGatt, rssi: Int, status: Int) {
+        if (!isCurrent(callbackGatt)) return
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            mutableDiagnostics.value = mutableDiagnostics.value.copy(rssi = rssi)
+            val current = mutableConnectionState.value
+            if (current is BikeConnectionState.Connected) {
+                mutableConnectionState.value = current.copy(rssi = rssi)
             }
         }
     }
@@ -562,55 +535,40 @@ internal class AndroidBikeConnection(
             )
         }
         when (uuid) {
-            BleCharacteristics.ProtectionChallenge -> {
-                log("Protection challenge received by indication")
-                mainHandler.removeCallbacksAndMessages(ChallengeTimeoutToken)
-                handleProtectionAction(
-                    protectionSession?.onChallenge(value)
-                        ?: ProtectionAction.Fail("Authentication session is missing"),
-                )
-            }
+            BleCharacteristics.ProtectionChallenge -> protectionCoordinator.onChallenge(value)
 
             BleCharacteristics.Telemetry -> {
-                telemetryTimestamps.addLast(now)
-                while (telemetryTimestamps.firstOrNull()
-                        ?.let { now - it > TelemetryWindowMillis } == true
-                ) telemetryTimestamps.removeFirst()
+                val acceptance = telemetryStream.accept(
+                    payload = value,
+                    receivedAtMillis = now,
+                    elapsedRealtime = SystemClock::elapsedRealtime,
+                )
                 mutableDiagnostics.update { diagnostics ->
-                    diagnostics.copy(telemetryHz = telemetryTimestamps.size / (TelemetryWindowMillis / 1_000.0))
+                    diagnostics.copy(telemetryHz = acceptance.telemetryHz)
                 }
-                val frame = TelemetryFrame.parse(value)
-                if (frame == null) {
+                if (!acceptance.valid) {
                     mutableDiagnostics.update { diagnostics ->
                         diagnostics.copy(malformedTelemetryFrames = diagnostics.malformedTelemetryFrames + 1)
                     }
                 } else {
-                    val reading = TelemetryReading(
-                        frame = frame,
-                        receivedAtMillis = now,
-                        receivedAtElapsedRealtime = SystemClock.elapsedRealtime(),
-                    )
-                    mutableLatestTelemetryReading.value = reading
-                    mutableTelemetry.value = liveMileageSmoother.smooth(frame)
-                    rawTelemetryChannel.trySend(reading)
-                    acceptPostAuthenticationEvidence("valid telemetry")
+                    protectionCoordinator.acceptEvidence("valid telemetry")
                 }
             }
 
             BleCharacteristics.Vin -> {
-                val vin = value.decodeVin()
+                val vin = value.decodeBikeVin()
                 if (vin == null) {
                     log("Ignored malformed VIN frame (${value.size} bytes)")
                 } else {
                     updateIdentity(vin = vin)
-                    acceptPostAuthenticationEvidence("VIN")
+                    protectionCoordinator.acceptEvidence("VIN")
                 }
             }
 
             BleCharacteristics.ClusterSoftwareVersion -> {
-                val version = value.cleanText()
+                val version = value.decodeClusterSoftwareVersion()
                 updateIdentity(version = version)
-                if (version.isNotBlank()) acceptPostAuthenticationEvidence("cluster software version")
+                if (version.isNotBlank()) protectionCoordinator.acceptEvidence("cluster software version")
             }
             BleCharacteristics.NavigationControl -> {
                 when (value.firstOrNull()?.toInt()?.and(0xFF)) {
@@ -629,43 +587,47 @@ internal class AndroidBikeConnection(
     private fun onRead(callbackGatt: BluetoothGatt, uuid: UUID, value: ByteArray, status: Int) {
         if (!isCurrent(callbackGatt)) return
         captureRecorder.record(BleCaptureDirection.Read, uuid, value, "status=$status")
-        val completed = completeOperation(status, "read ${uuid.shortName()}") { operation ->
-            operation is GattOperation.Read && operation.characteristic.uuid == uuid
-        }
-        if (completed is GattOperation.Read) {
-            mutableDiagnostics.update { diagnostics ->
-                diagnostics.copy(readsCompleted = diagnostics.readsCompleted + 1)
-            }
-            log("Read ${uuid.shortName()} completed (${value.size} bytes)")
-            when (uuid) {
-                BleCharacteristics.Vin -> {
-                    val vin = value.decodeVin()
-                    if (vin != null) {
-                        updateIdentity(vin = vin)
-                        acceptPostAuthenticationEvidence("VIN read")
+        operationCoordinator.complete(
+            status = status,
+            label = "read ${uuid.shortName()}",
+            matchesActiveOperation = { operation ->
+                operation is GattOperation.Read && operation.characteristic.uuid == uuid
+            },
+        ) { completed ->
+            if (completed is GattOperation.Read) {
+                mutableDiagnostics.update { diagnostics ->
+                    diagnostics.copy(readsCompleted = diagnostics.readsCompleted + 1)
+                }
+                log("Read ${uuid.shortName()} completed (${value.size} bytes)")
+                when (uuid) {
+                    BleCharacteristics.Vin -> {
+                        val vin = value.decodeBikeVin()
+                        if (vin != null) {
+                            updateIdentity(vin = vin)
+                            protectionCoordinator.acceptEvidence("VIN read")
+                        }
+                    }
+
+                    BleCharacteristics.ClusterSoftwareVersion -> {
+                        val version = value.decodeClusterSoftwareVersion()
+                        updateIdentity(version = version)
+                        if (version.isNotBlank()) {
+                            protectionCoordinator.acceptEvidence("cluster software version read")
+                        }
                     }
                 }
-
-                BleCharacteristics.ClusterSoftwareVersion -> {
-                    val version = value.cleanText()
-                    updateIdentity(version = version)
-                    if (version.isNotBlank()) acceptPostAuthenticationEvidence("cluster software version read")
-                }
             }
-            runNextOperation()
         }
     }
 
-    private fun completeAuthentication(evidence: String) {
+    private fun completeAuthentication(evidence: String, path: ProtectionPath?) {
         if (mutableDiagnostics.value.authenticated) return
         reconnectAttempt = 0
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        mainHandler.removeCallbacksAndMessages(ProtectionVerificationToken)
-        connectionTarget?.address?.let(protectionAcceptanceStore::markAccepted)
         mutableDiagnostics.value = mutableDiagnostics.value.copy(
             authenticated = true,
             protectionPhase = ProtectionPhase.Ready,
-            protectionPath = protectionSession?.path,
+            protectionPath = path,
         )
         connectionTarget?.address?.let { address ->
             bikeIdentityRepository.update(address) { identity ->
@@ -676,153 +638,6 @@ internal class AndroidBikeConnection(
         log("Protected session verified by $evidence")
         connectionMonitoringActive = true
         scheduleRssiRead()
-    }
-
-    private fun beginPostAuthenticationVerification() {
-        syncProtectionDiagnostics()
-        log("Starting post-authentication verification via ${protectionSession?.path?.name ?: "unknown path"}")
-        val subscriptions = BleCharacteristics.PostAuthenticationSubscriptions.map { uuid ->
-            GattOperation.Subscribe(
-                characteristics[uuid] ?: run {
-                    fail("Motorcycle companion profile lost ${uuid.shortName()}")
-                    return
-                },
-            )
-        }
-        postAuthenticationGate = PostAuthenticationGate(BleCharacteristics.PostAuthenticationSubscriptions)
-        enqueueAll(subscriptions)
-        val identityReads = BleCharacteristics.PostAuthenticationIdentityReads.mapNotNull { uuid ->
-            characteristics[uuid]?.takeIf { characteristic ->
-                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
-            }?.let(GattOperation::Read)
-        }
-        if (identityReads.isNotEmpty()) {
-            log("Queued ${identityReads.size} motorcycle identity snapshot reads")
-            enqueueAll(identityReads)
-        }
-    }
-
-    private fun onSubscriptionCompleted(operation: GattOperation.Subscribe) {
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(descriptorWritesCompleted = diagnostics.descriptorWritesCompleted + 1)
-        }
-        val uuid = operation.characteristic.uuid
-        log("Subscribed ${uuid.shortName()}")
-        if (uuid == BleCharacteristics.ProtectionChallenge) {
-            handleProtectionAction(
-                protectionSession?.onChallengeSubscriptionReady()
-                    ?: ProtectionAction.Fail("Authentication session is missing"),
-            )
-            if (protectionSession?.phase == ProtectionPhase.AwaitingChallenge) {
-                scheduleChallengeTimeout()
-            }
-            return
-        }
-
-        val gateUpdate = postAuthenticationGate?.markSubscriptionEnabled(uuid) ?: return
-        if (gateUpdate.becameReady) {
-            log("Required motorcycle subscriptions are ready")
-            gateUpdate.deferredEvidence?.let(::completePostAuthenticationEvidence)
-            if (!mutableDiagnostics.value.authenticated) scheduleProtectionVerificationTimeout()
-        }
-    }
-
-    private fun acceptPostAuthenticationEvidence(evidence: String) {
-        val gate = postAuthenticationGate ?: return
-        val acceptedEvidence = gate.acceptEvidence(evidence)
-        if (acceptedEvidence == null) {
-            log("Deferred $evidence until required subscriptions are ready")
-            return
-        }
-        completePostAuthenticationEvidence(acceptedEvidence)
-    }
-
-    private fun completePostAuthenticationEvidence(evidence: String) {
-        handleProtectionAction(protectionSession?.onPostAuthenticationEvidence(evidence) ?: ProtectionAction.None)
-    }
-
-    private fun handleProtectionAction(action: ProtectionAction) {
-        syncProtectionDiagnostics()
-        when (action) {
-            ProtectionAction.None -> Unit
-            ProtectionAction.SubscribeChallenge -> {
-                val challenge = characteristics[BleCharacteristics.ProtectionChallenge]
-                if (challenge == null) {
-                    fail("Authentication challenge endpoint is missing")
-                } else {
-                    enqueue(GattOperation.Subscribe(challenge))
-                }
-            }
-
-            is ProtectionAction.WriteResponse -> {
-                mainHandler.removeCallbacksAndMessages(ChallengeTimeoutToken)
-                val response = characteristics[BleCharacteristics.ProtectionResponse]
-                if (response == null) {
-                    fail("Authentication response endpoint is missing")
-                } else {
-                    log("Queueing protection response")
-                    enqueue(
-                        GattOperation.Write(
-                            response,
-                            action.value.copyOf(),
-                            priority = GattOperationPriority.Critical,
-                        ),
-                    )
-                }
-            }
-
-            ProtectionAction.BeginPostAuthentication -> beginPostAuthenticationVerification()
-            is ProtectionAction.CompleteAuthentication -> completeAuthentication(action.evidence)
-            is ProtectionAction.Fail -> handleProtectionFailure(action)
-        }
-        syncProtectionDiagnostics()
-    }
-
-    private fun handleProtectionFailure(failure: ProtectionAction.Fail) {
-        when (failure.policy) {
-            ProtectionFailurePolicy.Stop -> fail(failure.message)
-            ProtectionFailurePolicy.ClearAcceptance -> {
-                connectionTarget?.address?.let(protectionAcceptanceStore::clear)
-                fail(failure.message)
-            }
-
-            ProtectionFailurePolicy.ClearAcceptanceAndReconnect -> {
-                connectionTarget?.address?.let(protectionAcceptanceStore::clear)
-                reconnectAfterProtectionFailure(failure.message)
-            }
-        }
-    }
-
-    private fun syncProtectionDiagnostics() {
-        val session = protectionSession
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(
-                protectionPhase = session?.phase ?: ProtectionPhase.Idle,
-                protectionPath = session?.path,
-            )
-        }
-    }
-
-    private fun scheduleProtectionVerificationTimeout() {
-        mainHandler.removeCallbacksAndMessages(ProtectionVerificationToken)
-        val session = protectionSession ?: return
-        val generation = connectionGeneration
-        mainHandler.postAtTime({
-            if (generation == connectionGeneration && protectionSession === session) {
-                handleProtectionAction(session.onVerificationTimeout())
-            }
-        }, ProtectionVerificationToken, SystemClock.uptimeMillis() + ProtectionVerificationTimeoutMillis)
-    }
-
-    private fun scheduleChallengeTimeout() {
-        mainHandler.removeCallbacksAndMessages(ChallengeTimeoutToken)
-        val session = protectionSession ?: return
-        val generation = connectionGeneration
-        mainHandler.postAtTime({
-            if (generation == connectionGeneration && protectionSession === session) {
-                handleProtectionAction(session.onChallengeTimeout())
-            }
-        }, ChallengeTimeoutToken, SystemClock.uptimeMillis() + ChallengeTimeoutMillis)
     }
 
     private fun reconnectAfterProtectionFailure(message: String) {
@@ -837,200 +652,47 @@ internal class AndroidBikeConnection(
         }
     }
 
-    private fun enqueue(operation: GattOperation) {
-        val shouldStart = operationScheduler.enqueue(operation)
-        if (shouldStart) runNextOperation()
-    }
-
-    private fun enqueueAll(operations: List<GattOperation>) {
-        val shouldStart = operationScheduler.enqueueAll(operations)
-        if (shouldStart) runNextOperation()
-    }
-
-    private fun runNextOperation() {
-        val currentGatt = gatt ?: return
-        val operation = operationScheduler.beginNext() ?: return
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(activeGattOperation = operation.diagnosticLabel())
-        }
-        mainHandler.postAtTime(
-            { handleOperationTimeout(operation) },
-            OperationTimeoutToken,
-            android.os.SystemClock.uptimeMillis() + OperationTimeoutMillis,
-        )
-        // GATT I/O must be performed outside the scheduler lock: BluetoothGatt methods may
-        // synchronously invoke callbacks on the binder thread, which also use the scheduler.
-        val started = try {
-            operationExecutor.start(currentGatt, operation)
-        } catch (e: RuntimeException) {
-            // Closed gatt can throw IllegalStateException from native on some OEM stacks.
-            // Treat as a synchronous failure so the existing timeout/failure path runs.
-            log("Could not start ${operation.label}: ${e.message}")
-            false
-        }
-        when (gattStartAction(started)) {
-            GattStartAction.AwaitCallback -> Unit
-            GattStartAction.HandleSynchronousFailure -> {
-                mainHandler.removeCallbacksAndMessages(OperationTimeoutToken)
-                log("Could not start ${operation.label}")
-                handleOperationFailure(operation, GattFailureSource.SynchronousStart)
-            }
-        }
-    }
-
-    /**
-     * Once Android accepted a GATT operation, a missing callback leaves its remote outcome
-     * unknowable. Writes and required subscriptions therefore reset the link. Identity reads are
-     * side-effect-free, optional, and use distinct UUIDs, so a late callback can be ignored safely.
-     */
-    private fun handleOperationTimeout(operation: GattOperation) {
-        if (!operationScheduler.isActive(operation)) return
-        if (operation.isOptionalIdentityRead()) {
-            val read = operation as GattOperation.Read
-            if (!operationScheduler.complete(operation)) return
-            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = null) }
-            log("Motorcycle identity snapshot ${read.characteristic.uuid.shortName()} timed out; continuing")
-            runNextOperation()
-            return
-        }
-        handleOperationFailure(operation, GattFailureSource.CallbackTimeout)
-    }
-
-    private fun completeOperation(
-        status: Int,
-        label: String,
-        matchesActiveOperation: (GattOperation) -> Boolean,
-    ): GattOperation? {
-        val operation = operationScheduler.activeMatching(matchesActiveOperation)
-        if (operation == null) {
-            log("Ignoring unmatched callback for $label")
-            return null
-        }
-        mainHandler.removeCallbacksAndMessages(OperationTimeoutToken)
-        val success = status == BluetoothGatt.GATT_SUCCESS
-        if (success) {
-            if (!operationScheduler.complete(operation)) return null
-            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = null) }
-            return operation
-        } else {
-            log("Failed to $label ($status)")
-            handleOperationFailure(operation, GattFailureSource.StatusCallback)
-            return null
-        }
-    }
-
     private fun onWriteCompleted(operation: GattOperation.Write) {
         mutableDiagnostics.update { diagnostics ->
             diagnostics.copy(writesCompleted = diagnostics.writesCompleted + 1)
         }
         if (operation.isProtectionResponseWrite()) {
-            log("Protection response write completed")
-            val action = protectionSession?.onProtectionResponseWritten()
-                ?: ProtectionAction.Fail("Authentication session is missing")
-            if (action !is ProtectionAction.Fail) {
-                connectionTarget?.address?.let(protectionAcceptanceStore::markAccepted)
-            }
-            handleProtectionAction(action)
+            protectionCoordinator.onProtectionResponseWritten()
         }
         operation.completion?.complete(true)
     }
 
-    private fun handleOperationFailure(operation: GattOperation, source: GattFailureSource) {
-        var challengeSubscriptionSuperseded = false
-        var operationExhausted = false
-        if (!operationScheduler.isActive(operation)) return
-        val shouldContinue = if (isSupersededChallengeSubscription(operation, source)) {
-            challengeSubscriptionSuperseded = operationScheduler.complete(operation)
-            challengeSubscriptionSuperseded
-        } else {
-            when (gattFailureAction(source, operation.attempt, MaxOperationRetries)) {
-                GattFailureAction.RetryCurrentGatt -> {
-                    if (!operationScheduler.retry(operation)) return
-                    log("Retrying ${operation.label} (${operation.attempt + 1}/$MaxOperationRetries)")
-                    true
-                }
-
-                GattFailureAction.CompleteFailure -> {
-                    if (!operationScheduler.complete(operation)) return
-                    operationExhausted = true
-                    if (!operation.isOptionalIdentityRead()) {
-                        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-                            lastError = "GATT ${operation.label} failed after retries",
-                            lastErrorAtMillis = System.currentTimeMillis(),
-                        )
-                    }
-                    (operation as? GattOperation.Write)?.completion?.complete(false)
-                    true
-                }
-
-                GattFailureAction.ResetGattAndReconnect -> {
-                    log("Timed out during ${operation.label}; resetting GATT")
-                    disconnectInternal(closeOnly = true)
-                    if (!intentionalDisconnect) {
-                        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-                        scheduleReconnect()
-                    }
-                    false
-                }
-            }
+    private fun resetGattAfterOperationTimeout() {
+        disconnectInternal(closeOnly = true)
+        if (!intentionalDisconnect) {
+            mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
+            scheduleReconnect()
         }
-        if (challengeSubscriptionSuperseded) {
-            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = null) }
-            log("Challenge arrived before its subscription callback; continuing with the response")
-            runNextOperation()
-            return
-        }
-        if (operationExhausted) {
-            when {
-                operation.isChallengeSubscription() -> {
-                    fail("Could not enable motorcycle authentication indications")
-                    return
-                }
-
-                operation.isProtectionResponseWrite() -> {
-                    connectionTarget?.address?.let(protectionAcceptanceStore::clear)
-                    fail("Motorcycle authentication response was rejected")
-                    return
-                }
-
-                operation.isPostAuthenticationSubscription() -> {
-                    val uuid = (operation as GattOperation.Subscribe).characteristic.uuid
-                    handleProtectionAction(
-                        protectionSession?.onRequiredProfileFailure(
-                            "Could not enable required motorcycle data (${uuid.shortName()})",
-                        ) ?: ProtectionAction.Fail(
-                            "Protection session is missing after a required subscription failure",
-                            ProtectionFailurePolicy.ClearAcceptanceAndReconnect,
-                        ),
-                    )
-                    return
-                }
-            }
-        }
-        if (shouldContinue && operationScheduler.hasNoActiveOperation()) {
-            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = null) }
-        }
-        if (shouldContinue) runNextOperation()
     }
 
-    private fun isSupersededChallengeSubscription(
-        operation: GattOperation,
-        source: GattFailureSource,
-    ): Boolean = source != GattFailureSource.CallbackTimeout &&
-        operation.isChallengeSubscription() &&
-        protectionSession?.phase == ProtectionPhase.Responding
+    private fun handleExhaustedOperation(operation: GattOperation): Boolean = when {
+        operation.isChallengeSubscription() -> {
+            fail("Could not enable motorcycle authentication indications")
+            true
+        }
 
-    private fun GattOperation.isChallengeSubscription(): Boolean =
-        this is GattOperation.Subscribe && characteristic.uuid == BleCharacteristics.ProtectionChallenge
+        operation.isProtectionResponseWrite() -> {
+            connectionTarget?.address?.let(protectionAcceptanceStore::clear)
+            fail("Motorcycle authentication response was rejected")
+            true
+        }
 
-    private fun GattOperation.isPostAuthenticationSubscription(): Boolean =
-        this is GattOperation.Subscribe && characteristic.uuid in BleCharacteristics.PostAuthenticationSubscriptions
+        operation.isPostAuthenticationSubscription() -> {
+            val uuid = (operation as GattOperation.Subscribe).characteristic.uuid
+            protectionCoordinator.onRequiredProfileFailure(uuid)
+            true
+        }
 
-    private fun GattOperation.isOptionalIdentityRead(): Boolean =
-        this is GattOperation.Read && characteristic.uuid in BleCharacteristics.PostAuthenticationIdentityReads
+        else -> false
+    }
 
-    private fun GattOperation.isProtectionResponseWrite(): Boolean =
-        this is GattOperation.Write && characteristic.uuid == BleCharacteristics.ProtectionResponse
+    private fun isChallengeResponsePending(): Boolean =
+        protectionCoordinator.phase == ProtectionPhase.Responding
 
     private val rssiRunnable = object : Runnable {
         override fun run() {
@@ -1077,19 +739,10 @@ internal class AndroidBikeConnection(
         mainHandler.removeCallbacks(rssiRunnable)
         bondCoordinator.cancel()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        mainHandler.removeCallbacksAndMessages(OperationTimeoutToken)
-        mainHandler.removeCallbacksAndMessages(ProtectionVerificationToken)
-        mainHandler.removeCallbacksAndMessages(ChallengeTimeoutToken)
-        operationScheduler.clear().filterIsInstance<GattOperation.Write>().forEach {
-            it.completion?.complete(false)
-        }
-        characteristics.clear()
-        protectionSession = null
-        postAuthenticationGate = null
-        telemetryTimestamps.clear()
-        liveMileageSmoother.reset()
-        mutableTelemetry.value = null
-        mutableLatestTelemetryReading.value = null
+        protectionCoordinator.reset()
+        operationCoordinator.clear()
+        profile.clear()
+        telemetryStream.reset()
         mutableDiagnostics.value = mutableDiagnostics.value.copy(
             authenticated = false,
             protectionPhase = ProtectionPhase.Idle,
@@ -1102,7 +755,7 @@ internal class AndroidBikeConnection(
             activeGattOperation = null,
         )
         gatt?.let { current ->
-        connectedDevice = null
+            connectedDevice = null
             gatt = null
             if (!closeOnly) runCatching { current.disconnect() }
             runCatching { current.close() }
@@ -1134,54 +787,13 @@ internal class AndroidBikeConnection(
         connectionEventJournal.record(message)
     }
 
-    private fun ByteArray.cleanText(): String = toString(Charsets.UTF_8).trim('\u0000', ' ', '\r', '\n')
-
-    private fun ByteArray.decodeVin(): String? {
-        // Some firmwares return the raw 17‑byte VIN; others still wrap it in the
-        // 19‑byte OEM frame.
-        if (size == VinLength) {
-            if (any { (it.toInt() and 0xFF) !in PrintableAsciiRange }) return null
-            return toString(Charsets.US_ASCII)
-        }
-        if (size == FramedVinLength) {
-            val vinBytes = copyOfRange(1, size - 1)
-            if (vinBytes.any { (it.toInt() and 0xFF) !in PrintableAsciiRange }) return null
-            return vinBytes.toString(Charsets.US_ASCII).takeIf { it.length == VinLength }
-        }
-        return null
-    }
-
-    private fun UUID.shortName(): String = toString().takeLast(4)
-
-    private fun GattOperation.diagnosticLabel(): String {
-        val uuid = when (this) {
-            is GattOperation.Subscribe -> characteristic.uuid
-            is GattOperation.Read -> characteristic.uuid
-            is GattOperation.Write -> characteristic.uuid
-        }
-        return "$label ${uuid.shortName()}"
-    }
-
     private companion object {
         val ReconnectToken = Any()
         val ConnectionTimeoutToken = Any()
-        val OperationTimeoutToken = Any()
-        val ProtectionVerificationToken = Any()
-        val ChallengeTimeoutToken = Any()
         const val RssiIntervalMillis = 10_000L
-        const val TelemetryWindowMillis = 5_000L
-        const val TelemetrySampleIntervalMillis = 100L
-        const val RawTelemetryBufferCapacity = 256
-        const val OperationTimeoutMillis = 8_000L
-        const val ProtectionVerificationTimeoutMillis = 8_000L
-        const val ChallengeTimeoutMillis = 8_000L
         const val AwaitedWriteTimeoutMillis = 30_000L
         const val ConnectionTimeoutMillis = 20_000L
         const val DefaultAttMtu = 23
-        const val FramedVinLength = 19
-        const val VinLength = 17
-        val PrintableAsciiRange = 0x20..0x7E
-        const val MaxOperationRetries = 2
         const val MaxFrameEntries = 30
     }
 }
