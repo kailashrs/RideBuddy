@@ -49,25 +49,13 @@ interface BikeConnection {
     fun connect(target: BikeConnectionTarget)
     fun disconnect()
     fun notifyStartFailed(message: String = "Unable to start connection service") {}
-    fun write(characteristic: UUID, payload: ByteArray): Boolean
-
-    /**
-     * Queues a write and waits for Android's GATT callback when the characteristic supports one.
-     * Implementations return false when the write cannot be queued, is rejected, or times out.
-     */
-    suspend fun writeAndAwait(characteristic: UUID, payload: ByteArray): Boolean = false
+    fun enqueueWrite(characteristic: UUID, payload: ByteArray)
 
     /**
      * Queues a write with its required acknowledgement behavior and awaits its outcome.
-     * The legacy overload keeps existing implementations source-compatible.
+     * Implementations return false when the write cannot be queued, is rejected, or times out.
      */
-    suspend fun writeAndAwait(write: BikeWrite): Boolean =
-        writeAndAwait(write.characteristic, write.payload)
-
-    fun writeBatch(writes: List<BikeWrite>, priority: Boolean = false): Boolean {
-        writes.forEach { write -> write(write.characteristic, write.payload) }
-        return true
-    }
+    suspend fun writeAndAwait(write: BikeWrite): Boolean
 }
 
 sealed interface BikeConnectionState {

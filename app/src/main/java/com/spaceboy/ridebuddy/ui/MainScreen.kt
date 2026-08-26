@@ -100,7 +100,6 @@ data class MainScreenState(
     val settings: AppSettings,
     val bikeAssociation: BikeAssociationState,
     val notificationAccessEnabled: Boolean,
-    val callControlsEnabled: Boolean,
     val legacyCallPermissionGranted: Boolean,
     val backgroundLocationGranted: Boolean,
 )
@@ -396,7 +395,6 @@ private fun ScreenContent(
                 onOpenDiagnostics = onOpenDiagnostics,
                 onRunStationaryTest = onRunStationaryTest,
                 notificationAccessEnabled = notificationAccessEnabled,
-                callControlsEnabled = callControlsEnabled,
                 legacyCallPermissionGranted = legacyCallPermissionGranted,
                 onLegacyCallControlsChanged = onLegacyCallControlsChanged,
                 backgroundLocationGranted = backgroundLocationGranted,

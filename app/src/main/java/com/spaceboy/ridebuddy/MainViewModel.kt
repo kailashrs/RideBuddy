@@ -68,7 +68,6 @@ class MainViewModel(
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
     val connectionState = bikeConnection.connectionState
     val telemetry = bikeConnection.telemetry
-    val latestTelemetryReading = bikeConnection.latestTelemetryReading
     val identity = bikeConnection.identity
     val diagnostics = bikeConnection.diagnostics
     val bleCapture = bleCaptureRecorder.state
@@ -244,8 +243,6 @@ class MainViewModel(
     }
 
     private val autoConnectGate = MainViewModelAutoConnectGate()
-
-    fun disconnectBike() = bikeConnection.disconnect()
 
     /**
      * Delegates to [MainViewModelAutoConnectGate.consume]; see that class for the

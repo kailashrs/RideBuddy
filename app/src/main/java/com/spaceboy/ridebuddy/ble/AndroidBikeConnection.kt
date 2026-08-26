@@ -196,13 +196,9 @@ internal class AndroidBikeConnection(
         mainHandler.post { fail(message) }
     }
 
-    override fun write(characteristic: UUID, payload: ByteArray): Boolean {
+    override fun enqueueWrite(characteristic: UUID, payload: ByteArray) {
         mainHandler.post { writeInternal(characteristic, payload) }
-        return true
     }
-
-    override suspend fun writeAndAwait(characteristic: UUID, payload: ByteArray): Boolean =
-        writeAndAwait(BikeWrite(characteristic, payload))
 
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
         val completion = CompletableDeferred<Boolean>()
@@ -269,36 +265,6 @@ internal class AndroidBikeConnection(
         }
         cancellationComplete.await()
         return completion.await()
-    }
-
-    override fun writeBatch(writes: List<BikeWrite>, priority: Boolean): Boolean {
-        if (!mutableDiagnostics.value.authenticated) return false
-        val copied = writes.map { BikeWrite(it.characteristic, it.payload.copyOf(), it.mode) }
-        return mainHandler.post {
-            if (!mutableDiagnostics.value.authenticated) return@post
-            val operations = copied.mapNotNull { write ->
-                characteristics[write.characteristic]?.let { characteristic ->
-                    GattOperation.Write(characteristic, write.payload, mode = write.mode)
-                }
-            }
-            val update = if (priority) {
-                operationScheduler.replaceQueued(
-                    removeIf = { operation ->
-                        (operation as? GattOperation.Write)?.characteristic?.uuid in
-                            BleCharacteristics.NavigationWrites
-                    },
-                    replacements = operations,
-                    front = true,
-                )
-            } else {
-                GattQueueUpdate(
-                    removed = emptyList(),
-                    shouldStart = operationScheduler.enqueueAll(operations),
-                )
-            }
-            update.removed.filterIsInstance<GattOperation.Write>().forEach { it.completion?.complete(false) }
-            if (update.shouldStart) runNextOperation()
-        }
     }
 
     private fun writeInternal(characteristic: UUID, payload: ByteArray) {

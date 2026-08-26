@@ -30,12 +30,12 @@ Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC B
 
 ## Toolchain
 
-- Android Gradle Plugin 8.13.2
-- Gradle 8.13
-- Kotlin / Compose compiler 2.3.21
+- Android Gradle Plugin 9.3.1
+- Gradle 9.7.1
+- Kotlin / Compose compiler 2.4.10
 - Jetpack Compose BOM 2026.06.01
 - compile SDK 36.1, target SDK 36, minimum SDK 36 (Android 16); pairing requires `FEATURE_COMPANION_DEVICE_SETUP`
-- Google Navigation SDK 7.8.0
+- Google Navigation SDK 7.9.0
 
 The checked-in Gradle wrapper remains the authoritative build entry point.
 
@@ -44,13 +44,13 @@ The checked-in Gradle wrapper remains the authoritative build entry point.
 Open the project in Android Studio or run:
 
 ```bash
-./gradlew testDebugUnitTest lintDebug assembleDebug assembleBenchmark
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ./gradlew :app:compileDebugAndroidTestKotlin
 ```
 
-CI also runs the instrumentation suite on the checked-in `pixel2api35` Gradle
-managed device. Run `./gradlew pixel2api35DebugAndroidTest` locally when an
-Android emulator and hardware acceleration are available.
+CI compiles the instrumentation suite. Run `./gradlew pixel2api36DebugAndroidTest`
+locally to execute it on the checked-in Gradle managed device when the Android
+emulator and hardware acceleration are available.
 
 ### Release builds
 

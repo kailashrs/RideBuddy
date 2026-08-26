@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.times
 
 class RideRecorder(
     private val bikeConnection: BikeConnection,

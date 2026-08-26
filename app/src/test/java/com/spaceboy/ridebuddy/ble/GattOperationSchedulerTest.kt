@@ -79,35 +79,6 @@ class GattOperationSchedulerTest {
     }
 
     @Test
-    fun `front replacement removes stale queued work and preserves replacement order`() {
-        val scheduler = GattOperationScheduler()
-        val active = operation(1)
-        val staleFirst = operation(2)
-        val unrelated = operation(3)
-        val staleSecond = operation(4)
-        val replacementFirst = operation(5)
-        val replacementSecond = operation(6)
-        scheduler.enqueue(active)
-        scheduler.beginNext()
-        scheduler.enqueueAll(listOf(staleFirst, unrelated, staleSecond))
-
-        val update = scheduler.replaceQueued(
-            removeIf = { it === staleFirst || it === staleSecond },
-            replacements = listOf(replacementFirst, replacementSecond),
-            front = true,
-        )
-
-        assertEquals(listOf(staleFirst, staleSecond), update.removed)
-        assertFalse(update.shouldStart)
-        scheduler.complete(active)
-        assertSame(replacementFirst, scheduler.beginNext())
-        scheduler.complete(replacementFirst)
-        assertSame(replacementSecond, scheduler.beginNext())
-        scheduler.complete(replacementSecond)
-        assertSame(unrelated, scheduler.beginNext())
-    }
-
-    @Test
     fun `clear returns active and queued operations and resets the scheduler`() {
         val scheduler = GattOperationScheduler()
         val active = operation(1)

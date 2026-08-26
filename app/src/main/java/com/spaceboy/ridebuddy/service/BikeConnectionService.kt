@@ -165,8 +165,9 @@ class BikeConnectionService : Service() {
     }
 
     private fun rememberBike(address: BluetoothAddress, name: String) {
-        val current = AssociatedBikeStore(this).read()
-        AssociatedBikeStore(this).write(AssociatedBike(address, name, current?.associationId))
+        val store = AssociatedBikeStore(this)
+        val current = store.read()
+        store.write(AssociatedBike(address, name, current?.associationId))
     }
 
     private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
@@ -235,7 +236,7 @@ class BikeConnectionService : Service() {
         private const val ExtraName = "name"
         private const val ExtraVisibleActivityLaunch = "visible_activity_launch"
 
-        fun disconnect(context: Context): Boolean {
+        fun disconnect(context: Context) {
             val started = ContextCompatBridge.startForegroundService(
                 context,
                 Intent(context, BikeConnectionService::class.java).setAction(ActionDisconnect),
@@ -243,7 +244,6 @@ class BikeConnectionService : Service() {
             if (!started) {
                 context.appContainer.bikeConnection.disconnect()
             }
-            return started
         }
 
         fun reconnect(
@@ -267,37 +267,8 @@ class BikeConnectionService : Service() {
             return started
         }
 
-        /**
-         * User-initiated restart path. Use this when the foreground service has been
-         * stopped (after a final-state `BikeConnectionState.Failed`) and the rider presses
-         * the in-app `Reconnect` button. Distinct from [reconnect] because it always uses
-         * the dedicated [ActionRestartConnect] branch so the new foreground promotion runs
-         * before the GATT socket is opened; calling `reconnect` on an already-stopped
-         * service would otherwise race the binder thread against doze.
-         */
-        fun restartConnect(
-            context: Context,
-            bike: AssociatedBike,
-            launchedFromVisibleActivity: Boolean = true,
-        ): Boolean {
-            val started = ContextCompatBridge.startForegroundService(
-                context,
-                Intent(context, BikeConnectionService::class.java)
-                    .setAction(ActionRestartConnect)
-                    .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
-                    .putExtra(ExtraName, bike.name)
-                    .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity),
-            )
-            if (!started) {
-                context.appContainer.bikeConnection.notifyStartFailed(
-                    "Unable to start connection service",
-                )
-            }
-            return started
-        }
-
-        fun enableLocation(context: Context): Boolean {
-            return ContextCompatBridge.startService(
+        fun enableLocation(context: Context) {
+            ContextCompatBridge.startService(
                 context,
                 Intent(context, BikeConnectionService::class.java).setAction(ActionEnableLocation),
             )

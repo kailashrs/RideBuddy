@@ -45,16 +45,6 @@ object BleCharacteristics {
         Vin,
     )
 
-    val NavigationWrites: Set<UUID> = setOf(
-        NavigationManeuver,
-        NavigationSpeedLimit,
-        NavigationTrip,
-        NavigationText,
-        NavigationClear,
-        NavigationSession,
-        NavigationStatus,
-    )
-
     val ClientCharacteristicConfiguration: UUID =
         UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 

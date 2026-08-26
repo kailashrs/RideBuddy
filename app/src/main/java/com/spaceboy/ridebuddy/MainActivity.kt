@@ -228,7 +228,6 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         bikeAssociation = bikeAssociation,
                         notificationAccessEnabled = notificationAccessEnabled,
-                        callControlsEnabled = notificationAccessEnabled,
                         legacyCallPermissionGranted = legacyCallPermissionGranted,
                         backgroundLocationGranted = backgroundLocationGranted,
                     ),
@@ -351,7 +350,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Wired to the InfoScreen `Reconnect` button. If a bike is already associated, this
-     * restarts the BikeConnectionService via [BikeConnectionService.restartConnect] so the
+     * restarts the BikeConnectionService via [BikeConnectionService.reconnect] so the
      * foreground promotion happens before GATT begins. When no bike is associated yet,
      * delegates to the CDM picker so the user can pick one.
      */
@@ -361,7 +360,7 @@ class MainActivity : ComponentActivity() {
             requestBluetoothPermissionsAndAssociate()
             return
         }
-        if (!BikeConnectionService.restartConnect(this, bike, launchedFromVisibleActivity = true)) {
+        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
             viewModel.showMessage("Unable to start connection service")
         }
     }

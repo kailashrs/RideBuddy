@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,10 +12,9 @@ import org.junit.Test
  */
 class MainViewModelAutoConnectGateTest {
     @Test
-    fun firstConsumeReturnsTrueAndMarksAttempted() {
+    fun firstConsumeReturnsTrue() {
         val gate = MainViewModelAutoConnectGate()
         assertTrue(gate.consume())
-        assertEquals(true, gate.attempted.value)
     }
 
     @Test
@@ -30,7 +28,6 @@ class MainViewModelAutoConnectGateTest {
         repeat(5) {
             assertFalse("call #$it after first consume must return false", gate.consume())
         }
-        assertEquals(true, gate.attempted.value)
     }
 
     @Test
@@ -43,16 +40,5 @@ class MainViewModelAutoConnectGateTest {
 
         val second = MainViewModelAutoConnectGate()
         assertTrue("fresh gate must hand out true again", second.consume())
-    }
-
-    @Test
-    fun attemptedFlowEmitsAfterFirstConsume() {
-        // Subscribers (e.g. future diagnostics) see the attempted flag flip
-        // immediately. MutableStateFlow.value is the synchronous accessor and is
-        // sufficient here because the test is single-threaded.
-        val gate = MainViewModelAutoConnectGate()
-        assertEquals(false, gate.attempted.value)
-        gate.consume()
-        assertEquals(true, gate.attempted.value)
     }
 }

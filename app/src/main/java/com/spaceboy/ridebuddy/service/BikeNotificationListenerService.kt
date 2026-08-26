@@ -9,6 +9,11 @@ import android.service.notification.StatusBarNotification
 import com.spaceboy.ridebuddy.AppContainer
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.core.calls.isRideBuddyCallNotification
+import com.spaceboy.ridebuddy.data.AppSettings
+import com.spaceboy.ridebuddy.data.NotificationAlertCategory
+import com.spaceboy.ridebuddy.data.SupportedNotificationApp
+import com.spaceboy.ridebuddy.data.SupportedNotificationApps
+import com.spaceboy.ridebuddy.data.SupportedNotificationAppsByPackage
 
 class BikeNotificationListenerService : NotificationListenerService() {
     private val eventTracker = NotificationEventTracker()
@@ -26,18 +31,18 @@ class BikeNotificationListenerService : NotificationListenerService() {
         val settings = container.appSettings.settings.value
         val eligibleKeys = if (container.tftPriorityCoordinator.canPresentNotification()) {
             regularNotifications.mapNotNull { notification ->
-                val mapping = EventCodes[notification.packageName] ?: return@mapNotNull null
+                val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return@mapNotNull null
                 if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) {
                     return@mapNotNull null
                 }
-                mapping.shown to notification.key
+                mapping.shownEvent to notification.key
             }
         } else {
             emptyList()
         }
         eventTracker.reconcile(eligibleKeys).forEach { event ->
-            EventCodes.values.firstOrNull { mapping -> mapping.shown == event }?.let { mapping ->
-                sendEvent(mapping.hidden)
+            SupportedNotificationApps.firstOrNull { mapping -> mapping.shownEvent == event }?.let { mapping ->
+                sendEvent(mapping.hiddenEvent)
             }
             container.tftPriorityCoordinator.notificationRemoved(event)
         }
@@ -47,7 +52,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(notification: StatusBarNotification) {
         val container = appContainer
-        val mapping = EventCodes[notification.packageName]
+        val mapping = SupportedNotificationAppsByPackage[notification.packageName]
         if (container.callNotificationBridge.onNotificationPosted(notification)) {
             mapping?.let { removeTrackedEvent(it, notification.key, container) }
             return
@@ -57,12 +62,12 @@ class BikeNotificationListenerService : NotificationListenerService() {
         val settings = container.appSettings.settings.value
         if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) return
 
-        val shouldShow = eventTracker.posted(mapping.shown, notification.key)
+        val shouldShow = eventTracker.posted(mapping.shownEvent, notification.key)
         if (shouldShow) {
-            sendEvent(mapping.shown)
-            container.tftPriorityCoordinator.notificationPresented(mapping.shown) {
-                val shouldExpire = eventTracker.expire(mapping.shown)
-                if (shouldExpire) sendEvent(mapping.hidden)
+            sendEvent(mapping.shownEvent)
+            container.tftPriorityCoordinator.notificationPresented(mapping.shownEvent) {
+                val shouldExpire = eventTracker.expire(mapping.shownEvent)
+                if (shouldExpire) sendEvent(mapping.hiddenEvent)
             }
         }
     }
@@ -70,19 +75,19 @@ class BikeNotificationListenerService : NotificationListenerService() {
     override fun onNotificationRemoved(notification: StatusBarNotification) {
         val container = appContainer
         if (container.callNotificationBridge.onNotificationRemoved(notification)) return
-        val mapping = EventCodes[notification.packageName] ?: return
+        val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return
         removeTrackedEvent(mapping, notification.key, container)
     }
 
     private fun removeTrackedEvent(
-        mapping: EventMapping,
+        mapping: SupportedNotificationApp,
         notificationKey: String,
         container: AppContainer,
     ) {
-        val removal = eventTracker.removed(mapping.shown, notificationKey)
+        val removal = eventTracker.removed(mapping.shownEvent, notificationKey)
         if (removal != null) {
-            if (removal.shouldHide) sendEvent(mapping.hidden)
-            container.tftPriorityCoordinator.notificationRemoved(mapping.shown)
+            if (removal.shouldHide) sendEvent(mapping.hiddenEvent)
+            container.tftPriorityCoordinator.notificationRemoved(mapping.shownEvent)
         }
     }
 
@@ -90,36 +95,16 @@ class BikeNotificationListenerService : NotificationListenerService() {
         val battery = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             .coerceIn(0, 100)
-        connection().write(
+        appContainer.bikeConnection.enqueueWrite(
             BleCharacteristics.AppEvent,
             byteArrayOf(11, event.toByte(), battery.toByte(), 0),
         )
     }
 
-    private fun connection() = appContainer.bikeConnection
-
-    private fun AlertCategory.enabled(settings: com.spaceboy.ridebuddy.data.AppSettings): Boolean = when (this) {
-        AlertCategory.Messages -> settings.messageAlerts
-        AlertCategory.Social -> settings.socialAlerts
-        AlertCategory.Email -> settings.emailAlerts
-    }
-
-    private companion object {
-        data class EventMapping(val hidden: Int, val shown: Int, val category: AlertCategory)
-        enum class AlertCategory { Messages, Social, Email }
-
-        val EventCodes = mapOf(
-            "com.facebook.katana" to EventMapping(10, 11, AlertCategory.Social),
-            "com.facebook.lite" to EventMapping(10, 11, AlertCategory.Social),
-            "com.instagram.android" to EventMapping(12, 13, AlertCategory.Social),
-            "com.instagram.lite" to EventMapping(12, 13, AlertCategory.Social),
-            "com.google.android.gm" to EventMapping(14, 15, AlertCategory.Email),
-            "com.microsoft.office.outlook" to EventMapping(14, 15, AlertCategory.Email),
-            "com.twitter.android" to EventMapping(32, 33, AlertCategory.Social),
-            "com.google.android.apps.messaging" to EventMapping(6, 7, AlertCategory.Messages),
-            "com.samsung.android.messaging" to EventMapping(6, 7, AlertCategory.Messages),
-            "com.whatsapp" to EventMapping(6, 7, AlertCategory.Messages),
-        )
+    private fun NotificationAlertCategory.enabled(settings: AppSettings): Boolean = when (this) {
+        NotificationAlertCategory.Messages -> settings.messageAlerts
+        NotificationAlertCategory.Social -> settings.socialAlerts
+        NotificationAlertCategory.Email -> settings.emailAlerts
     }
 }
 

@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import android.os.PowerManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +32,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.spaceboy.ridebuddy.ble.isRideBuddyIgnoringBatteryOptimizations
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 
@@ -52,7 +52,9 @@ fun InfoScreen(
 ) {
     val connected = connectionState is BikeConnectionState.Connected
     val context = LocalContext.current
-    val backgroundAccess = isRideBuddyIgnoringBatteryOptimizations(context)
+    val backgroundAccess = context.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName)
+        ?: false
     val missingIdentityLabel = if (connected) {
         "Not reported by motorcycle"
     } else {

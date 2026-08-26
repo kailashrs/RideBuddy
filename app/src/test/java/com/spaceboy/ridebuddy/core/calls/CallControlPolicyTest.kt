@@ -6,9 +6,8 @@ import org.junit.Test
 
 class CallControlPolicyTest {
     @Test
-    fun controlsPublishCallStateWithoutExposingCallerIdentity() {
+    fun controlsPublishCallStateWhenCallerDisplayIsDisabled() {
         assertTrue(shouldPublishCallState(callerDisplay = false, tftCallControls = true))
-        assertFalse(shouldPublishCallerIdentity(callerDisplay = false))
     }
 
     @Test

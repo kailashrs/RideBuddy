@@ -220,18 +220,14 @@ internal class BluetoothBondCoordinator(
 
     private fun isActiveObservation(device: BluetoothDevice, generation: Long): Boolean {
         val expected = observedDevice ?: return false
+        // getAddress() reads the cached address and is safe for this identity comparison.
         return generation == observedGeneration &&
             isGenerationCurrent(generation) &&
-            sameBluetoothDevice(device, expected)
+            device.address == expected.address
     }
 
     private fun readBondState(device: BluetoothDevice): Int? =
         runCatching { device.bondState }.getOrNull()
-
-    private fun sameBluetoothDevice(first: BluetoothDevice, second: BluetoothDevice): Boolean =
-        // getAddress() is a non-throwing getter on the cached mAddress field; no OEM stack has
-        // ever been observed to throw from it.
-        first.address == second.address
 
     private companion object {
         const val BondTimeoutMillis = 60_000L

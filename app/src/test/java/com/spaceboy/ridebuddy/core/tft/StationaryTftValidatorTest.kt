@@ -163,14 +163,11 @@ private class RecordingConnection(
 
     override fun connect(target: BikeConnectionTarget) = Unit
     override fun disconnect() = Unit
-    override fun write(characteristic: UUID, payload: ByteArray) = true
+    override fun enqueueWrite(characteristic: UUID, payload: ByteArray) = Unit
 
     fun publishSpeed(speedKph: Double, receivedAtElapsedRealtime: Long) {
         mutableLatestTelemetryReading.value = reading(speedKph, receivedAtElapsedRealtime)
     }
-
-    override suspend fun writeAndAwait(characteristic: UUID, payload: ByteArray): Boolean =
-        writeAndAwait(BikeWrite(characteristic, payload))
 
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
         writes += Write(write.characteristic, write.payload, write.mode)

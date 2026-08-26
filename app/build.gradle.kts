@@ -23,14 +23,13 @@ android {
         applicationId = "com.spaceboy.ridebuddy"
         // CDM-only pairing path requires Android 16+ on every supported phone.
         minSdk = 36
-        // Navigation SDK 7.8.0 currently requires the 36.1 compile toolchain.
+        // Navigation SDK 7.9.0 requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36
         versionCode = 103
         versionName = "0.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables.useSupportLibrary = true
     }
 
     signingConfigs {
@@ -74,7 +73,6 @@ android {
     lint {
         // Updated to AGP 9.3.1 and Navigation SDK 7.9.0.
         disable += "AndroidGradlePluginVersion"
-        sarifReport = true
     }
 
     testOptions {
@@ -105,15 +103,13 @@ dependencies {
     //noinspection GradleDependency
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
 
     implementation("com.google.android.libraries.navigation:navigation:7.9.0")
-    // Maps Compose 7.x is compatible with Maps SDK 19.0.0 (from Navigation SDK 7.8.0)
+    // Maps Compose 7.x is compatible with Maps SDK 19.2.0 from Navigation SDK 7.9.0.
     // v8.x requires Maps SDK 20.0.0; Navigation SDK 7.9.0 only provides 19.2.0
     // Exclude transitive play-services-maps to avoid duplicate classes (Navigation SDK bundles it)
     implementation("com.google.maps.android:maps-compose:7.0.0") {

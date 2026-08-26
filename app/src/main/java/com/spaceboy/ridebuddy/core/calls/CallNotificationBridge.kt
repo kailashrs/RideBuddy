@@ -39,8 +39,6 @@ data class CallIntegrationState(
 internal fun shouldPublishCallState(callerDisplay: Boolean, tftCallControls: Boolean): Boolean =
     callerDisplay || tftCallControls
 
-internal fun shouldPublishCallerIdentity(callerDisplay: Boolean): Boolean = callerDisplay
-
 internal fun shouldClearPublishedCall(
     published: Boolean,
     callerDisplay: Boolean,
@@ -216,7 +214,7 @@ class CallNotificationBridge(
             // Each conflated request is self-contained. Resetting first prevents caller identity
             // from a superseded request surviving a rapid settings or notification transition.
             add(endedWrite())
-            if (shouldPublishCallerIdentity(settings.callerDisplay)) {
+            if (settings.callerDisplay) {
                 add(BikeWrite(BleCharacteristics.CallerName, TftCallEncoder.callerName(name)))
                 call.callerNumber?.let { number ->
                     add(BikeWrite(BleCharacteristics.CallerNumber, TftCallEncoder.callerNumber(number)))

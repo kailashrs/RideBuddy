@@ -29,7 +29,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.Ride
@@ -146,41 +145,41 @@ private fun RoutePreview(ride: Ride) {
         val maxLon = points.maxOf { it.longitude }
         val latRange = (maxLat - minLat).takeIf { it > 0.0 } ?: 1.0
         val lonRange = (maxLon - minLon).takeIf { it > 0.0 } ?: 1.0
-        
+
         // Draw grid
         repeat(4) { index ->
             val y = size.height * index / 3f
             drawLine(outline, Offset(0f, y), Offset(size.width, y), 1f)
         }
-        
+
         if (points.size < 2) return@Canvas
-        
+
         cachedPath.reset()
-        
+
         // Calculate all points first
         val mappedPoints = points.map { point ->
             val x = ((point.longitude - minLon) / lonRange * size.width).toFloat()
             val y = (size.height - (point.latitude - minLat) / latRange * size.height).toFloat()
             Offset(x, y)
         }
-        
+
         // Draw path using bezier curves
         var previous = mappedPoints.first()
         cachedPath.moveTo(previous.x, previous.y)
-        
+
         for (i in 1 until mappedPoints.size) {
             val current = mappedPoints[i]
             val controlX = previous.x + (current.x - previous.x) / 2f
             cachedPath.cubicTo(controlX, previous.y, controlX, current.y, current.x, current.y)
             previous = current
         }
-        
+
         drawPath(cachedPath, color, style = Stroke(5f))
-        
+
         // Draw start point
         val startPoint = mappedPoints.first()
         drawCircle(color, radius = 6f, center = startPoint)
-        
+
         // Draw end point
         val endPoint = mappedPoints.last()
         drawCircle(surfaceColor, radius = 6f, center = endPoint)

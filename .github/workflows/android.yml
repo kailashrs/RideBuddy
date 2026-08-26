@@ -43,10 +43,9 @@ jobs:
 
       - name: Run lint
         run: ./gradlew lintDebug --stacktrace
-        continue-on-error: true
 
       - name: Upload lint results
-        if: hashFiles('app/build/reports/lint-results-debug.sarif') != ''
+        if: always() && hashFiles('app/build/reports/lint-results-debug.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: app/build/reports/lint-results-debug.sarif
@@ -129,7 +128,7 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: ./gradlew testDebugUnitTest lintDebug assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Sanitize release ref name
         shell: bash

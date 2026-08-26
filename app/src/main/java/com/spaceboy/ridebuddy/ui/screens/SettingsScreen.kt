@@ -155,7 +155,6 @@ fun SettingsScreen(
     onOpenDiagnostics: () -> Unit,
     onRunStationaryTest: () -> Unit,
     notificationAccessEnabled: Boolean,
-    callControlsEnabled: Boolean,
     legacyCallPermissionGranted: Boolean,
     onLegacyCallControlsChanged: (Boolean) -> Unit,
     backgroundLocationGranted: Boolean,
@@ -504,7 +503,7 @@ fun SettingsScreen(
             SettingsRow(
                 icon = Icons.Outlined.Settings,
                 title = "Bike call controls",
-                supportingText = if (callControlsEnabled) "Standard call actions enabled; your phone app remains in control" else "Tap to enable notification access; your default phone app is unchanged",
+                supportingText = if (notificationAccessEnabled) "Standard call actions enabled; your phone app remains in control" else "Tap to enable notification access; your default phone app is unchanged",
                 onClick = onEnableCallControls,
             )
             HorizontalDivider(Modifier.padding(start = 56.dp))

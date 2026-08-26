@@ -300,7 +300,7 @@ class BikeCompanionManager internal constructor(
         val name = scanResult?.scanRecord?.deviceName
             ?: associationInfo.displayName?.toString()?.takeIf(String::isNotBlank)
             ?: ""
-        if (!isApriliaFamilyName(name)) {
+        if (!name.isApriliaBikeName()) {
             rejectBikeName(name)
             return null
         }
@@ -330,19 +330,6 @@ class BikeCompanionManager internal constructor(
         mutableState.update { it.copy(associationInProgress = false, errorMessage = message) }
         onFailure(message)
     }
-
-    /**
-     * Defensive name check after the CDM picker returns an [AssociationInfo].
-     *
-     * The picker already filters by [BikeNameFilter] (and a `0x1812` ScanFilter on
-     * Android 16+), so this is a sanity check rather than the primary gate. It is
-     * intentionally strict: an empty `name` is rejected here rather than silently
-     * accepted via a sentinel, because no Aprilia RS 457 / Tuono 457 firmware ever
-     * advertises an empty name and a blank acceptance would let the picker
-     * silently associate with anything that loses its scan-record between
-     * connect and callback.
-     */
-    private fun isApriliaFamilyName(name: String): Boolean = name.isApriliaBikeName()
 
     private fun rejectBikeName(name: String) {
         val message = "The selected device '$name' is not a supported Aprilia RS 457 / Tuono 457"

@@ -10,12 +10,7 @@ import java.util.regex.Pattern
  * `BleServerHelper.e(Context, BluetoothDevice)`. We do exactly that; SR-family devices
  * are intentionally not handled.
  */
-internal object BikeNames {
-    const val RsFamilyPrefix = "RS457_ID"
-
-    fun matchesRsFamily(name: String): Boolean =
-        name.uppercase(Locale.ROOT).contains(RsFamilyPrefix)
-}
+private const val RsFamilyPrefix = "RS457_ID"
 
 /**
  * CDM picker filter. Anchored to the `RS457_ID…` family so that unrelated peripherals
@@ -28,7 +23,7 @@ internal object BikeNames {
  * appends (e.g. `RS457_IDE1B7`, `RS457_ID-AB`).
  */
 val BikeNameFilter: Pattern = Pattern.compile(
-    "RS457_ID[-_]?[0-9A-F]{1,8}",
+    "$RsFamilyPrefix[-_]?[0-9A-F]{1,8}",
     Pattern.CASE_INSENSITIVE,
 )
 
@@ -52,7 +47,7 @@ const val BikeHogpServiceUuidString: String =
     "00001812-0000-1000-8000-00805f9b34fb"
 
 /** True when the name carries the OEM `RS457_ID` substring (case-insensitive). */
-fun String.isApriliaBikeName(): Boolean = BikeNames.matchesRsFamily(this)
+fun String.isApriliaBikeName(): Boolean = uppercase(Locale.ROOT).contains(RsFamilyPrefix)
 
 internal fun ByteArray.toHex(separator: String = ""): String =
     joinToString(separator) { "%02X".format(it.toInt() and 0xFF) }

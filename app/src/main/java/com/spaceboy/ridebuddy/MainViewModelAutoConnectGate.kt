@@ -1,8 +1,6 @@
 package com.spaceboy.ridebuddy
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * One-shot guard for auto-connect on app start.
@@ -17,16 +15,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * the `MainActivity.onCreate` invocation site stays a single-line call.
  */
 internal class MainViewModelAutoConnectGate {
-    private val mutableAttempted = MutableStateFlow(false)
-
-    /** Observable for tests and future diagnostics; UI does not currently subscribe. */
-    val attempted: StateFlow<Boolean> = mutableAttempted.asStateFlow()
+    private val attempted = AtomicBoolean(false)
 
     /**
      * Returns true on the first call per gate lifetime, false thereafter.
      *
-     * Thread-safe via [MutableStateFlow.compareAndSet]; callers may invoke this
+     * Thread-safe via [AtomicBoolean.compareAndSet]; callers may invoke this
      * from `MainActivity.onCreate` without holding the main-thread lock.
      */
-    fun consume(): Boolean = mutableAttempted.compareAndSet(expect = false, update = true)
+    fun consume(): Boolean = attempted.compareAndSet(false, true)
 }

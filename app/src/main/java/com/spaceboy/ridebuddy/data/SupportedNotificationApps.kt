@@ -1,18 +1,31 @@
 package com.spaceboy.ridebuddy.data
 
-data class SupportedNotificationApp(val packageName: String, val label: String)
+internal enum class NotificationAlertCategory {
+    Messages,
+    Social,
+    Email,
+}
 
-val SupportedNotificationApps = listOf(
-    SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages"),
-    SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages"),
-    SupportedNotificationApp("com.whatsapp", "WhatsApp"),
-    SupportedNotificationApp("com.instagram.android", "Instagram"),
-    SupportedNotificationApp("com.instagram.lite", "Instagram Lite"),
-    SupportedNotificationApp("com.facebook.katana", "Facebook"),
-    SupportedNotificationApp("com.facebook.lite", "Facebook Lite"),
-    SupportedNotificationApp("com.twitter.android", "X"),
-    SupportedNotificationApp("com.google.android.gm", "Gmail"),
-    SupportedNotificationApp("com.microsoft.office.outlook", "Outlook"),
+internal data class SupportedNotificationApp(
+    val packageName: String,
+    val label: String,
+    val hiddenEvent: Int,
+    val shownEvent: Int,
+    val category: NotificationAlertCategory,
 )
 
-val DefaultNotificationPackages = SupportedNotificationApps.map { it.packageName }.toSet()
+internal val SupportedNotificationApps = listOf(
+    SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
+    SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
+    SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
+    SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
+    SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
+    SupportedNotificationApp("com.facebook.katana", "Facebook", 10, 11, NotificationAlertCategory.Social),
+    SupportedNotificationApp("com.facebook.lite", "Facebook Lite", 10, 11, NotificationAlertCategory.Social),
+    SupportedNotificationApp("com.twitter.android", "X", 32, 33, NotificationAlertCategory.Social),
+    SupportedNotificationApp("com.google.android.gm", "Gmail", 14, 15, NotificationAlertCategory.Email),
+    SupportedNotificationApp("com.microsoft.office.outlook", "Outlook", 14, 15, NotificationAlertCategory.Email),
+)
+
+internal val SupportedNotificationAppsByPackage = SupportedNotificationApps.associateBy { it.packageName }
+internal val DefaultNotificationPackages = SupportedNotificationAppsByPackage.keys

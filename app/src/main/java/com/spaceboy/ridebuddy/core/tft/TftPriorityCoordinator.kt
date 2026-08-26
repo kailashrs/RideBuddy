@@ -49,6 +49,10 @@ class TftPriorityCoordinator(
 
     fun canPresentNotification(): Boolean {
         if (synchronized(activeAlerts) { TextAlertKey in activeAlerts }) return false
+        return presentationWindowAvailable()
+    }
+
+    private fun presentationWindowAvailable(): Boolean {
         val guidance = navigationFeed.guidance.value
         return tftNotificationAllowed(
             callActive = calls.state.value.active,
@@ -95,7 +99,7 @@ class TftPriorityCoordinator(
             alert.job.cancel()
             alert.onExpire()
         }
-        if (!canPresentTextAlert()) return false
+        if (!presentationWindowAvailable()) return false
 
         val previous = synchronized(activeAlerts) { activeAlerts.remove(TextAlertKey) }
         previous?.job?.cancel()
@@ -116,15 +120,6 @@ class TftPriorityCoordinator(
         }
         job.start()
         return true
-    }
-
-    private fun canPresentTextAlert(): Boolean {
-        val guidance = navigationFeed.guidance.value
-        return tftNotificationAllowed(
-            callActive = calls.state.value.active,
-            navigationActive = guidance.active,
-            distanceToManeuverMetres = guidance.distanceToManeuverMetres,
-        )
     }
 
     private fun expireAlert(key: String) {

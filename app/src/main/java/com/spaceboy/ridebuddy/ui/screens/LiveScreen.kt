@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -33,9 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,9 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
 import com.spaceboy.ridebuddy.R
@@ -432,7 +427,7 @@ private fun ConnectionCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp), 
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -704,5 +699,3 @@ private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<Ride
     val lastIndex = lastIndex
     return List(maxPoints) { index -> this[index * lastIndex / (maxPoints - 1)] }
 }
-
-// Dropped NearbyBikesSection: bike selection is exclusively via CompanionDeviceManager.

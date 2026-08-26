@@ -2,11 +2,6 @@ package com.spaceboy.ridebuddy.ble
 
 import java.util.ArrayDeque
 
-internal data class GattQueueUpdate(
-    val removed: List<GattOperation>,
-    val shouldStart: Boolean,
-)
-
 /**
  * Serializes Android GATT operations while keeping protocol-critical work in a dedicated lane.
  * The active operation is never preempted, but critical work always runs before queued normal work.
@@ -22,19 +17,9 @@ internal class GattOperationScheduler {
         activeOperation == null
     }
 
-    fun enqueueAll(operations: List<GattOperation>, front: Boolean = false): Boolean = synchronized(lock) {
-        addAll(operations, front)
+    fun enqueueAll(operations: List<GattOperation>): Boolean = synchronized(lock) {
+        operations.forEach { add(it, front = false) }
         activeOperation == null
-    }
-
-    fun replaceQueued(
-        removeIf: (GattOperation) -> Boolean,
-        replacements: List<GattOperation>,
-        front: Boolean,
-    ): GattQueueUpdate = synchronized(lock) {
-        val removed = removeMatching(criticalQueue, removeIf) + removeMatching(normalQueue, removeIf)
-        addAll(replacements, front)
-        GattQueueUpdate(removed, activeOperation == null)
     }
 
     fun beginNext(): GattOperation? = synchronized(lock) {
@@ -82,14 +67,6 @@ internal class GattOperationScheduler {
             activeOperation = null
             criticalQueue.clear()
             normalQueue.clear()
-        }
-    }
-
-    private fun addAll(operations: List<GattOperation>, front: Boolean) {
-        if (front) {
-            operations.asReversed().forEach { add(it, front = true) }
-        } else {
-            operations.forEach { add(it, front = false) }
         }
     }
 
