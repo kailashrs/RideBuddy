@@ -30,6 +30,7 @@ import com.google.android.libraries.navigation.Navigator
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
+import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.service.BikeConnectionService
 import com.spaceboy.ridebuddy.ui.MainScreen
@@ -133,7 +134,6 @@ class MainActivity : ComponentActivity() {
             val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
             val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
             val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
-            val latestTelemetryReading = viewModel.latestTelemetryReading.collectAsStateWithLifecycle().value
             val identity = viewModel.identity.collectAsStateWithLifecycle().value
             val diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value
             val bleCapture = viewModel.bleCapture.collectAsStateWithLifecycle().value
@@ -216,7 +216,6 @@ class MainActivity : ComponentActivity() {
                         uiState = uiState,
                         connectionState = connectionState,
                         telemetry = telemetry,
-                        latestTelemetryReceivedAtElapsedRealtime = latestTelemetryReading?.receivedAtElapsedRealtime,
                         identity = identity,
                         diagnostics = diagnostics,
                         bleCapture = bleCapture,
@@ -608,6 +607,7 @@ class MainActivity : ComponentActivity() {
 
     private fun exportDiagnostics() {
         val value = viewModel.diagnostics.value
+        val identity = viewModel.identity.value
         val report = buildString {
             appendLine("RideBuddy diagnostics")
             appendLine("Connection: ${viewModel.connectionState.value}")
@@ -620,13 +620,18 @@ class MainActivity : ComponentActivity() {
             appendLine("Active GATT operation: ${value.activeGattOperation ?: "none"}")
             appendLine("RSSI: ${value.rssi ?: "unknown"} dBm")
             appendLine("Telemetry rate: %.2f Hz".format(value.telemetryHz))
-            appendLine("MTU: ${value.negotiatedMtu ?: "unknown"}")
+            appendLine("ATT MTU: ${value.attMtu ?: "unknown"}")
             appendLine("Services: ${value.servicesDiscovered}")
             appendLine("Notifications: ${value.notificationsReceived}")
             appendLine("Descriptor writes: ${value.descriptorWritesCompleted}")
             appendLine("Characteristic reads: ${value.readsCompleted}")
             appendLine("Characteristic writes: ${value.writesCompleted}")
             appendLine("Malformed frames: ${value.malformedTelemetryFrames}")
+            appendLine("VIN: ${identity.vin ?: "unknown"}")
+            appendLine("Cluster software: ${identity.clusterSoftwareVersion ?: "unknown"}")
+            appendLine(
+                "Last successful link: ${identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime) ?: "never"}",
+            )
             appendLine("Last error: ${value.lastError ?: "none"}")
             appendLine("\nGATT snapshot")
             value.serviceSnapshot.forEach(::appendLine)
@@ -670,7 +675,7 @@ class MainActivity : ComponentActivity() {
                     }
                     File(exportDir, "ride_history.csv").also { output ->
                         output.bufferedWriter().use { writer ->
-                            writer.appendLine("started_at,ended_at,start_area,end_area,distance_km,duration_ms,average_speed_kph,maximum_speed_kph,average_rpm,maximum_rpm,average_consumption_l_per_100km,estimated_fuel_l,zero_to_60_ms,zero_to_100_ms")
+                            writer.appendLine("started_at,ended_at,start_area,end_area,distance_km,duration_ms,average_speed_kph,maximum_speed_kph,average_rpm,maximum_rpm,average_mileage_km_per_litre,estimated_fuel_l,zero_to_60_ms,zero_to_100_ms")
                             rides.forEach { ride ->
                                 fun String.escapeCsv() = "\"${replace("\"", "\"\"")}\""
                                 writer.appendLine(
@@ -685,8 +690,8 @@ class MainActivity : ComponentActivity() {
                                         ride.maximumSpeedKph,
                                         ride.averageRpm,
                                         ride.maximumRpm,
-                                        ride.averageConsumptionLPer100Km,
-                                        ride.estimatedFuelLitres,
+                                        ride.averageMileageKilometresPerLitre ?: "",
+                                        ride.estimatedFuelLitres ?: "",
                                         ride.zeroToSixtyMillis ?: "",
                                         ride.zeroToHundredMillis ?: "",
                                     ).joinToString(","),

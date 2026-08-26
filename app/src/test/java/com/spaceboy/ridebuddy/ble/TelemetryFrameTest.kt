@@ -24,7 +24,7 @@ class TelemetryFrameTest {
 
         assertEquals(72.0, frame.speedKilometresPerHour, 0.001)
         assertEquals(38, frame.throttlePercent)
-        assertEquals(5.8, frame.instantaneousConsumptionLitresPer100Km, 0.001)
+        assertEquals(5.8, requireNotNull(frame.instantaneousMileageKilometresPerLitre), 0.001)
         assertEquals(5_420L, frame.engineRpm)
     }
 
@@ -43,6 +43,13 @@ class TelemetryFrameTest {
         val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 20, 0x10, 0x27, 0x00, 0x00, 0x7F, 0x55)
 
         assertEquals(1.0, requireNotNull(TelemetryFrame.parse(payload)).speedKilometresPerHour, 0.001)
+    }
+
+    @Test
+    fun `treats zero mileage as unavailable`() {
+        val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 0, 0x10, 0x27, 0x00, 0x00)
+
+        assertNull(requireNotNull(TelemetryFrame.parse(payload)).instantaneousMileageKilometresPerLitre)
     }
 
     @Test

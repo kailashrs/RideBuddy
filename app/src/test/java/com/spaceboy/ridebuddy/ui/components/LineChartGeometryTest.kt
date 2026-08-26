@@ -95,4 +95,19 @@ class LineChartGeometryTest {
         assertEquals(100f, points[0].y, 0.001f)
         assertEquals(0f, points[1].y, 0.001f)
     }
+
+    @Test
+    fun unavailableValuesBreakTheLineWithoutCompressingTime() {
+        val segments = lineChartSegments(
+            values = listOf(10.0, null, 20.0),
+            width = 100f,
+            height = 100f,
+            scalePolicy = LineChartScalePolicy.AutoRange,
+            clampNegativeValues = false,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals(0f, segments[0].single().x, 0.001f)
+        assertEquals(100f, segments[1].single().x, 0.001f)
+    }
 }

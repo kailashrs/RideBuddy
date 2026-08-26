@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.data
 
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RideDistanceIntegrationTest {
@@ -30,15 +31,33 @@ class RideDistanceIntegrationTest {
     }
 
     @Test
-    fun `integrates fuel by distance instead of telemetry sample count`() {
-        val completed = ActiveRide.started(0L, 0L, frame(speed = 20.0, consumption = 10.0))
-            .add(frame(speed = 20.0, consumption = 10.0), receivedAtElapsedRealtime = 1_000L, distanceDelta = 20.0)
-            .add(frame(speed = 100.0, consumption = 5.0), receivedAtElapsedRealtime = 2_000L, distanceDelta = 0.0)
-            .add(frame(speed = 100.0, consumption = 5.0), receivedAtElapsedRealtime = 3_000L, distanceDelta = 100.0)
-            .toRide(4_000L)
+    fun `decodes bike mileage and integrates litres by distance`() {
+        val rawFrame = byteArrayOf(0x10, 0, 0, 10, 125, 0x10, 0x27, 0, 0)
+        val frame = requireNotNull(TelemetryFrame.parse(rawFrame))
+        val completed = ActiveRide.started(0L, 0L, frame)
+            .add(frame, receivedAtElapsedRealtime = 1_000L, distanceDelta = 10.0)
+            .toRide(2_000L)
 
-        assertEquals(7.0, completed.estimatedFuelLitres, 0.000_001)
-        assertEquals(5.833_333, completed.averageConsumptionLPer100Km, 0.000_001)
+        assertEquals(25.0, requireNotNull(frame.instantaneousMileageKilometresPerLitre), 0.000_001)
+        assertEquals(0.4, requireNotNull(completed.estimatedFuelLitres), 0.000_001)
+        assertEquals(25.0, requireNotNull(completed.averageMileageKilometresPerLitre), 0.000_001)
+    }
+
+    @Test
+    fun `integrates the inverse mileage rate between samples`() {
+        assertEquals(0.75, requireNotNull(fuelDeltaLitres(10.0, 10.0, 20.0)), 0.000_001)
+    }
+
+    @Test
+    fun `does not turn unavailable mileage into zero fuel use`() {
+        assertNull(fuelDeltaLitres(10.0, null, 20.0))
+        assertNull(fuelDeltaLitres(10.0, 20.0, 0.0))
+
+        val unavailable = ActiveRide.started(0L, 0L, frame(mileage = null))
+            .add(frame(mileage = null), receivedAtElapsedRealtime = 1_000L, distanceDelta = 10.0)
+            .toRide(2_000L)
+        assertNull(unavailable.estimatedFuelLitres)
+        assertNull(unavailable.averageMileageKilometresPerLitre)
     }
 
     @Test
@@ -47,10 +66,10 @@ class RideDistanceIntegrationTest {
         assertEquals(12_000L, completedRideEndMillis(null, 12_000L))
     }
 
-    private fun frame(speed: Double, consumption: Double) = TelemetryFrame(
-        speedKilometresPerHour = speed,
+    private fun frame(mileage: Double?) = TelemetryFrame(
+        speedKilometresPerHour = 36.0,
         throttlePercent = 10,
-        instantaneousConsumptionLitresPer100Km = consumption,
+        instantaneousMileageKilometresPerLitre = mileage,
         engineRpm = 3_000,
     )
 }

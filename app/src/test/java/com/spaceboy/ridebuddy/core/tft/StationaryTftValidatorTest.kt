@@ -182,7 +182,7 @@ private class RecordingConnection(
             frame = TelemetryFrame(
                 speedKilometresPerHour = speedKph,
                 throttlePercent = 0,
-                instantaneousConsumptionLitresPer100Km = 0.0,
+                instantaneousMileageKilometresPerLitre = null,
                 engineRpm = 0,
             ),
             receivedAtMillis = 1_700_000_000_000L,

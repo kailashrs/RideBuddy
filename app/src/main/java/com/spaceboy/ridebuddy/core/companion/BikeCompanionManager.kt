@@ -14,6 +14,7 @@ import android.content.pm.PackageManager
 import android.os.ParcelUuid
 import androidx.core.content.edit
 import com.spaceboy.ridebuddy.ble.BikeHogpServiceUuidString
+import com.spaceboy.ridebuddy.ble.BikeIdentityRepository
 import com.spaceboy.ridebuddy.ble.BikeNameFilter
 import com.spaceboy.ridebuddy.ble.BluetoothAddress
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
@@ -47,6 +48,7 @@ data class BikeAssociationState(
 class BikeCompanionManager internal constructor(
     context: Context,
     private val protectionAcceptanceStore: ProtectionAcceptanceStore,
+    private val bikeIdentityRepository: BikeIdentityRepository,
     applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -57,13 +59,13 @@ class BikeCompanionManager internal constructor(
     private val manager: CompanionDeviceManager? = if (supported) {
         appContext.getSystemService(CompanionDeviceManager::class.java)
     } else null
-    private val mutableState = MutableStateFlow(
-        BikeAssociationState(supported = supported, bike = deviceStore.read()),
-    )
+    private val initialBike = deviceStore.read()
+    private val mutableState = MutableStateFlow(BikeAssociationState(supported = supported, bike = initialBike))
 
     val state: StateFlow<BikeAssociationState> = mutableState.asStateFlow()
 
     init {
+        initialBike?.bluetoothAddress?.let(bikeIdentityRepository::select)
         // Defer CDM Binder IPCs off the constructor so AppContainer creation
         // (and therefore Application.onCreate) doesn't block on a slow CDM call.
         // The synchronous deviceStore.read() above already populates the initial
@@ -185,7 +187,10 @@ class BikeCompanionManager internal constructor(
         if (refreshed != null) {
             storeAssociation(refreshed)
         } else {
-            stored?.bluetoothAddress?.let(protectionAcceptanceStore::clear)
+            stored?.bluetoothAddress?.let { address ->
+                protectionAcceptanceStore.clear(address)
+                bikeIdentityRepository.clear(address)
+            }
             deviceStore.clear()
         }
         mutableState.update { state ->
@@ -260,7 +265,10 @@ class BikeCompanionManager internal constructor(
             }
             return false
         }
-        bike?.bluetoothAddress?.let(protectionAcceptanceStore::clear)
+        bike?.bluetoothAddress?.let { address ->
+            protectionAcceptanceStore.clear(address)
+            bikeIdentityRepository.clear(address)
+        }
         deviceStore.clear()
         mutableState.value = BikeAssociationState(supported = supported)
         return true
@@ -345,8 +353,12 @@ class BikeCompanionManager internal constructor(
 
     private fun storeAssociation(bike: AssociatedBike) {
         protectionAcceptanceToClear(deviceStore.read(), bike)
-            ?.let(protectionAcceptanceStore::clear)
+            ?.let { previousAddress ->
+                protectionAcceptanceStore.clear(previousAddress)
+                bikeIdentityRepository.clear(previousAddress)
+            }
         deviceStore.write(bike)
+        bikeIdentityRepository.select(bike.bluetoothAddress)
     }
 }
 

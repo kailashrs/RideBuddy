@@ -98,14 +98,14 @@ The RS 457/Tuono parser checks the `0x10` header and then consumes at least nine
 byte 0       0x10 header
 bytes 1..2   front-wheel speed, little-endian, raw * 0.01 km/h
 byte 3       throttle/gas opening, percentage-like value
-byte 4       instantaneous consumption, raw * 0.2 L/100 km
+byte 4       instantaneous mileage, raw * 0.2 km/L
 bytes 5..8   engine RPM, little-endian unsigned integer
 bytes 9..n   ignored by the inspected parser
 ```
 
 Observed samples may contain `0x23` at byte 9, but the India OEM parser does not validate that byte or require an exact ten-byte length. RideBuddy therefore rejects frames shorter than nine bytes or with the wrong header, while tolerating trailing firmware-specific bytes.
 
-The OEM computes ride distance/time, average speed, average consumption, and a filtered longitudinal acceleration value on the phone. RPM is parsed and logged but is not prominently displayed. The parser has a separate variant for the SR Motard family; the custom app should key decoding by detected model/firmware rather than assuming all Piaggio clusters share one frame.
+The OEM applies an exponential moving average with an alpha of `0.2` to this km/L value for its live presentation, then takes the reciprocal when it needs L/100 km. RideBuddy treats an encoded zero as unavailable because it has no valid reciprocal, preserves positive km/L values in raw telemetry and stored samples, applies that filter only to the sampled live frame, and accumulates estimated litres from distance divided by mileage. RPM is parsed and logged but is not prominently displayed by the OEM app. The parser has a separate variant for the SR Motard family; the custom app should key decoding by detected model/firmware rather than assuming all Piaggio clusters share one frame.
 
 ## Navigation packet builders
 

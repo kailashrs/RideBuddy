@@ -213,7 +213,7 @@ class RideRecorder(
             speedKph = frame.speedKilometresPerHour,
             rpm = frame.engineRpm,
             throttlePercent = frame.throttlePercent,
-            consumptionLPer100Km = frame.instantaneousConsumptionLitresPer100Km,
+            mileageKilometresPerLitre = frame.instantaneousMileageKilometresPerLitre,
             accelerationMetresPerSecondSquared = acceleration,
             latitude = location?.latitude,
             longitude = location?.longitude,
@@ -261,13 +261,19 @@ internal fun completedRideEndMillis(confirmedStopAtMillis: Long?, completionTime
 
 internal fun fuelDeltaLitres(
     distanceKilometres: Double,
-    previousConsumptionLPer100Km: Double,
-    currentConsumptionLPer100Km: Double,
-): Double {
-    if (!distanceKilometres.isFinite() || distanceKilometres <= 0.0) return 0.0
-    val previous = previousConsumptionLPer100Km.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
-    val current = currentConsumptionLPer100Km.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
-    return distanceKilometres * ((previous + current) / 2.0) / 100.0
+    previousMileageKilometresPerLitre: Double?,
+    currentMileageKilometresPerLitre: Double?,
+): Double? {
+    if (!distanceKilometres.isFinite() || distanceKilometres <= 0.0) return null
+    val previousFuelLitresPerKilometre = previousMileageKilometresPerLitre
+        ?.takeIf { it.isFinite() && it > 0.0 }
+        ?.let { 1.0 / it }
+        ?: return null
+    val currentFuelLitresPerKilometre = currentMileageKilometresPerLitre
+        ?.takeIf { it.isFinite() && it > 0.0 }
+        ?.let { 1.0 / it }
+        ?: return null
+    return distanceKilometres * (previousFuelLitresPerKilometre + currentFuelLitresPerKilometre) / 2.0
 }
 
 internal fun List<RideSample>.accelerationTime(targetKph: Double): Long? {
@@ -331,11 +337,16 @@ data class ActiveRide(
     val rpmSum: Double,
     val maximumRpm: Long,
     val throttleSum: Double,
-    val lastConsumptionLPer100Km: Double,
-    val estimatedFuelLitres: Double,
+    val lastMileageKilometresPerLitre: Double?,
+    val estimatedFuelLitres: Double?,
 ) {
     fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long, distanceDelta: Double): ActiveRide {
-        val currentConsumption = frame.instantaneousConsumptionLitresPer100Km
+        val currentMileage = frame.instantaneousMileageKilometresPerLitre
+        val fuelDelta = fuelDeltaLitres(
+            distanceDelta,
+            lastMileageKilometresPerLitre,
+            currentMileage,
+        )
         return copy(
             lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
             lastSpeedKph = frame.speedKilometresPerHour,
@@ -346,20 +357,14 @@ data class ActiveRide(
             rpmSum = rpmSum + frame.engineRpm,
             maximumRpm = maxOf(maximumRpm, frame.engineRpm),
             throttleSum = throttleSum + frame.throttlePercent,
-            lastConsumptionLPer100Km = currentConsumption,
-            estimatedFuelLitres = estimatedFuelLitres + fuelDeltaLitres(
-                distanceDelta,
-                lastConsumptionLPer100Km,
-                currentConsumption,
-            ),
+            lastMileageKilometresPerLitre = currentMileage,
+            estimatedFuelLitres = fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
+                ?: estimatedFuelLitres,
         )
     }
 
     fun toRide(endedAtMillis: Long): Ride {
         val divisor = sampleCount.coerceAtLeast(1).toDouble()
-        val averageConsumption = if (distanceKilometres > 0.0) {
-            estimatedFuelLitres * 100.0 / distanceKilometres
-        } else 0.0
         return Ride(
             id = 0,
             startedAtMillis = startedAtMillis,
@@ -370,7 +375,6 @@ data class ActiveRide(
             averageRpm = rpmSum / divisor,
             maximumRpm = maximumRpm,
             averageThrottlePercent = throttleSum / divisor,
-            averageConsumptionLPer100Km = averageConsumption,
             estimatedFuelLitres = estimatedFuelLitres,
         )
     }
@@ -387,8 +391,8 @@ data class ActiveRide(
             rpmSum = frame.engineRpm.toDouble(),
             maximumRpm = frame.engineRpm,
             throttleSum = frame.throttlePercent.toDouble(),
-            lastConsumptionLPer100Km = frame.instantaneousConsumptionLitresPer100Km,
-            estimatedFuelLitres = 0.0,
+            lastMileageKilometresPerLitre = frame.instantaneousMileageKilometresPerLitre,
+            estimatedFuelLitres = null,
         )
     }
 }

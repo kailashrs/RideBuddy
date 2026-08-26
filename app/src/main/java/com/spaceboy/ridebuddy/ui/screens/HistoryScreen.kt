@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.data.combinedMileageKilometresPerLitre
 import java.util.Calendar
 
 @Composable
@@ -92,7 +93,7 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
                 RideValue("Average", UnitFormatter.speed(ride.averageSpeedKph, units, locale))
             }
             Text(
-                "Max ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} estimated fuel • ${UnitFormatter.consumption(ride.averageConsumptionLPer100Km, units, locale)} • ${ride.averageRpm} RPM",
+                "Max ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} estimated fuel • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)} • ${ride.averageRpm} RPM",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -123,7 +124,7 @@ private fun WeeklySummary(rides: List<Ride>, units: DistanceUnits) {
                 RideValue("Avg duration", formatDuration(week.map(Ride::durationMillis).average().takeIf(Double::isFinite)?.toLong() ?: 0L))
             }
             Text(
-                "Average mileage ${week.takeIf { it.isNotEmpty() }?.map(Ride::averageConsumptionLPer100Km)?.average()?.let { UnitFormatter.consumption(it, units, locale) } ?: "—"}",
+                "Average mileage ${UnitFormatter.mileage(week.combinedMileageKilometresPerLitre(), units, locale)}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

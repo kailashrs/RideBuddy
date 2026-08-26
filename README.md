@@ -7,7 +7,7 @@ vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 ## Features
 
 - **Material You UI**: Adaptive layouts, light/dark modes, and dynamic color. Features Live, History, Insights, Info, and Settings destinations.
-- **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and consumption metrics with automatic ride recording.
+- **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and mileage metrics with automatic ride recording.
 - **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
 - **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities.
 - **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and standard phone app call controls directly to the motorcycle's display.

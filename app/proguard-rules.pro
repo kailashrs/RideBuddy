@@ -8,3 +8,8 @@
 # the referenced class is not present on every device/driver. It is safe to
 # silence the warning so R8 doesn't fail the release build.
 -dontwarn com.google.android.gms.common.GooglePlayServicesMissingManifestValueException
+
+# Navigation SDK 7.9.0's extension-registry loader reflects a package-private
+# implementation in the same package. R8 otherwise repackages this caller,
+# causing IllegalAccessException when a GoogleMap is first created.
+-keep class com.google.android.libraries.navigation.internal.alt.ax { *; }

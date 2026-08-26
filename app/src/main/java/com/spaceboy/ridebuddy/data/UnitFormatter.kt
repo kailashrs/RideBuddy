@@ -18,27 +18,28 @@ object UnitFormatter {
         return "%.$decimals".plus("f $suffix").format(locale, value)
     }
 
-    /**
-     * Telemetry is stored canonically as L/100 km, but motorcycle riders using metric units
-     * usually think in km/L. Keeping the source unit unchanged avoids database migrations.
-     */
-    fun consumption(litresPer100Km: Double, units: DistanceUnits, locale: Locale): String =
-        mileageValue(litresPer100Km, units, locale)?.let { "%.1f %s".format(locale, it, mileageUnit(units)) }
+    fun mileage(kilometresPerLitre: Double?, units: DistanceUnits, locale: Locale): String =
+        mileageValue(kilometresPerLitre, units, locale)?.let { "%.1f %s".format(locale, it, mileageUnit(units)) }
             ?: "— ${mileageUnit(units)}"
 
-    fun mileageValue(litresPer100Km: Double, units: DistanceUnits, locale: Locale = Locale.getDefault()): Double? =
-        litresPer100Km.takeIf { it > 0.0 }?.let { value ->
-            if (units == DistanceUnits.Metric) 100.0 / value
-            else if (locale.country.equals("US", ignoreCase = true)) 235.214583 / value
-            else 282.480936 / value
-        }
+    fun mileageValue(
+        kilometresPerLitre: Double?,
+        units: DistanceUnits,
+        locale: Locale = Locale.getDefault(),
+    ): Double? = kilometresPerLitre?.takeIf { it.isFinite() && it > 0.0 }?.let { value ->
+        if (units == DistanceUnits.Metric) value
+        else if (locale.country.equals("US", ignoreCase = true)) value * KilometresPerLitreToUsMpg
+        else value * KilometresPerLitreToImperialMpg
+    }
 
     fun mileageUnit(units: DistanceUnits): String = if (units == DistanceUnits.Metric) "km/L" else "mpg"
 
     fun chartSpeed(kph: Double, units: DistanceUnits): Double = if (units == DistanceUnits.Metric) kph else kph * KmToMiles
-    fun fuel(litres: Double, units: DistanceUnits, locale: Locale): String =
-        if (units == DistanceUnits.Metric) "%.1f L".format(locale, litres)
-        else "%.1f gal".format(locale, litres * gallonsPerLitre(locale))
+    fun fuel(litres: Double?, units: DistanceUnits, locale: Locale): String =
+        litres?.takeIf { it.isFinite() && it >= 0.0 }?.let { value ->
+            if (units == DistanceUnits.Metric) "%.1f L".format(locale, value)
+            else "%.1f gal".format(locale, value * gallonsPerLitre(locale))
+        } ?: if (units == DistanceUnits.Metric) "— L" else "— gal"
 
     fun maneuverDistance(metres: Int, units: DistanceUnits, locale: Locale): String {
         val safeMetres = metres.coerceAtLeast(0)
@@ -59,6 +60,8 @@ object UnitFormatter {
     private const val KmToMiles = 0.621371192
     private const val LitresToUsGallons = 0.264172052
     private const val LitresToImperialGallons = 0.219969157
+    private const val KilometresPerLitreToUsMpg = 2.35214583
+    private const val KilometresPerLitreToImperialMpg = 2.82480936
     private const val MetresPerKilometre = 1_000
     private const val MetresPerMile = 1_609.344
     private const val FeetPerMetre = 3.280839895

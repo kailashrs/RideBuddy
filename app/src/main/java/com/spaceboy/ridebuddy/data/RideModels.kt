@@ -10,8 +10,7 @@ data class Ride(
     val averageRpm: Double,
     val maximumRpm: Long,
     val averageThrottlePercent: Double,
-    val averageConsumptionLPer100Km: Double,
-    val estimatedFuelLitres: Double,
+    val estimatedFuelLitres: Double?,
     val startArea: String? = null,
     val endArea: String? = null,
     val startLatitude: Double? = null,
@@ -23,6 +22,25 @@ data class Ride(
     val zeroToHundredMillis: Long? = null,
 ) {
     val durationMillis: Long get() = (endedAtMillis - startedAtMillis).coerceAtLeast(0)
+
+    val averageMileageKilometresPerLitre: Double?
+        get() {
+            val distance = distanceKilometres.takeIf { it.isFinite() && it > 0.0 } ?: return null
+            val fuel = estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+            return distance / fuel
+        }
+}
+
+fun Iterable<Ride>.combinedMileageKilometresPerLitre(): Double? {
+    val distanceAndFuel = mapNotNull { ride ->
+        val distance = ride.distanceKilometres.takeIf { it.isFinite() && it > 0.0 }
+            ?: return@mapNotNull null
+        val fuel = ride.estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 }
+            ?: return@mapNotNull null
+        distance to fuel
+    }
+    if (distanceAndFuel.isEmpty()) return null
+    return distanceAndFuel.sumOf { it.first } / distanceAndFuel.sumOf { it.second }
 }
 
 data class RoutePoint(val latitude: Double, val longitude: Double)
@@ -39,13 +57,13 @@ data class RideInsights(
     val rideCount: Int = 0,
     val totalDistanceKilometres: Double = 0.0,
     val totalDurationMillis: Long = 0,
-    val estimatedFuelLitres: Double = 0.0,
+    val estimatedFuelLitres: Double? = null,
     val averageRideDistanceKilometres: Double = 0.0,
     val averageRideDurationMillis: Long = 0,
     val averageSpeedKph: Double = 0.0,
     val averageRpm: Double = 0.0,
     val averageThrottlePercent: Double = 0.0,
-    val averageConsumptionLPer100Km: Double = 0.0,
+    val averageMileageKilometresPerLitre: Double? = null,
     val longestRideKilometres: Double = 0.0,
     val highestSpeedKph: Double = 0.0,
     val distanceChangePercent: Double? = null,
@@ -58,7 +76,7 @@ data class RideSample(
     val speedKph: Double,
     val rpm: Long,
     val throttlePercent: Int,
-    val consumptionLPer100Km: Double,
+    val mileageKilometresPerLitre: Double?,
     val accelerationMetresPerSecondSquared: Double,
     val latitude: Double? = null,
     val longitude: Double? = null,

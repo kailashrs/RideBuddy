@@ -13,19 +13,25 @@ class UnitFormatterTest {
     fun convertsMetricTelemetryToImperial() {
         assertEquals("62 mph", UnitFormatter.speed(100.0, DistanceUnits.Imperial, Locale.US))
         assertEquals("62.1 mi", UnitFormatter.distance(100.0, DistanceUnits.Imperial, Locale.US))
-        assertEquals("47.0 mpg", UnitFormatter.consumption(5.0, DistanceUnits.Imperial, Locale.US))
+        assertEquals("47.0 mpg", UnitFormatter.mileage(20.0, DistanceUnits.Imperial, Locale.US))
     }
 
     @Test
     fun displaysMetricFuelEconomyAsMileage() {
-        assertEquals("20.0 km/L", UnitFormatter.consumption(5.0, DistanceUnits.Metric, Locale.US))
+        assertEquals("20.0 km/L", UnitFormatter.mileage(20.0, DistanceUnits.Metric, Locale.US))
     }
 
     @Test
     fun usesImperialGallonsForBritishMileage() {
-        assertEquals("56.5 mpg", UnitFormatter.consumption(5.0, DistanceUnits.Imperial, Locale.UK))
+        assertEquals("56.5 mpg", UnitFormatter.mileage(20.0, DistanceUnits.Imperial, Locale.UK))
         assertEquals("2.2 gal", UnitFormatter.fuel(10.0, DistanceUnits.Imperial, Locale.UK))
         assertEquals("2.6 gal", UnitFormatter.fuel(10.0, DistanceUnits.Imperial, Locale.US))
+    }
+
+    @Test
+    fun unavailableFuelDataIsNotFormattedAsZero() {
+        assertEquals("— km/L", UnitFormatter.mileage(null, DistanceUnits.Metric, Locale.US))
+        assertEquals("— L", UnitFormatter.fuel(null, DistanceUnits.Metric, Locale.US))
     }
 
     @Test

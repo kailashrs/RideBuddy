@@ -3,7 +3,7 @@ package com.spaceboy.ridebuddy.ble
 data class TelemetryFrame(
     val speedKilometresPerHour: Double,
     val throttlePercent: Int,
-    val instantaneousConsumptionLitresPer100Km: Double,
+    val instantaneousMileageKilometresPerLitre: Double?,
     val engineRpm: Long,
 ) {
     companion object {
@@ -18,14 +18,19 @@ data class TelemetryFrame(
                 (payload[6].unsigned.toLong() shl 8) or
                 (payload[7].unsigned.toLong() shl 16) or
                 (payload[8].unsigned.toLong() shl 24)
+            val rawMileage = payload[4].unsigned
 
             return TelemetryFrame(
                 speedKilometresPerHour = rawSpeed * 0.01,
                 throttlePercent = payload[3].unsigned,
-                instantaneousConsumptionLitresPer100Km = payload[4].unsigned * 0.2,
+                instantaneousMileageKilometresPerLitre = rawMileage
+                    .takeIf { it > 0 }
+                    ?.times(KilometresPerLitrePerUnit),
                 engineRpm = rawRpm,
             )
         }
+
+        private const val KilometresPerLitrePerUnit = 0.2
 
         private val Byte.unsigned: Int
             get() = toInt() and 0xFF

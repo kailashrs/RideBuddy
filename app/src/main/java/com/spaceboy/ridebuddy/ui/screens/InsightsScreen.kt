@@ -125,7 +125,7 @@ fun InsightsScreen(
                 Triple("Avg speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
                 Triple("Avg RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
                 Triple("Avg throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
-                Triple("Mileage", UnitFormatter.consumption(insights.averageConsumptionLPer100Km, units, locale), Icons.Outlined.Eco),
+                Triple("Mileage", UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale), Icons.Outlined.Eco),
                 Triple("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
                 Triple("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
             ),

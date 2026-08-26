@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.ble
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BleCharacteristicsTest {
@@ -26,5 +27,18 @@ class BleCharacteristicsTest {
     @Test
     fun `SR-only mobile status is not part of RS post-authentication flow`() {
         assertFalse(BleCharacteristics.SrMobileStatus in BleCharacteristics.PostAuthenticationSubscriptions)
+    }
+
+    @Test
+    fun `identity snapshots preserve the OEM subscription profile`() {
+        assertEquals(
+            listOf("8810", "8910"),
+            BleCharacteristics.PostAuthenticationIdentityReads.map { it.toString().takeLast(4) },
+        )
+        assertTrue(
+            BleCharacteristics.PostAuthenticationSubscriptions.containsAll(
+                BleCharacteristics.PostAuthenticationIdentityReads,
+            ),
+        )
     }
 }

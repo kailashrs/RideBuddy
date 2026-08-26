@@ -36,6 +36,15 @@ object BleCharacteristics {
         Vin,
     )
 
+    /**
+     * Optional snapshots taken after the exact OEM subscription sequence is established.
+     * Both characteristics advertise READ on the RS457 profile; failures remain non-fatal.
+     */
+    val PostAuthenticationIdentityReads: List<UUID> = listOf(
+        ClusterSoftwareVersion,
+        Vin,
+    )
+
     val NavigationWrites: Set<UUID> = setOf(
         NavigationManeuver,
         NavigationSpeedLimit,

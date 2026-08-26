@@ -77,8 +77,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 average_rpm REAL NOT NULL,
                 maximum_rpm INTEGER NOT NULL,
                 average_throttle REAL NOT NULL,
-                average_consumption REAL NOT NULL,
-                estimated_fuel REAL NOT NULL,
+                estimated_fuel_litres REAL,
                 start_area TEXT,
                 end_area TEXT,
                 start_latitude REAL,
@@ -94,19 +93,10 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) createSamplesTable(db)
-        if (oldVersion < 3) {
-            db.execSQL("ALTER TABLE $Table ADD COLUMN start_area TEXT")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN end_area TEXT")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN start_latitude REAL")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN start_longitude REAL")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN end_latitude REAL")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN end_longitude REAL")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN route_preview TEXT")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN zero_to_sixty INTEGER")
-            db.execSQL("ALTER TABLE $Table ADD COLUMN zero_to_hundred INTEGER")
-        }
+        recreate(db)
     }
+
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = recreate(db)
 
     fun insertRide(ride: Ride, samples: List<RideSample>): Long {
         val db = writableDatabase
@@ -120,8 +110,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 put("average_rpm", ride.averageRpm)
                 put("maximum_rpm", ride.maximumRpm)
                 put("average_throttle", ride.averageThrottlePercent)
-                put("average_consumption", ride.averageConsumptionLPer100Km)
-                put("estimated_fuel", ride.estimatedFuelLitres)
+                ride.estimatedFuelLitres?.let { put("estimated_fuel_litres", it) }
                 ride.startArea?.let { put("start_area", it) }
                 ride.endArea?.let { put("end_area", it) }
                 ride.startLatitude?.let { put("start_latitude", it) }
@@ -139,7 +128,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                     put("speed", sample.speedKph)
                     put("rpm", sample.rpm)
                     put("throttle", sample.throttlePercent)
-                    put("consumption", sample.consumptionLPer100Km)
+                    sample.mileageKilometresPerLitre?.let { put("mileage_km_per_litre", it) }
                     put("acceleration", sample.accelerationMetresPerSecondSquared)
                     sample.latitude?.let { put("latitude", it) }
                     sample.longitude?.let { put("longitude", it) }
@@ -173,7 +162,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                     speedKph = cursor.getDouble(cursor.getColumnIndexOrThrow("speed")),
                     rpm = cursor.getLong(cursor.getColumnIndexOrThrow("rpm")),
                     throttlePercent = cursor.getInt(cursor.getColumnIndexOrThrow("throttle")),
-                    consumptionLPer100Km = cursor.getDouble(cursor.getColumnIndexOrThrow("consumption")),
+                    mileageKilometresPerLitre = cursor.nullableDouble("mileage_km_per_litre"),
                     accelerationMetresPerSecondSquared = cursor.getDouble(cursor.getColumnIndexOrThrow("acceleration")),
                     latitude = cursor.nullableDouble("latitude"),
                     longitude = cursor.nullableDouble("longitude"),
@@ -193,7 +182,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 speed REAL NOT NULL,
                 rpm INTEGER NOT NULL,
                 throttle INTEGER NOT NULL,
-                consumption REAL NOT NULL,
+                mileage_km_per_litre REAL,
                 acceleration REAL NOT NULL,
                 latitude REAL,
                 longitude REAL,
@@ -226,8 +215,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                         averageRpm = cursor.getDouble(cursor.getColumnIndexOrThrow("average_rpm")),
                         maximumRpm = cursor.getLong(cursor.getColumnIndexOrThrow("maximum_rpm")),
                         averageThrottlePercent = cursor.getDouble(cursor.getColumnIndexOrThrow("average_throttle")),
-                        averageConsumptionLPer100Km = cursor.getDouble(cursor.getColumnIndexOrThrow("average_consumption")),
-                        estimatedFuelLitres = cursor.getDouble(cursor.getColumnIndexOrThrow("estimated_fuel")),
+                        estimatedFuelLitres = cursor.nullableDouble("estimated_fuel_litres"),
                         startArea = cursor.nullableString("start_area"),
                         endArea = cursor.nullableString("end_area"),
                         startLatitude = cursor.nullableDouble("start_latitude"),
@@ -246,7 +234,13 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
     companion object {
         const val Table = "rides"
         const val SamplesTable = "ride_samples"
-        const val Version = 3
+        const val Version = 4
+    }
+
+    private fun recreate(db: SQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS $SamplesTable")
+        db.execSQL("DROP TABLE IF EXISTS $Table")
+        onCreate(db)
     }
 }
 

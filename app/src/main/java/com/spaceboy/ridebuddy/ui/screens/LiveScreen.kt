@@ -578,7 +578,7 @@ private fun TelemetryCard(
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("Throttle", "${frame.throttlePercent}%")
-                Metric("Mileage", UnitFormatter.consumption(frame.instantaneousConsumptionLitresPer100Km, units, locale))
+                Metric("Mileage", UnitFormatter.mileage(frame.instantaneousMileageKilometresPerLitre, units, locale))
             }
 
             activeRide?.let {
@@ -625,7 +625,7 @@ private fun LiveDetailsSheet(
             Metric("Throttle", frame?.let { "${it.throttlePercent}%" } ?: "—")
         }
         Text(
-            "Mileage ${frame?.let { UnitFormatter.consumption(it.instantaneousConsumptionLitresPer100Km, units, locale) } ?: "—"}",
+            "Mileage ${frame?.let { UnitFormatter.mileage(it.instantaneousMileageKilometresPerLitre, units, locale) } ?: "— ${UnitFormatter.mileageUnit(units)}"}",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (level != LiveDetailLevel.Glance) {
@@ -644,7 +644,7 @@ private fun LiveDetailsSheet(
             LiveChart("Throttle", chartSamples.map { it.throttlePercent.toDouble() }, "%")
             LiveChart(
                 "Mileage",
-                chartSamples.mapNotNull { UnitFormatter.mileageValue(it.consumptionLPer100Km, units, locale) },
+                chartSamples.map { UnitFormatter.mileageValue(it.mileageKilometresPerLitre, units, locale) },
                 UnitFormatter.mileageUnit(units),
             )
             Text(
@@ -668,12 +668,12 @@ private fun ConnectionQuality(diagnostics: BleDiagnostics, samples: List<RideSam
 }
 
 @Composable
-private fun LiveChart(title: String, values: List<Double>, unit: String) {
+private fun LiveChart(title: String, values: List<Double?>, unit: String) {
     val color = MaterialTheme.colorScheme.primary
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(values.lastOrNull()?.let { "Latest %.1f %s".format(it, unit) } ?: "Waiting for samples", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(values.lastOrNull { it != null }?.let { "Latest %.1f %s".format(it, unit) } ?: "Waiting for samples", color = MaterialTheme.colorScheme.onSurfaceVariant)
             LineChart(
                 values = values,
                 height = 100.dp,

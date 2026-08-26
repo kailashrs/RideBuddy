@@ -45,6 +45,9 @@ object InsightsCalculator {
         if (current.isEmpty()) return RideInsights()
 
         val totalDuration = current.sumOf(Ride::durationMillis)
+        val fuelEstimates = current.mapNotNull { ride ->
+            ride.estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 }
+        }
         val weightedSeconds = current.sumOf { it.durationMillis / 1_000.0 }.takeIf { it > 0.0 }
         val distanceChange = previousStart?.let { prevStart ->
             val previousDistance = rides
@@ -59,7 +62,7 @@ object InsightsCalculator {
             rideCount = current.size,
             totalDistanceKilometres = current.sumOf(Ride::distanceKilometres),
             totalDurationMillis = totalDuration,
-            estimatedFuelLitres = current.sumOf(Ride::estimatedFuelLitres),
+            estimatedFuelLitres = fuelEstimates.sum().takeIf { fuelEstimates.isNotEmpty() },
             averageRideDistanceKilometres = current.map(Ride::distanceKilometres).average(),
             averageRideDurationMillis = totalDuration / current.size,
             averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.durationMillis / 1_000.0 } / seconds }
@@ -68,8 +71,7 @@ object InsightsCalculator {
                 ?: 0.0,
             averageThrottlePercent = weightedSeconds?.let { seconds -> current.sumOf { it.averageThrottlePercent * it.durationMillis / 1_000.0 } / seconds }
                 ?: 0.0,
-            averageConsumptionLPer100Km = current.sumOf { it.averageConsumptionLPer100Km * it.distanceKilometres }
-                .div(current.sumOf(Ride::distanceKilometres).takeIf { it > 0.0 } ?: 1.0),
+            averageMileageKilometresPerLitre = current.combinedMileageKilometresPerLitre(),
             longestRideKilometres = current.maxOf(Ride::distanceKilometres),
             highestSpeedKph = current.maxOf(Ride::maximumSpeedKph),
             distanceChangePercent = distanceChange,

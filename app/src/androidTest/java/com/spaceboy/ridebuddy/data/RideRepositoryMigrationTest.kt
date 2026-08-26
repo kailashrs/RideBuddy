@@ -51,15 +51,40 @@ class RideRepositoryMigrationTest {
     }
 
     @Test
-    fun versionOneUpgradePreservesRidesAndCreatesSamplesTable() = runBlocking {
+    fun legacySchemaIsResetBecauseFuelUnitsChanged() = runBlocking {
         val repository = RideRepository(context, databaseName = TestDatabaseName)
 
         repository.refresh()
 
-        val ride = repository.rides.value.single()
-        assertEquals(1_000L, ride.startedAtMillis)
-        assertEquals(2.5, ride.distanceKilometres, 0.0)
-        assertTrue(repository.samples(ride.id).isEmpty())
+        assertTrue(repository.rides.value.isEmpty())
+
+        val rideId = repository.insert(
+            ride = Ride(
+                id = 0,
+                startedAtMillis = 3_000L,
+                endedAtMillis = 4_000L,
+                distanceKilometres = 10.0,
+                averageSpeedKph = 36.0,
+                maximumSpeedKph = 50.0,
+                averageRpm = 4_000.0,
+                maximumRpm = 6_000,
+                averageThrottlePercent = 20.0,
+                estimatedFuelLitres = 0.4,
+            ),
+            samples = listOf(
+                RideSample(
+                    timestampMillis = 3_500L,
+                    speedKph = 36.0,
+                    rpm = 4_000,
+                    throttlePercent = 20,
+                    mileageKilometresPerLitre = 25.0,
+                    accelerationMetresPerSecondSquared = 0.0,
+                ),
+            ),
+        )
+
+        assertEquals(0.4, requireNotNull(repository.rides.value.single().estimatedFuelLitres), 0.0)
+        assertEquals(25.0, requireNotNull(repository.samples(rideId).single().mileageKilometresPerLitre), 0.0)
     }
 
     private companion object {

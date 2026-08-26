@@ -78,8 +78,8 @@ The main action is connection. Do not show empty telemetry gauges.
 │           72                 │
 │          km/h               │
 │                             │
-│  RPM       Throttle   Fuel  │
-│  5,420     38%        5.8   │
+│  RPM       Throttle Mileage │
+│  5,420     38%      5.8km/L │
 │                             │
 │  Navigation                  │
 │  Share a destination from   │
@@ -92,7 +92,7 @@ The main action is connection. Do not show empty telemetry gauges.
 Design rules:
 
 - Speed is the largest value and uses the user-selected unit.
-- RPM, throttle, and consumption are compact secondary metrics.
+- RPM, throttle, and mileage are compact secondary metrics.
 - The connection indicator is a semantic status pill, not a decorative Bluetooth icon.
 - Do not require a manual “Start ride” action. A ride begins automatically when the bike is connected and moving.
 - “Live details” opens a bottom sheet, not a new dense dashboard.
@@ -152,7 +152,7 @@ If the product decision remains fully automatic, this sheet should briefly confi
 
 Use a three-level bottom sheet:
 
-- Peek: speed, RPM, throttle, consumption.
+- Peek: speed, RPM, throttle, mileage.
 - Half: current ride metrics and connection quality.
 - Full: timestamped telemetry chart and raw-data diagnostics.
 
@@ -161,7 +161,7 @@ The full view may include:
 - Speed chart.
 - RPM chart.
 - Throttle chart.
-- Consumption chart.
+- Mileage chart.
 - Acceleration/braking events.
 - Telemetry frequency and packet-loss estimate.
 
@@ -176,7 +176,7 @@ Top content:
 - This week distance.
 - Ride count.
 - Average ride duration.
-- Average fuel consumption.
+- Average mileage.
 
 Each ride card shows:
 

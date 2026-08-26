@@ -84,7 +84,40 @@ class InsightsCalculatorTest {
         assertNull(result.distanceChangePercent)
     }
 
-    private fun ride(start: Long, distance: Double, durationHours: Int, speed: Double) = Ride(
+    @Test
+    fun mileageIsDerivedFromCombinedDistanceAndFuel() {
+        val now = 10_000L
+        val rides = listOf(
+            ride(start = 8_000L, distance = 1.0, durationHours = 1, speed = 10.0, fuelLitres = 0.1),
+            ride(start = 9_000L, distance = 100.0, durationHours = 1, speed = 20.0, fuelLitres = 5.0),
+        )
+
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, now)
+
+        assertEquals(5.1, requireNotNull(result.estimatedFuelLitres), 0.000_001)
+        assertEquals(101.0 / 5.1, requireNotNull(result.averageMileageKilometresPerLitre), 0.000_001)
+    }
+
+    @Test
+    fun ridesWithoutFuelDataDoNotInflateMileage() {
+        val rides = listOf(
+            ride(start = 8_000L, distance = 10.0, durationHours = 1, speed = 10.0, fuelLitres = 0.5),
+            ride(start = 9_000L, distance = 100.0, durationHours = 1, speed = 20.0, fuelLitres = null),
+        )
+
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
+
+        assertEquals(0.5, requireNotNull(result.estimatedFuelLitres), 0.0)
+        assertEquals(20.0, requireNotNull(result.averageMileageKilometresPerLitre), 0.0)
+    }
+
+    private fun ride(
+        start: Long,
+        distance: Double,
+        durationHours: Int,
+        speed: Double,
+        fuelLitres: Double? = distance / 25.0,
+    ) = Ride(
         id = start,
         startedAtMillis = start,
         endedAtMillis = start + durationHours * 3_600_000L,
@@ -94,7 +127,6 @@ class InsightsCalculatorTest {
         averageRpm = 4_000.0,
         maximumRpm = 6_000,
         averageThrottlePercent = 25.0,
-        averageConsumptionLPer100Km = 4.0,
-        estimatedFuelLitres = distance * 0.04,
+        estimatedFuelLitres = fuelLitres,
     )
 }

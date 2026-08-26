@@ -28,18 +28,33 @@ internal data class LineChartPoint(
 )
 
 internal fun lineChartPoints(
-    values: List<Double>,
+    values: List<Double?>,
     width: Float,
     height: Float,
     scalePolicy: LineChartScalePolicy,
     clampNegativeValues: Boolean,
-): List<LineChartPoint> {
-    if (values.isEmpty()) return emptyList()
+): List<LineChartPoint> = lineChartSegments(
+    values,
+    width,
+    height,
+    scalePolicy,
+    clampNegativeValues,
+).flatten()
+
+internal fun lineChartSegments(
+    values: List<Double?>,
+    width: Float,
+    height: Float,
+    scalePolicy: LineChartScalePolicy,
+    clampNegativeValues: Boolean,
+): List<List<LineChartPoint>> {
+    val validValues = values.mapNotNull { it?.takeIf(Double::isFinite) }
+    if (validValues.isEmpty()) return emptyList()
 
     val valueToY: (Double) -> Float = when (scalePolicy) {
         LineChartScalePolicy.ZeroBased -> {
-            val maximum = values.maxOrNull()?.takeIf { it > 0.0 }
-                ?: if (values.size == 1) 1.0 else return emptyList()
+            val maximum = validValues.maxOrNull()?.takeIf { it > 0.0 }
+                ?: if (validValues.size == 1) 1.0 else return emptyList()
             val transform: (Double) -> Float = { value ->
                 val plottedValue = if (clampNegativeValues) value.coerceAtLeast(0.0) else value
                 height - (plottedValue / maximum * height).toFloat()
@@ -47,8 +62,8 @@ internal fun lineChartPoints(
             transform
         }
         LineChartScalePolicy.AutoRange -> {
-            val minimum = values.minOrNull() ?: return emptyList()
-            val maximum = values.maxOrNull() ?: return emptyList()
+            val minimum = validValues.minOrNull() ?: return emptyList()
+            val maximum = validValues.maxOrNull() ?: return emptyList()
             val range = (maximum - minimum).takeIf { it > 0.0 } ?: 1.0
             val transform: (Double) -> Float = { value ->
                 height - ((value - minimum) / range * height).toFloat()
@@ -57,17 +72,27 @@ internal fun lineChartPoints(
         }
     }
     val dx = if (values.size == 1) 0f else width / values.lastIndex
-    return values.mapIndexed { index, value ->
-        LineChartPoint(
-            x = if (values.size == 1) width / 2f else index * dx,
-            y = if (values.size == 1) height / 2f else valueToY(value),
-        )
+    val segments = mutableListOf<List<LineChartPoint>>()
+    var segment = mutableListOf<LineChartPoint>()
+    values.forEachIndexed { index, nullableValue ->
+        val value = nullableValue?.takeIf(Double::isFinite)
+        if (value == null) {
+            if (segment.isNotEmpty()) segments += segment
+            segment = mutableListOf()
+        } else {
+            segment += LineChartPoint(
+                x = if (values.size == 1) width / 2f else index * dx,
+                y = if (validValues.size == 1) height / 2f else valueToY(value),
+            )
+        }
     }
+    if (segment.isNotEmpty()) segments += segment
+    return segments
 }
 
 @Composable
 internal fun LineChart(
-    values: List<Double>,
+    values: List<Double?>,
     modifier: Modifier = Modifier,
     height: Dp = 100.dp,
     topPadding: Dp = 0.dp,
@@ -91,57 +116,59 @@ internal fun LineChart(
         if (drawBaseline) {
             drawLine(baselineColor, Offset(0f, size.height), Offset(size.width, size.height), 2f)
         }
-        val points = lineChartPoints(
+        val segments = lineChartSegments(
             values = values,
             width = size.width,
             height = size.height,
             scalePolicy = scalePolicy,
             clampNegativeValues = clampNegativeValues,
         )
-        if (points.isEmpty()) return@Canvas
-        if (points.size == 1) {
-            drawCircle(
-                color = color,
-                radius = strokeWidth.coerceAtLeast(3f),
-                center = Offset(points.single().x, points.single().y),
-            )
-            return@Canvas
-        }
-        val path = Path()
-        var previousX = points.first().x
-        var previousY = points.first().y
-        path.moveTo(previousX, previousY)
-
-        for (i in 1 until points.size) {
-            val (x, y) = points[i]
-            if (smooth) {
-                val controlX1 = previousX + (x - previousX) / 2f
-                val controlX2 = previousX + (x - previousX) / 2f
-                path.cubicTo(controlX1, previousY, controlX2, y, x, y)
-            } else {
-                path.lineTo(x, y)
-            }
-            previousX = x
-            previousY = y
-        }
-
-        drawPath(path, color, style = Stroke(strokeWidth))
-
-        if (fillAlpha != null) {
-            val fillPath = Path().apply {
-                addPath(path)
-                lineTo(size.width, size.height)
-                lineTo(0f, size.height)
-                close()
-            }
-            drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(color.copy(alpha = fillAlpha), Color.Transparent),
-                    startY = 0f,
-                    endY = size.height
+        if (segments.isEmpty()) return@Canvas
+        segments.forEach { points ->
+            if (points.size == 1) {
+                drawCircle(
+                    color = color,
+                    radius = strokeWidth.coerceAtLeast(3f),
+                    center = Offset(points.single().x, points.single().y),
                 )
-            )
+                return@forEach
+            }
+            val path = Path()
+            var previousX = points.first().x
+            var previousY = points.first().y
+            path.moveTo(previousX, previousY)
+
+            for (i in 1 until points.size) {
+                val (x, y) = points[i]
+                if (smooth) {
+                    val controlX1 = previousX + (x - previousX) / 2f
+                    val controlX2 = previousX + (x - previousX) / 2f
+                    path.cubicTo(controlX1, previousY, controlX2, y, x, y)
+                } else {
+                    path.lineTo(x, y)
+                }
+                previousX = x
+                previousY = y
+            }
+
+            drawPath(path, color, style = Stroke(strokeWidth))
+
+            if (fillAlpha != null) {
+                val fillPath = Path().apply {
+                    addPath(path)
+                    lineTo(points.last().x, size.height)
+                    lineTo(points.first().x, size.height)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(color.copy(alpha = fillAlpha), Color.Transparent),
+                        startY = 0f,
+                        endY = size.height
+                    )
+                )
+            }
         }
     }
 }

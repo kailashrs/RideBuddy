@@ -22,8 +22,6 @@
     <string name="navigation_tft_clear_failed">Navigation ended, but the TFT clear command failed</string>
     <string name="navigation_maneuver_distance">In %1$s</string>
     <string name="navigation_full_map">Full map</string>
-    <string name="telemetry_receiving">Connected and receiving</string>
-    <string name="telemetry_waiting">Waiting for telemetry…</string>
     <string name="browser_unavailable">No browser is available to open this page</string>
     <string name="ride_share_unavailable">No app is available to share this ride</string>
     <string name="ride_share_title">Share ride</string>
@@ -39,5 +37,4 @@
     <string name="protection_phase_ready">Ready</string>
     <string name="protection_path_stored_acceptance">Previously accepted</string>
     <string name="protection_path_challenge_indication">Challenge indication</string>
-    <string name="info_battery_optimization_pausing">Phone may pause the connection</string>
 </resources>

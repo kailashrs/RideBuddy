@@ -281,7 +281,7 @@ private data class RideDetailUiData(
     val speedValues: List<Double>,
     val rpmValues: List<Double>,
     val throttleValues: List<Double>,
-    val mileageValues: List<Double>,
+    val mileageValues: List<Double?>,
     val events: List<RideEvent>,
 )
 
@@ -304,8 +304,8 @@ private fun buildRideDetailUiData(
         speedValues = chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) },
         rpmValues = chartSamples.map { it.rpm.toDouble() },
         throttleValues = chartSamples.map { it.throttlePercent.toDouble() },
-        mileageValues = chartSamples.mapNotNull { sample ->
-            UnitFormatter.mileageValue(sample.consumptionLPer100Km, units, Locale.getDefault())
+        mileageValues = chartSamples.map { sample ->
+            UnitFormatter.mileageValue(sample.mileageKilometresPerLitre, units, Locale.getDefault())
         },
         events = RideEventDetector.detect(samples).take(MaxVisibleEvents),
     )
@@ -383,7 +383,7 @@ private fun RideDetailContent(
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride summary", style = MaterialTheme.typography.titleMedium)
-                    Text("Fuel used ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.consumption(ride.averageConsumptionLPer100Km, units, locale)}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Estimated fuel ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}", style = MaterialTheme.typography.bodyMedium)
                     Text("Peak ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${ride.maximumRpm} rpm", style = MaterialTheme.typography.bodyMedium)
                     ride.zeroToSixtyMillis?.let { Text("0–60 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
                     ride.zeroToHundredMillis?.let { Text("0–100 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
@@ -522,20 +522,21 @@ private fun RouteCard(points: List<Pair<Double, Double>>) {
 }
 
 @androidx.compose.runtime.Composable
-private fun TelemetryChart(title: String, unit: String, values: List<Double>) {
+private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
     val color = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp)) {
-            val maximum = values.maxOrNull() ?: 0.0
+            val maximum = values.filterNotNull().maxOrNull()
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text("Peak %.1f %s".format(maximum, unit), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(maximum?.let { "Peak %.1f %s".format(it, unit) } ?: "No data", color = MaterialTheme.colorScheme.onSurfaceVariant)
             LineChart(
                 values = values,
                 height = 140.dp,
                 topPadding = 12.dp,
                 color = color,
-                contentDescription = "$title over the duration of the ride; peak %.1f $unit".format(maximum),
+                contentDescription = maximum?.let { "$title over the duration of the ride; peak %.1f $unit".format(it) }
+                    ?: "$title data unavailable",
                 scalePolicy = LineChartScalePolicy.ZeroBased,
                 clampNegativeValues = true,
                 smooth = false,
@@ -551,9 +552,9 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double>) {
 private enum class RideExportFormat { Csv, Gpx }
 
 private fun Writer.writeCsv(samples: List<RideSample>) {
-    appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,consumption_l_per_100km,acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
+    appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,mileage_km_per_litre,acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
     samples.forEach { sample ->
-        appendLine(listOf(Instant.ofEpochMilli(sample.timestampMillis), sample.speedKph, sample.rpm, sample.throttlePercent, sample.consumptionLPer100Km, sample.accelerationMetresPerSecondSquared, sample.latitude ?: "", sample.longitude ?: "", sample.accuracyMetres ?: "", sample.altitudeMetres ?: "").joinToString(","))
+        appendLine(listOf(Instant.ofEpochMilli(sample.timestampMillis), sample.speedKph, sample.rpm, sample.throttlePercent, sample.mileageKilometresPerLitre ?: "", sample.accelerationMetresPerSecondSquared, sample.latitude ?: "", sample.longitude ?: "", sample.accuracyMetres ?: "", sample.altitudeMetres ?: "").joinToString(","))
     }
 }
 

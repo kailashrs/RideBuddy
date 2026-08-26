@@ -113,7 +113,7 @@ data class BleDiagnostics(
     val protectionPhase: ProtectionPhase = ProtectionPhase.Idle,
     val protectionPath: ProtectionPath? = null,
     val bonded: Boolean? = null,
-    val negotiatedMtu: Int? = null,
+    val attMtu: Int? = null,
     val servicesDiscovered: Int = 0,
     val notificationsReceived: Long = 0,
     val writesCompleted: Long = 0,

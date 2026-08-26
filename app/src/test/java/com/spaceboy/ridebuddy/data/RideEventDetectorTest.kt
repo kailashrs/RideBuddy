@@ -46,7 +46,7 @@ class RideEventDetectorTest {
         speedKph = 10.0,
         rpm = 3_000,
         throttlePercent = 10,
-        consumptionLPer100Km = 4.0,
+        mileageKilometresPerLitre = 25.0,
         accelerationMetresPerSecondSquared = acceleration,
     )
 }
