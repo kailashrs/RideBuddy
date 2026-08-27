@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 class MainViewModel internal constructor(
@@ -54,13 +55,13 @@ class MainViewModel internal constructor(
     private val navigationFeed: NavigationFeedRepository,
     private val appSettings: AppSettingsRepository,
 ) : ViewModel() {
-    private val navigationKeyOperationGuard = NavigationKeyOperationGuard()
     private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
     private val restoredSharedDestinationState = sharedDestinationStateStore.restore()
     private val sharedDestinationRequestIds = AtomicLong(
         restoredSharedDestinationState.autoStartSharedDestination?.requestId ?: 0L,
     )
     private val navigationStartAttemptIds = AtomicLong()
+    private val autoConnectAttempted = AtomicBoolean(false)
     private val mutableUiState = MutableStateFlow(
         restoredSharedDestinationState.copy(
             navigationKey = NavigationKeyUiState(isLoading = true),
@@ -87,17 +88,14 @@ class MainViewModel internal constructor(
     val insights: StateFlow<RideInsights> = combine(rides, insightPeriod) { currentRides, period ->
         InsightsCalculator.calculate(currentRides, period)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
+
     init {
         viewModelScope.launch {
-            try {
-                val bootstrapResult = navigationKeyBootstrap.await()
-                mutableUiState.update { state ->
-                    if (!state.navigationKey.isLoading) state else state.copy(
-                        navigationKey = navigationKeyStateForBootstrap(bootstrapResult),
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
+            val bootstrapResult = navigationKeyBootstrap.await()
+            mutableUiState.update { state ->
+                if (!state.navigationKey.isLoading) state else state.copy(
+                    navigationKey = navigationKeyStateForBootstrap(bootstrapResult),
+                )
             }
         }
     }
@@ -140,46 +138,28 @@ class MainViewModel internal constructor(
 
     fun saveNavigationApiKey(value: String) {
         val apiKey = value.trim()
-        val validationError = NavigationApiKeyPolicy.validate(apiKey)
-        if (validationError != null) {
+        NavigationApiKeyPolicy.validate(apiKey)?.let { validationError ->
             mutableUiState.update { state ->
                 state.copy(navigationKey = state.navigationKey.copy(errorMessage = validationError))
             }
             return
         }
-
         runNavigationKeyOperation {
-            val outcome = withContext(Dispatchers.IO) {
-                try {
-                    navigationSdkGateway.configureIfNeeded(apiKey).also { result ->
-                        if (result !is ConfigureResult.Failed) {
-                            apiKeyStore.save(apiKey)
-                            navigationKeyBootstrap.recordSavedKey(apiKey, result)
-                        }
+            val result = withContext(Dispatchers.IO) {
+                navigationSdkGateway.configureIfNeeded(apiKey).also { outcome ->
+                    if (outcome !is ConfigureResult.Failed) {
+                        apiKeyStore.save(apiKey)
+                        navigationKeyBootstrap.recordSavedKey(apiKey, outcome)
                     }
-                        .let { Result.success(it) }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Result.failure(error)
                 }
             }
-
             mutableUiState.update { state ->
-                outcome.fold(
-                    onSuccess = { result ->
-                        state.copy(
-                            navigationKey = navigationKeyStateFor(result, apiKey, state.navigationKey),
-                            transientMessage = if (result is ConfigureResult.Failed) null else "Navigation API key saved",
-                        )
-                    },
-                    onFailure = { error ->
-                        state.copy(
-                            navigationKey = state.navigationKey.copy(
-                                isSaving = false,
-                                errorMessage = error.message ?: "Could not save the API key",
-                            ),
-                        )
+                state.copy(
+                    navigationKey = navigationKeyStateFor(result, apiKey, state.navigationKey),
+                    transientMessage = if (result is ConfigureResult.Failed) {
+                        null
+                    } else {
+                        "Navigation API key saved"
                     },
                 )
             }
@@ -188,36 +168,18 @@ class MainViewModel internal constructor(
 
     fun removeNavigationApiKey() {
         runNavigationKeyOperation {
-            val outcome = withContext(Dispatchers.IO) {
-                try {
-                    apiKeyStore.clear()
-                    navigationKeyBootstrap.recordRemovedKey(
-                        restartRequired = navigationSdkGateway.isConfiguredInProcess,
-                    )
-                    Result.success(Unit)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Result.failure(error)
-                }
+            withContext(Dispatchers.IO) {
+                apiKeyStore.clear()
+                navigationKeyBootstrap.recordRemovedKey(
+                    restartRequired = navigationSdkGateway.isConfiguredInProcess,
+                )
             }
             mutableUiState.update { state ->
-                outcome.fold(
-                    onSuccess = {
-                        state.copy(
-                            navigationKey = NavigationKeyUiState(
-                                restartRequired = navigationSdkGateway.isConfiguredInProcess,
-                            ),
-                            transientMessage = "Navigation API key removed",
-                        )
-                    },
-                    onFailure = { error ->
-                        state.copy(
-                            navigationKey = state.navigationKey.copy(
-                                errorMessage = error.message ?: "Could not remove the API key",
-                            ),
-                        )
-                    },
+                state.copy(
+                    navigationKey = NavigationKeyUiState(
+                        restartRequired = navigationSdkGateway.isConfiguredInProcess,
+                    ),
+                    transientMessage = "Navigation API key removed",
                 )
             }
         }
@@ -241,17 +203,15 @@ class MainViewModel internal constructor(
         }
     }
 
+    /**
+     * Runs one navigation-key operation at a time. `isSaving` is the mutex: every caller reaches
+     * this from the main dispatcher, so the check and the set cannot interleave.
+     */
     private fun runNavigationKeyOperation(operation: suspend () -> Unit) {
-        if (mutableUiState.value.navigationKey.isLoading) return
-        if (!navigationKeyOperationGuard.tryAcquire()) return
+        val current = mutableUiState.value.navigationKey
+        if (current.isLoading || current.isSaving) return
         mutableUiState.update { state ->
-            state.copy(
-                navigationKey = state.navigationKey.copy(
-                    isLoading = false,
-                    isSaving = true,
-                    errorMessage = null,
-                ),
-            )
+            state.copy(navigationKey = state.navigationKey.copy(isSaving = true, errorMessage = null))
         }
         viewModelScope.launch {
             try {
@@ -267,7 +227,6 @@ class MainViewModel internal constructor(
                     )
                 }
             } finally {
-                navigationKeyOperationGuard.release()
                 mutableUiState.update { state ->
                     state.copy(navigationKey = state.navigationKey.copy(isSaving = false))
                 }
@@ -275,13 +234,11 @@ class MainViewModel internal constructor(
         }
     }
 
-    private val autoConnectGate = MainViewModelAutoConnectGate()
-
     /**
-     * Delegates to [MainViewModelAutoConnectGate.consume]; see that class for the
-     * one-shot semantics.
+     * One-shot: true on the first call after process start, false thereafter, so a resume or a
+     * recreated Activity can never hand the connection stack a fresh retry budget.
      */
-    fun consumeAutoConnectAttempt(): Boolean = autoConnectGate.consume()
+    fun consumeAutoConnectAttempt(): Boolean = autoConnectAttempted.compareAndSet(false, true)
 
     fun selectInsightPeriod(period: InsightPeriod) {
         insightPeriod.value = period
@@ -385,6 +342,23 @@ class MainViewModel internal constructor(
 
     fun showMessage(message: String) {
         mutableUiState.update { it.copy(transientMessage = message) }
+    }
+
+    fun askTftTestConfirmation(message: String) {
+        mutableUiState.update { it.copy(tftTestConfirmation = message) }
+    }
+
+    fun resolveTftTestConfirmation(displayLooksCorrect: Boolean) {
+        mutableUiState.update { state ->
+            state.copy(
+                tftTestConfirmation = null,
+                transientMessage = if (displayLooksCorrect) {
+                    "TFT display test completed"
+                } else {
+                    "TFT display test needs investigation"
+                },
+            )
+        }
     }
 
     companion object {

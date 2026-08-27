@@ -22,6 +22,7 @@ import com.spaceboy.ridebuddy.core.calls.CallNotificationBridge
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
+import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -47,6 +48,7 @@ class AppContainer(context: Context) {
         scope = applicationScope,
     )
     val appSettings = AppSettingsRepository(context)
+    internal val bikeConnectionDemand = BikeConnectionDemandController(context)
     internal val connectionEventJournal = ConnectionEventJournal(
         store = SharedPreferencesConnectionEventStore(context),
         scope = applicationScope,
@@ -86,7 +88,7 @@ class AppContainer(context: Context) {
     val destinationParser = DestinationParser(context)
     val navigationFeed = NavigationFeedRepository()
     internal val navigationStartStopGuard = NavigationStartStopGuard()
-    val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings, applicationScope)
+    val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings.settings, applicationScope)
     internal val navigationGuidanceLifecycle = NavigationGuidanceLifecycle(
         clearNavigationFeed = navigationFeed::clear,
         finishTftArrival = tftNavigationBridge::arrivedAndStop,

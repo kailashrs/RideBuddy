@@ -2,7 +2,7 @@ package com.spaceboy.ridebuddy.core.tft
 
 import com.google.android.libraries.mapsplatform.turnbyturn.model.NavInfo
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
-import com.spaceboy.ridebuddy.data.AppSettingsRepository
+import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
@@ -15,7 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
@@ -39,7 +41,7 @@ internal fun arrivalDisplayTimerGeneration(
 
 class TftNavigationBridge(
     private val connection: BikeConnection,
-    private val settings: AppSettingsRepository,
+    private val settings: StateFlow<AppSettings>,
     private val scope: CoroutineScope,
 ) {
     private val queueLock = Any()
@@ -51,7 +53,7 @@ class TftNavigationBridge(
     private var textAlertActive = false
     private var textAlertMessage: String? = null
     private var transportReady = false
-    private var outputEnabled = settings.settings.value.tftNavigationOutputEnabled
+    private var outputEnabled = settings.value.tftNavigationOutputEnabled
     private var clusterResetNeeded = false
     private var sessionGeneration = 0L
     private var arrivalPendingGeneration: Long? = null
@@ -60,12 +62,16 @@ class TftNavigationBridge(
 
     init {
         scope.launch {
-            connection.connectionState.collect { refreshTransportAvailability() }
+            // BleDiagnostics is republished on every telemetry frame; only the readiness edge
+            // matters here, so the snapshot is reduced before it can wake this bridge.
+            combine(connection.connectionState, connection.diagnostics) { state, diagnostics ->
+                state is BikeConnectionState.Connected && diagnostics.authenticated
+            }
+                .distinctUntilChanged()
+                .collect(::refreshTransportAvailability)
         }
         scope.launch {
-            connection.diagnostics.collect { refreshTransportAvailability() }
-        }
-        scope.launch {
+            var consecutiveWriteFailures = 0
             for (ignored in wakeWorker) {
                 while (true) {
                     val batch = synchronized(queueLock) {
@@ -87,17 +93,28 @@ class TftNavigationBridge(
                         }
                     } ?: break
                     if (!isCurrent(batch)) continue
-                    val result = runCatching { writeBatch(batch) }
-                        .getOrDefault(BatchWriteResult.Failed)
+                    val result = writeBatch(batch)
                     when (result) {
                         BatchWriteResult.Stale -> continue
                         BatchWriteResult.Failed -> {
+                            consecutiveWriteFailures++
+                            // A cluster that keeps rejecting writes must not be retried forever:
+                            // each attempt costs a full GATT operation timeout and can retire the
+                            // link, so the pending output is dropped instead of livelocking.
+                            if (consecutiveWriteFailures >= MaxConsecutiveWriteFailures) {
+                                consecutiveWriteFailures = 0
+                                synchronized(queueLock) {
+                                    controlBatches.clear()
+                                    latestData.clear()
+                                }
+                                break
+                            }
                             restore(batch)
-                            delay(FailedWriteRetryMillis.milliseconds)
+                            delay((FailedWriteRetryMillis * consecutiveWriteFailures).milliseconds)
                             wakeWorker.trySend(Unit)
                             break
                         }
-                        BatchWriteResult.Completed -> Unit
+                        BatchWriteResult.Completed -> consecutiveWriteFailures = 0
                     }
                     arrivalDisplayTimerGeneration(
                         arrivalGeneration = batch.arrivalGeneration,
@@ -110,7 +127,7 @@ class TftNavigationBridge(
             }
         }
         scope.launch {
-            settings.settings
+            settings
                 .map { appSettings -> appSettings.tftNavigationOutputEnabled }
                 .distinctUntilChanged()
                 .collect(::setOutputEnabled)
@@ -180,7 +197,7 @@ class TftNavigationBridge(
             )
             val displayText = current.fullRoadName?.takeUnless(String::isBlank)
                 ?: current.fullInstructionText.orEmpty()
-            val rowLimit = if (settings.settings.value.tftTextMode == TftTextMode.Compact) 1 else 3
+            val rowLimit = if (settings.value.tftTextMode == TftTextMode.Compact) 1 else 3
             if (!synchronized(queueLock) { textAlertActive }) {
                 TftPacketEncoder.displayTextRows(displayText, rowLimit).forEach { payload ->
                     dataFrames += Frame(BleCharacteristics.NavigationText, payload)
@@ -448,9 +465,7 @@ class TftNavigationBridge(
      * A cluster forgets the navigation session on disconnect. Discard stale queued frames and
      * republish the latest guidance only after the new connection is authenticated.
      */
-    private fun refreshTransportAvailability() {
-        val ready = connection.connectionState.value is BikeConnectionState.Connected &&
-                connection.diagnostics.value.authenticated
+    private fun refreshTransportAvailability(ready: Boolean) {
         val recovery = synchronized(queueLock) {
             when {
                 ready && !transportReady -> {
@@ -592,6 +607,7 @@ class TftNavigationBridge(
         const val MinimumWriteIntervalMillis = 200L
         const val ClusterReplayCount = 2
         const val FailedWriteRetryMillis = 1_000L
+        const val MaxConsecutiveWriteFailures = 3
         const val ArrivalDisplayMillis = 2_000L
         const val SessionGuidanceStarted = 80
         const val SessionRerouting = 82

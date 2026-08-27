@@ -29,9 +29,30 @@ val BikeNameFilter: Pattern = Pattern.compile(
 
 /**
  * Canonical string for the SIG-standard HID-over-GATT service UUID (`0x1812`),
- * stable since Bluetooth 4.0 (2010). Every BLE HID peripheral advertises this,
- * including the bike's HOGP profile; the classic-BT headset (`20:72:1B:28:C8:5C`)
- * does not.
+ * stable since Bluetooth 4.0 (2010). Used **only** as a CDM picker scan filter.
+ *
+ * Confirmed against the bike, not assumed. The CDM association record for
+ * `RS457_IDE1B7` holds the scan record the picker actually matched:
+ *
+ * ```
+ * mAdvertiseFlags=6, mServiceUuids=[00001812-0000-1000-8000-00805f9b34fb],
+ * mDeviceName=RS457_IDE1B7, rssi=-66, eventType=27
+ * ```
+ *
+ * So the cluster advertises this UUID and no other, carries its name in the same
+ * (merged, `eventType` bit 3) scan record, and sets flag bit 2 — BR/EDR Not
+ * Supported. The bike is also registered in Android's HID host over
+ * `BT_TRANSPORT_LE`, which is what makes it a HOGP peripheral in the first place.
+ *
+ * The filter earns its keep: the bike exposes a second, BR/EDR endpoint under the
+ * *same* advertised name (`…C8:5C`, class-of-device 0x240418 — Audio/Video,
+ * headphones) which Android classifies as DUAL. Name alone cannot separate them.
+ *
+ * Scan-filter use only. Do NOT reference this from anything GATT-side: Android
+ * withholds the HID service from `BluetoothGatt.getServices()` for apps without
+ * `BLUETOOTH_PRIVILEGED`, so adding `0x1812` to [BikeGattProfile]'s required
+ * characteristics would make every connection fail as "profile is incomplete".
+ * Scan filters read the advertisement, which is not subject to that restriction.
  *
  * Held as a String rather than a `ParcelUuid` constant to avoid loading
  * `android.os.ParcelUuid` from a Robolectric test classloader that has a partial
@@ -42,6 +63,10 @@ val BikeNameFilter: Pattern = Pattern.compile(
  * This is a SIG-standard UUID (assigned in Bluetooth 4.0) and not a vendor-defined
  * value. Hardcoding it cannot drift because SIG cannot reassign the 16-bit slot
  * without breaking conformance with every HID host on the planet.
+ *
+ * Note the OEM India app does none of this: it scans with an empty `ScanFilter`
+ * list and matches `RS457_ID`/`SR_ID` as a substring of the name in its callback.
+ * Our picker is deliberately stricter, and the record above is why that is safe.
  */
 const val BikeHogpServiceUuidString: String =
     "00001812-0000-1000-8000-00805f9b34fb"

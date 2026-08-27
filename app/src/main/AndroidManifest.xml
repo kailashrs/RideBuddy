@@ -72,6 +72,10 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
 
+        <receiver
+            android:name=".service.BikeConnectionActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.BikeCompanionDeviceService"
             android:exported="true"

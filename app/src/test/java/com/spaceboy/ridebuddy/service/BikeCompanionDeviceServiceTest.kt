@@ -9,18 +9,18 @@ import org.junit.Test
 
 class BikeCompanionDeviceServiceTest {
     @Test
-    fun positivePresenceEnsuresConnectionWhileNegativeSourcesLeaveGattUnchanged() {
+    fun onlyBlePresenceTransitionsOwnAutomaticConnectionDemand() {
         assertEquals(
-            CompanionPresenceAction.EnsureConnected,
+            CompanionPresenceAction.EvaluateBleAppearance,
             companionPresenceAction(DevicePresenceEvent.EVENT_BLE_APPEARED),
         )
         assertEquals(
-            CompanionPresenceAction.EnsureConnected,
-            companionPresenceAction(DevicePresenceEvent.EVENT_BT_CONNECTED),
+            CompanionPresenceAction.MarkBleAbsent,
+            companionPresenceAction(DevicePresenceEvent.EVENT_BLE_DISAPPEARED),
         )
         assertEquals(
             CompanionPresenceAction.KeepConnection,
-            companionPresenceAction(DevicePresenceEvent.EVENT_BLE_DISAPPEARED),
+            companionPresenceAction(DevicePresenceEvent.EVENT_BT_CONNECTED),
         )
         assertEquals(
             CompanionPresenceAction.KeepConnection,

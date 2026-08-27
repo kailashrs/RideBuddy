@@ -37,4 +37,8 @@
     <string name="protection_phase_ready">Ready</string>
     <string name="protection_path_stored_acceptance">Previously accepted</string>
     <string name="protection_path_challenge_indication">Challenge indication</string>
+    <string name="ride_history_share_unavailable">No app is available to share the ride history</string>
+    <string name="tft_test_confirm_title">Confirm TFT display</string>
+    <string name="tft_test_confirm_yes">Looks correct</string>
+    <string name="tft_test_confirm_no">Did not appear</string>
 </resources>

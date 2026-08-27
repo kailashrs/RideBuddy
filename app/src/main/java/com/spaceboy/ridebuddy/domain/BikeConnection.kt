@@ -73,7 +73,17 @@ sealed interface BikeConnectionState {
     ) : BikeConnectionState
     data class Authenticating(val deviceName: String) : BikeConnectionState
     data class Connected(val deviceName: String, val rssi: Int?) : BikeConnectionState
-    data class Failed(val message: String) : BikeConnectionState
+    /**
+     * The stack is not connected and will not retry on its own.
+     *
+     * [retriesExhausted] marks the terminal end of the bounded backoff schedule. Only a fresh
+     * BLE appearance or an explicit user retry may start another attempt from that state; an
+     * app relaunch must not silently reset the retry budget.
+     */
+    data class Failed(
+        val message: String,
+        val retriesExhausted: Boolean = false,
+    ) : BikeConnectionState
 }
 
 data class BikeIdentity(
@@ -113,12 +123,21 @@ data class BleDiagnostics(
     val lastFrameAtMillis: Long? = null,
     val rssi: Int? = null,
     val telemetryHz: Double = 0.0,
-    val lastError: String? = null,
-    val lastErrorAtMillis: Long? = null,
     val serviceSnapshot: List<String> = emptyList(),
     val recentFrames: List<String> = emptyList(),
     val recentEvents: List<String> = emptyList(),
-)
+    /** The real failure, retained across automatic reattempts against the same target. */
+    val lastFailure: ConnectionFailure? = null,
+    /** What the last authenticated link negotiated; teardown does not clear it. */
+    val lastSuccessfulLink: LinkSnapshot? = null,
+    /** Context of the attempt currently in flight. */
+    val attempt: ConnectionAttemptContext = ConnectionAttemptContext(),
+    /** Set when the stack deliberately declined to start or continue automatic attempts. */
+    val suppressionReason: String? = null,
+) {
+    val lastError: String? get() = lastFailure?.message
+    val lastErrorAtMillis: Long? get() = lastFailure?.atMillis
+}
 
 sealed interface BikeControlEvent {
     data object SkipManeuver : BikeControlEvent

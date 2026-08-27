@@ -19,6 +19,11 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import com.spaceboy.ridebuddy.domain.BikeWrite
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.domain.BondStateSnapshot
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptContext
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
+import com.spaceboy.ridebuddy.domain.ConnectionFailure
+import com.spaceboy.ridebuddy.domain.ConnectionFailureCategory
 import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
 import kotlinx.coroutines.CancellationException
@@ -33,7 +38,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
@@ -41,6 +45,15 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Sole owner of the GATT link and of automatic reconnection.
+ *
+ * Nothing outside this class may start, retry, or tear down a GATT session: the foreground service
+ * and the companion presence receiver express demand, and this class decides. Sessions are tracked
+ * through [GattSessionRegistry] so each Android instance is closed exactly once even when a retired
+ * instance keeps delivering callbacks, and every failure is recorded as a structured
+ * [ConnectionFailure] rather than a bare string.
+ */
 @SuppressLint("MissingPermission")
 internal class AndroidBikeConnection(
     context: Context,
@@ -57,43 +70,38 @@ internal class AndroidBikeConnection(
         handler = mainHandler,
         isGenerationCurrent = { generation -> generation == connectionGeneration },
         onBondReady = ::onBondReady,
-        onFailure = ::fail,
+        onFailure = { message -> failLocally(message) },
         log = ::log,
     )
     private val profile = BikeGattProfile()
-    private var gatt: BluetoothGatt? = null
+    private val sessions = GattSessionRegistry<BluetoothGatt>(::closeAndroidGatt)
     private var connectedDevice: BluetoothDevice? = null
     private var connectionTarget: BikeConnectionTarget? = null
     private var deviceName: String? = null
     private var connectedDeviceBonded = false
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
+    private var reconnectScheduled = false
     private var connectionGeneration = 0L
     private var connectionMonitoringActive = false
-    private var gattConnectedAtElapsedRealtime: Long? = null
+    private var attemptTrigger: ConnectionAttemptTrigger? = null
+    private var authenticatedAtMillis: Long? = null
     private val nextWriteRequestId = AtomicLong()
     private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val telemetryStream = BikeTelemetryStream(telemetryScope)
 
     private val mutableConnectionState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
-    private val mutableDiagnostics = MutableStateFlow(
-        BleDiagnostics(recentEvents = connectionEventJournal.events.value),
-    )
+    private val diagnosticsRecorder = BleDiagnosticsRecorder(connectionEventJournal.events.value)
     private val mutableControls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)
     private val operationCoordinator = GattOperationCoordinator(
         handler = mainHandler,
         executor = AndroidGattOperationExecutor(captureRecorder),
-        currentGatt = { gatt },
+        currentGatt = { sessions.current()?.openTransport() },
         isChallengeResponsePending = ::isChallengeResponsePending,
-        onActiveOperationChanged = { label ->
-            mutableDiagnostics.update { diagnostics -> diagnostics.copy(activeGattOperation = label) }
-        },
-        onFailureRecorded = { message ->
-            mutableDiagnostics.update { diagnostics ->
-                diagnostics.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
-            }
-        },
-        onResetRequired = ::resetGattAfterOperationTimeout,
+        attemptContext = { attemptContext() },
+        onActiveOperationChanged = diagnosticsRecorder::setActiveOperation,
+        onFailureRecorded = ::recordConnectionFailure,
+        onResetRequired = ::resetGattAfterOperationFailure,
         onOperationExhausted = ::handleExhaustedOperation,
         log = ::log,
     )
@@ -103,28 +111,20 @@ internal class AndroidBikeConnection(
         characteristic = { uuid -> profile[uuid] },
         enqueue = operationCoordinator::enqueue,
         enqueueAll = operationCoordinator::enqueueAll,
-        isAuthenticated = { mutableDiagnostics.value.authenticated },
+        isAuthenticated = { diagnosticsRecorder.value.authenticated },
         markAccepted = { connectionTarget?.address?.let(protectionAcceptanceStore::markAccepted) },
         clearAcceptance = { connectionTarget?.address?.let(protectionAcceptanceStore::clear) },
         onAuthenticated = ::completeAuthentication,
-        onFailure = ::fail,
+        onFailure = ::failWithCategory,
         onReconnectRequired = ::reconnectAfterProtectionFailure,
-        updateDiagnostics = { phase, path ->
-            mutableDiagnostics.update { diagnostics ->
-                diagnostics.copy(protectionPhase = phase, protectionPath = path)
-            }
-        },
+        updateDiagnostics = diagnosticsRecorder::setProtection,
         log = ::log,
     )
 
     init {
         telemetryScope.launch {
             connectionEventJournal.events.collect { events ->
-                mainHandler.post {
-                    mutableDiagnostics.update { diagnostics ->
-                        diagnostics.copy(recentEvents = events)
-                    }
-                }
+                mainHandler.post { diagnosticsRecorder.recordEvents(events) }
             }
         }
     }
@@ -134,39 +134,43 @@ internal class AndroidBikeConnection(
     override val telemetry = telemetryStream.telemetry
     override val latestTelemetryReading = telemetryStream.latestReading
     override val identity = bikeIdentityRepository.identity
-    override val diagnostics: StateFlow<BleDiagnostics> = mutableDiagnostics.asStateFlow()
+    override val diagnostics: StateFlow<BleDiagnostics> = diagnosticsRecorder.diagnostics
     override val controls: SharedFlow<BikeControlEvent> = mutableControls
 
     override fun connect(target: BikeConnectionTarget) {
-        mainHandler.post {
+        runOnMain {
             if (!shouldStartConnection(connectionTarget, target, mutableConnectionState.value)) {
                 log("Ignored duplicate connection request for ${target.deviceName}; connection already active")
-                return@post
+                return@runOnMain
             }
+            val replacingTarget = connectionTarget?.address != target.address
             connectionGeneration++
             intentionalDisconnect = true
             disconnectInternal(closeOnly = false)
             connectionTarget = target
             deviceName = target.deviceName
             bikeIdentityRepository.select(target.address)
-            mutableDiagnostics.update { diagnostics ->
-                diagnostics.copy(
-                    lastError = null,
-                    lastErrorAtMillis = null,
-                    protectionPhase = ProtectionPhase.Idle,
-                    protectionPath = null,
-                    activeGattOperation = null,
-                )
-            }
+            // A failure recorded against a different bike says nothing about this one.
+            if (replacingTarget) diagnosticsRecorder.clearFailure()
+            diagnosticsRecorder.setProtection(ProtectionPhase.Idle, null)
+            diagnosticsRecorder.setActiveOperation(null)
             reconnectAttempt = 0
+            attemptTrigger = target.trigger
             mainHandler.removeCallbacksAndMessages(ReconnectToken)
-            connectGatt()
+            // Cleared before connectGatt(), not after: on an already-bonded device the whole
+            // chain below is synchronous, so a failure inside it reaches scheduleReconnect()
+            // during this call. Leaving the flag set there suppressed the backoff and stranded
+            // the state machine in Connecting with no retry and no timeout armed. Late callbacks
+            // from the session just torn down are recognised by the session registry, not by
+            // this flag, so clearing it early loses nothing.
             intentionalDisconnect = false
+            connectGatt()
         }
     }
 
     override fun disconnect() {
-        mainHandler.post {
+        runOnMain {
+            connectionGeneration++
             intentionalDisconnect = true
             connectionMonitoringActive = false
             mainHandler.removeCallbacksAndMessages(ReconnectToken)
@@ -177,18 +181,18 @@ internal class AndroidBikeConnection(
     }
 
     override fun notifyStartFailed(message: String) {
-        mainHandler.post { fail(message) }
+        runOnMain { failLocally(message) }
     }
 
     override fun enqueueWrite(characteristic: UUID, payload: ByteArray) {
-        mainHandler.post { writeInternal(characteristic, payload) }
+        runOnMain { writeInternal(characteristic, payload) }
     }
 
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
         val completion = CompletableDeferred<Boolean>()
         val requestId = nextWriteRequestId.incrementAndGet()
         mainHandler.post {
-            if (!mutableDiagnostics.value.authenticated) {
+            if (!diagnosticsRecorder.value.authenticated) {
                 completion.complete(false)
                 return@post
             }
@@ -228,11 +232,14 @@ internal class AndroidBikeConnection(
                 val activeWrite = operationCoordinator.activeWrite()
                 when {
                     activeWrite?.requestId == requestId -> {
-                        log("Aborting timed-out write")
-                        disconnectInternal(closeOnly = true)
                         completion.complete(false)
-                        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-                        scheduleReconnect()
+                        retireLinkAndReconnect(
+                            connectionFailure(
+                                message = "Link lost while writing: awaited write was abandoned after " +
+                                    "${AwaitedWriteTimeoutMillis}ms",
+                                category = ConnectionFailureCategory.LinkLost,
+                            ),
+                        )
                     }
 
                     operationCoordinator.removeQueuedWrite(requestId) -> completion.complete(false)
@@ -250,7 +257,7 @@ internal class AndroidBikeConnection(
     }
 
     private fun writeInternal(characteristic: UUID, payload: ByteArray) {
-        if (mutableDiagnostics.value.authenticated.not()) return
+        if (!diagnosticsRecorder.value.authenticated) return
         val target = profile[characteristic] ?: return
         operationCoordinator.enqueue(GattOperation.Write(target, payload.copyOf()))
     }
@@ -260,57 +267,38 @@ internal class AndroidBikeConnection(
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            fail("Allow Nearby devices to connect to the motorcycle")
+            failLocally("Allow Nearby devices to connect to the motorcycle")
             return
         }
 
         val adapter = bluetoothManager.adapter ?: run {
-            fail("Bluetooth is unavailable on this phone")
+            failLocally("Bluetooth is unavailable on this phone")
             return
         }
-        val bluetoothEnabled = try {
-            adapter.isEnabled
-        } catch (error: SecurityException) {
-            log("Bluetooth state check failed: ${error.javaClass.simpleName}")
-            fail("Allow Nearby devices to connect to the motorcycle")
-            return
-        }
-        if (!bluetoothEnabled) {
-            fail("Turn on Bluetooth to connect to the motorcycle")
+        if (!adapter.isEnabled) {
+            failLocally("Turn on Bluetooth to connect to the motorcycle")
             return
         }
 
-        val device = try {
-            adapter.getRemoteDevice(target.address.toByteArray())
-        } catch (error: SecurityException) {
-            log("Bluetooth device access failed: ${error.javaClass.simpleName}")
-            fail("Allow Nearby devices to connect to the motorcycle")
-            return
-        } catch (error: IllegalArgumentException) {
-            log("Bluetooth address rejected: ${error.message.orEmpty()}")
-            fail("The saved motorcycle address is invalid")
-            return
-        } catch (error: RuntimeException) {
-            log("Bluetooth device resolution failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
-            fail("Android could not resolve the paired motorcycle")
-            return
-        }
-
-        val bondState = runCatching { device.bondState }.getOrNull()
+        // BLUETOOTH_CONNECT is granted above and BluetoothAddress always yields six bytes, so
+        // neither the permission nor the malformed-address rejection is reachable here.
+        val device = adapter.getRemoteDevice(target.address.toByteArray())
+        val bondState = device.bondState
         connectedDeviceBonded = bondState == BluetoothDevice.BOND_BONDED
         connectedDevice = device
-        if (bondState == BluetoothDevice.BOND_NONE) protectionAcceptanceStore.clear(target.address)
+        // A bond that is absent or still forming means the pairing epoch this acceptance was
+        // recorded against is gone, so the stored shortcut must not survive into the new one.
+        if (bondState == BluetoothDevice.BOND_NONE || bondState == BluetoothDevice.BOND_BONDING) {
+            if (protectionAcceptanceStore.isAccepted(target.address)) {
+                log("New pairing epoch (bond ${bondStateSnapshot(bondState)}); stored acceptance cleared")
+            }
+            protectionAcceptanceStore.clear(target.address)
+        }
         mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
         telemetryStream.clearUiTelemetry()
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-            authenticated = false,
-            protectionPhase = ProtectionPhase.Idle,
-            protectionPath = null,
-            bonded = bondState?.let { it == BluetoothDevice.BOND_BONDED },
-            attMtu = null,
-            servicesDiscovered = 0,
-            rssi = null,
-            activeGattOperation = null,
+        diagnosticsRecorder.beginConnectionAttempt(
+            bonded = connectedDeviceBonded,
+            context = attemptContext(),
         )
 
         bondCoordinator.prepare(
@@ -323,7 +311,8 @@ internal class AndroidBikeConnection(
 
     private fun onBondReady(device: BluetoothDevice) {
         connectedDeviceBonded = true
-        mutableDiagnostics.update { it.copy(bonded = true) }
+        diagnosticsRecorder.markBonded()
+        if (attemptTrigger == null) attemptTrigger = ConnectionAttemptTrigger.BondCompleted
         startGattConnection(device)
     }
 
@@ -341,33 +330,38 @@ internal class AndroidBikeConnection(
                 BluetoothDevice.PHY_LE_1M_MASK,
                 mainHandler,
             )
-        } catch (error: SecurityException) {
-            log("GATT permission failure: ${error.javaClass.simpleName}")
-            fail("Allow Nearby devices to connect to the motorcycle")
-            return
         } catch (error: RuntimeException) {
             log("GATT start failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
-            fail("Android could not start the Bluetooth connection")
+            failLocally("Android could not start the Bluetooth connection")
             return
         }
         if (newGatt == null) {
-            log("Could not create a GATT connection")
+            recordConnectionFailure(
+                connectionFailure(
+                    message = "Android could not create a GATT connection",
+                    category = ConnectionFailureCategory.LocalPrecondition,
+                ),
+            )
             scheduleReconnect()
             return
         }
         if (requestedGeneration != connectionGeneration) {
-            newGatt.close()
+            sessions.closeUnadopted(newGatt, SystemClock.elapsedRealtime())
             return
         }
-        gatt = newGatt
+        val session = sessions.open(newGatt, SystemClock.elapsedRealtime())
+        diagnosticsRecorder.updateAttempt(attemptContext())
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
         mainHandler.postAtTime({
-            if (requestedGeneration == connectionGeneration && gatt === newGatt &&
+            if (requestedGeneration == connectionGeneration && sessions.current() === session &&
                 mutableConnectionState.value !is BikeConnectionState.Connected
             ) {
-                log("Timed out connecting to the bike")
-                disconnectInternal(closeOnly = true)
-                scheduleReconnect()
+                retireLinkAndReconnect(
+                    connectionFailure(
+                        message = "Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms",
+                        category = ConnectionFailureCategory.LinkLost,
+                    ),
+                )
             }
         }, ConnectionTimeoutToken, SystemClock.uptimeMillis() + ConnectionTimeoutMillis)
     }
@@ -389,38 +383,55 @@ internal class AndroidBikeConnection(
 
     private fun onConnectionStateChanged(callbackGatt: BluetoothGatt, status: Int, newState: Int) {
         if (!isCurrent(callbackGatt)) {
-            callbackGatt.close()
+            discardStaleCallback(callbackGatt, "connection state change")
             return
         }
+        val session = sessions.current() ?: return
         when (newState) {
             BluetoothProfile.STATE_CONNECTED -> {
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    log("GATT connection failed, status $status")
-                    val wasIntentional = intentionalDisconnect
-                    disconnectInternal(closeOnly = true)
-                    if (!wasIntentional) scheduleReconnect()
+                    val failure = connectionFailure(
+                        message = "GATT connection failed: " +
+                            "${gattConnectionStatusLabel(status)} ($status)",
+                        category = ConnectionFailureCategory.LinkLost,
+                        statusCode = status,
+                        statusName = gattConnectionStatusLabel(status),
+                    )
+                    if (intentionalDisconnect) {
+                        recordConnectionFailure(failure)
+                        disconnectInternal(closeOnly = true)
+                    } else {
+                        retireLinkAndReconnect(failure, updateConnectingState = false)
+                    }
                     return
                 }
-                gatt = callbackGatt
-                gattConnectedAtElapsedRealtime = SystemClock.elapsedRealtime()
+                session.markConnected(SystemClock.elapsedRealtime())
                 // RideBuddy does not alter the OEM connection sequence with an MTU request.
                 // Until Android reports a negotiated value, the active ATT bearer uses 23 bytes.
-                mutableDiagnostics.update { diagnostics -> diagnostics.copy(attMtu = DefaultAttMtu) }
+                diagnosticsRecorder.setAttMtu(DefaultAttMtu)
                 log("GATT connected")
                 discoverServices(callbackGatt)
             }
 
             BluetoothProfile.STATE_DISCONNECTED -> {
-                val linkAgeSeconds = gattConnectedAtElapsedRealtime?.let { connectedAt ->
-                    (SystemClock.elapsedRealtime() - connectedAt).coerceAtLeast(0L) / 1_000L
+                val linkAge = session.linkAgeMillis(SystemClock.elapsedRealtime())
+                val message = "Link lost: ${gattConnectionStatusLabel(status)} ($status)" +
+                    linkAge?.let { ", link age ${it / 1_000}s" }.orEmpty()
+                if (intentionalDisconnect) {
+                    log(message)
+                    disconnectInternal(closeOnly = true)
+                } else {
+                    retireLinkAndReconnect(
+                        connectionFailure(
+                            message = message,
+                            category = ConnectionFailureCategory.LinkLost,
+                            statusCode = status,
+                            statusName = gattConnectionStatusLabel(status),
+                            linkAgeMillis = linkAge,
+                        ),
+                        updateConnectingState = false,
+                    )
                 }
-                log(
-                    "GATT disconnected, status $status (${gattConnectionStatusLabel(status)})" +
-                        linkAgeSeconds?.let { ", link age ${it}s" }.orEmpty(),
-                )
-                val wasIntentional = intentionalDisconnect
-                disconnectInternal(closeOnly = true)
-                if (!wasIntentional) scheduleReconnect()
             }
         }
     }
@@ -428,7 +439,7 @@ internal class AndroidBikeConnection(
     private fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
         if (!isCurrent(callbackGatt)) return
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            mutableDiagnostics.value = mutableDiagnostics.value.copy(attMtu = mtu)
+            diagnosticsRecorder.setAttMtu(mtu)
             log("MTU $mtu")
         }
     }
@@ -436,19 +447,25 @@ internal class AndroidBikeConnection(
     private fun onServicesDiscovered(callbackGatt: BluetoothGatt, status: Int) {
         if (!isCurrent(callbackGatt)) return
         if (status != BluetoothGatt.GATT_SUCCESS) {
-            fail("Could not discover bike services ($status)")
+            resetGattAfterOperationFailure(
+                connectionFailure(
+                    message = "Link lost while discovering services: " +
+                        "${gattStatusName(status)} ($status)",
+                    category = ConnectionFailureCategory.LinkLost,
+                    statusCode = status,
+                    statusName = gattStatusName(status),
+                ),
+            )
             return
         }
         val snapshot = profile.replace(callbackGatt.services)
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-            servicesDiscovered = snapshot.serviceCount,
-            serviceSnapshot = snapshot.characteristicLabels,
-        )
+        diagnosticsRecorder.setServices(snapshot.serviceCount, snapshot.characteristicLabels)
         if (snapshot.missingRequiredCharacteristics.isNotEmpty()) {
-            fail(
+            failWithCategory(
                 "Motorcycle companion profile is incomplete (missing ${
                     snapshot.missingRequiredCharacteristics.joinToString { it.shortName() }
                 })",
+                ConnectionFailureCategory.Deterministic,
             )
             return
         }
@@ -456,8 +473,7 @@ internal class AndroidBikeConnection(
         val address = connectionTarget?.address
         // Re-read the live bond state so a pair that completed between connectGatt() and the
         // service discovery callback is still recognised for the stored-acceptance shortcut.
-        val bondState = runCatching { connectedDevice?.bondState }.getOrNull()
-        if (bondState != null) connectedDeviceBonded = bondState == BluetoothDevice.BOND_BONDED
+        connectedDevice?.let { device -> connectedDeviceBonded = device.bondState == BluetoothDevice.BOND_BONDED }
         val previouslyAccepted =
             address != null && connectedDeviceBonded && protectionAcceptanceStore.isAccepted(address)
         protectionCoordinator.begin(previouslyAccepted)
@@ -478,9 +494,7 @@ internal class AndroidBikeConnection(
             },
         ) { completed ->
             if (completed is GattOperation.Subscribe) {
-                mutableDiagnostics.update { diagnostics ->
-                    diagnostics.copy(descriptorWritesCompleted = diagnostics.descriptorWritesCompleted + 1)
-                }
+                diagnosticsRecorder.countDescriptorWrite()
                 protectionCoordinator.onSubscriptionCompleted(completed.characteristic.uuid)
             }
         }
@@ -506,7 +520,7 @@ internal class AndroidBikeConnection(
     private fun onRssiRead(callbackGatt: BluetoothGatt, rssi: Int, status: Int) {
         if (!isCurrent(callbackGatt)) return
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            mutableDiagnostics.value = mutableDiagnostics.value.copy(rssi = rssi)
+            diagnosticsRecorder.setRssi(rssi)
             val current = mutableConnectionState.value
             if (current is BikeConnectionState.Connected) {
                 mutableConnectionState.value = current.copy(rssi = rssi)
@@ -515,11 +529,20 @@ internal class AndroidBikeConnection(
     }
 
     private fun discoverServices(gatt: BluetoothGatt) {
-        try {
-            if (!gatt.discoverServices()) fail("Could not start service discovery")
-        } catch (e: RuntimeException) {
+        val started = try {
+            gatt.discoverServices()
+        } catch (error: RuntimeException) {
             // Closed gatt can throw IllegalStateException from native on some OEM stacks.
-            fail("Service discovery threw: ${e.message}")
+            log("Service discovery threw: ${error.message}")
+            false
+        }
+        if (!started) {
+            resetGattAfterOperationFailure(
+                connectionFailure(
+                    message = "Link lost while starting service discovery: rejected by the Bluetooth stack",
+                    category = ConnectionFailureCategory.LinkLost,
+                ),
+            )
         }
     }
 
@@ -528,12 +551,8 @@ internal class AndroidBikeConnection(
         captureRecorder.record(BleCaptureDirection.Notification, uuid, value)
         val now = System.currentTimeMillis()
         val frameLine = "${uuid.shortName()} ${value.toHex(" ")}"
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(
-                notificationsReceived = diagnostics.notificationsReceived + 1,
-                lastFrameAtMillis = now,
-                recentFrames = (listOf(frameLine) + diagnostics.recentFrames).take(MaxFrameEntries),
-            )
+        if (uuid != BleCharacteristics.Telemetry) {
+            diagnosticsRecorder.recordNotification(frameLine, now)
         }
         when (uuid) {
             BleCharacteristics.ProtectionChallenge -> protectionCoordinator.onChallenge(value)
@@ -544,19 +563,14 @@ internal class AndroidBikeConnection(
                     receivedAtMillis = now,
                     elapsedRealtime = SystemClock::elapsedRealtime,
                 )
-                mutableDiagnostics.update { diagnostics ->
-                    diagnostics.copy(
-                        telemetryHz = acceptance.telemetryHz,
-                        droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
-                    )
-                }
-                if (!acceptance.valid) {
-                    mutableDiagnostics.update { diagnostics ->
-                        diagnostics.copy(malformedTelemetryFrames = diagnostics.malformedTelemetryFrames + 1)
-                    }
-                } else {
-                    protectionCoordinator.acceptEvidence("valid telemetry")
-                }
+                diagnosticsRecorder.recordTelemetryNotification(
+                    frameLine = frameLine,
+                    receivedAtMillis = now,
+                    telemetryHz = acceptance.telemetryHz,
+                    droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
+                    malformed = !acceptance.valid,
+                )
+                if (acceptance.valid) protectionCoordinator.acceptEvidence("valid telemetry")
             }
 
             BleCharacteristics.Vin -> {
@@ -574,6 +588,7 @@ internal class AndroidBikeConnection(
                 updateIdentity(version = version)
                 if (version.isNotBlank()) protectionCoordinator.acceptEvidence("cluster software version")
             }
+
             BleCharacteristics.NavigationControl -> {
                 when (value.firstOrNull()?.toInt()?.and(0xFF)) {
                     2 -> BikeControlEvent.SkipManeuver
@@ -599,9 +614,7 @@ internal class AndroidBikeConnection(
             },
         ) { completed ->
             if (completed is GattOperation.Read) {
-                mutableDiagnostics.update { diagnostics ->
-                    diagnostics.copy(readsCompleted = diagnostics.readsCompleted + 1)
-                }
+                diagnosticsRecorder.countRead()
                 log("Read ${uuid.shortName()} completed (${value.size} bytes)")
                 when (uuid) {
                     BleCharacteristics.Vin -> {
@@ -625,14 +638,12 @@ internal class AndroidBikeConnection(
     }
 
     private fun completeAuthentication(evidence: String, path: ProtectionPath?) {
-        if (mutableDiagnostics.value.authenticated) return
+        if (diagnosticsRecorder.value.authenticated) return
         reconnectAttempt = 0
+        authenticatedAtMillis = System.currentTimeMillis()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-            authenticated = true,
-            protectionPhase = ProtectionPhase.Ready,
-            protectionPath = path,
-        )
+        diagnosticsRecorder.markAuthenticated(path)
+        diagnosticsRecorder.updateAttempt(attemptContext())
         connectionTarget?.address?.let { address ->
             bikeIdentityRepository.update(address) { identity ->
                 identity.copy(lastConnectedAtMillis = System.currentTimeMillis())
@@ -645,44 +656,51 @@ internal class AndroidBikeConnection(
     }
 
     private fun reconnectAfterProtectionFailure(message: String) {
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
-        }
-        log(message)
-        disconnectInternal(closeOnly = true)
-        if (!intentionalDisconnect) {
-            mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-            scheduleReconnect()
-        }
+        retireLinkAndReconnect(
+            connectionFailure(message, ConnectionFailureCategory.LinkLost),
+        )
     }
 
     private fun onWriteCompleted(operation: GattOperation.Write) {
-        mutableDiagnostics.update { diagnostics ->
-            diagnostics.copy(writesCompleted = diagnostics.writesCompleted + 1)
-        }
+        diagnosticsRecorder.countWrite()
         if (operation.isProtectionResponseWrite()) {
             protectionCoordinator.onProtectionResponseWritten()
         }
         operation.completion?.complete(true)
     }
 
-    private fun resetGattAfterOperationTimeout() {
+    private fun resetGattAfterOperationFailure(failure: ConnectionFailure) {
+        retireLinkAndReconnect(failure)
+    }
+
+    /** The single path that retires a live GATT session and hands the link back to the backoff. */
+    private fun retireLinkAndReconnect(
+        failure: ConnectionFailure,
+        updateConnectingState: Boolean = true,
+    ) {
+        recordConnectionFailure(failure)
         disconnectInternal(closeOnly = true)
-        if (!intentionalDisconnect) {
+        if (intentionalDisconnect) return
+        if (updateConnectingState) {
             mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-            scheduleReconnect()
         }
+        scheduleReconnect()
     }
 
     private fun handleExhaustedOperation(operation: GattOperation): Boolean = when {
         operation.isChallengeSubscription() -> {
-            fail("Could not enable motorcycle authentication indications")
+            failWithCategory(
+                "Could not enable motorcycle authentication indications",
+                ConnectionFailureCategory.Deterministic,
+            )
             true
         }
 
         operation.isProtectionResponseWrite() -> {
-            connectionTarget?.address?.let(protectionAcceptanceStore::clear)
-            fail("Motorcycle authentication response was rejected")
+            failWithCategory(
+                "Motorcycle authentication response could not be delivered",
+                ConnectionFailureCategory.Deterministic,
+            )
             true
         }
 
@@ -702,12 +720,12 @@ internal class AndroidBikeConnection(
         override fun run() {
             if (!connectionMonitoringActive) return
             try {
-                gatt?.readRemoteRssi()
-            } catch (e: RuntimeException) {
+                sessions.current()?.openTransport()?.readRemoteRssi()
+            } catch (error: RuntimeException) {
                 // Closed gatt can throw IllegalStateException from native on some OEM stacks.
                 // Stop polling rather than crashing the main handler.
                 connectionMonitoringActive = false
-                log("RSSI read threw, monitoring disabled: ${e.message}")
+                log("RSSI read threw, monitoring disabled: ${error.message}")
                 return
             }
             mainHandler.postDelayed(this, RssiIntervalMillis)
@@ -721,50 +739,71 @@ internal class AndroidBikeConnection(
     }
 
     private fun scheduleReconnect() {
-        if (intentionalDisconnect) return
+        if (intentionalDisconnect || reconnectScheduled) return
         val delay = reconnectDelayMillis(reconnectAttempt)
         if (delay == null) {
-            fail("Bike is out of range; automatic retries paused")
+            val reason = "Bike is out of range; automatic retries paused after " +
+                "$MaxReconnectAttempts attempts"
+            mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
+            // The real failure stays on record; this only explains why nothing is retrying.
+            diagnosticsRecorder.recordSuppression(
+                reason = reason,
+                category = ConnectionFailureCategory.LinkLost,
+                context = attemptContext(),
+            )
+            log(reason)
             return
         }
         reconnectAttempt++
-        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName, reconnectAttempt, MaxReconnectAttempts)
-        log("Reconnecting in ${delay / 1_000}s")
+        reconnectScheduled = true
+        attemptTrigger = ConnectionAttemptTrigger.AutomaticReconnect
+        diagnosticsRecorder.updateAttempt(attemptContext())
+        mutableConnectionState.value =
+            BikeConnectionState.Connecting(deviceName, reconnectAttempt, MaxReconnectAttempts)
+        log("Reconnecting in ${delay / 1_000}s (attempt $reconnectAttempt/$MaxReconnectAttempts)")
         mainHandler.postAtTime(
-            { if (!intentionalDisconnect) connectGatt() },
+            {
+                reconnectScheduled = false
+                if (!intentionalDisconnect) connectGatt()
+            },
             ReconnectToken,
-            SystemClock.uptimeMillis() + delay
+            SystemClock.uptimeMillis() + delay,
         )
     }
 
     private fun disconnectInternal(closeOnly: Boolean) {
         connectionMonitoringActive = false
-        gattConnectedAtElapsedRealtime = null
+        reconnectScheduled = false
         mainHandler.removeCallbacks(rssiRunnable)
+        mainHandler.removeCallbacksAndMessages(ReconnectToken)
         bondCoordinator.cancel()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
         protectionCoordinator.reset()
         operationCoordinator.clear()
         profile.clear()
         telemetryStream.reset()
-        mutableDiagnostics.value = mutableDiagnostics.value.copy(
-            authenticated = false,
-            protectionPhase = ProtectionPhase.Idle,
-            attMtu = null,
-            servicesDiscovered = 0,
-            serviceSnapshot = emptyList(),
-            lastFrameAtMillis = null,
-            rssi = null,
-            telemetryHz = 0.0,
-            droppedRawTelemetryFrames = 0,
-            activeGattOperation = null,
+        val session = sessions.current()
+        diagnosticsRecorder.resetForTeardown(
+            sessionId = session?.id,
+            establishedAtMillis = authenticatedAtMillis,
+            durationMillis = authenticatedAtMillis?.let { (System.currentTimeMillis() - it).coerceAtLeast(0L) },
         )
-        gatt?.let { current ->
-            connectedDevice = null
-            gatt = null
-            if (!closeOnly) runCatching { current.disconnect() }
-            runCatching { current.close() }
+        authenticatedAtMillis = null
+        connectedDevice = null
+        sessions.retireCurrent(disconnectFirst = !closeOnly)
+    }
+
+    /**
+     * A callback from a GATT instance the app has already retired. The registry closed it exactly
+     * once when it was retired, so closing again here would be the second close of the same handle.
+     */
+    private fun discardStaleCallback(callbackGatt: BluetoothGatt, description: String) {
+        if (sessions.isRetired(callbackGatt)) {
+            log("Ignoring $description from a retired GATT session")
+            return
         }
+        log("Closing an unrecognised GATT instance after a $description")
+        sessions.closeUnadopted(callbackGatt, SystemClock.elapsedRealtime())
     }
 
     private fun updateIdentity(vin: String? = null, version: String? = null) {
@@ -778,15 +817,62 @@ internal class AndroidBikeConnection(
         }
     }
 
-    private fun fail(message: String) {
-        disconnectInternal(closeOnly = true)
-        mutableConnectionState.value = BikeConnectionState.Failed(message)
-        mutableDiagnostics.value =
-            mutableDiagnostics.value.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis())
-        log(message)
+    /** A failure the phone caused: permissions, adapter state, or a service that would not start. */
+    private fun failLocally(message: String) {
+        failWithCategory(message, ConnectionFailureCategory.LocalPrecondition)
     }
 
-    private fun isCurrent(callbackGatt: BluetoothGatt): Boolean = callbackGatt === gatt
+    private fun failWithCategory(message: String, category: ConnectionFailureCategory) {
+        // Built before teardown so the failure still carries the session it happened in.
+        val failure = connectionFailure(message, category)
+        disconnectInternal(closeOnly = true)
+        mutableConnectionState.value = BikeConnectionState.Failed(message)
+        recordConnectionFailure(failure)
+    }
+
+    private fun recordConnectionFailure(failure: ConnectionFailure) {
+        diagnosticsRecorder.recordFailure(failure)
+        log(failure.message)
+    }
+
+    private fun connectionFailure(
+        message: String,
+        category: ConnectionFailureCategory,
+        statusCode: Int? = null,
+        statusName: String? = null,
+        linkAgeMillis: Long? = null,
+    ): ConnectionFailure = ConnectionFailure(
+        message = message,
+        category = category,
+        atMillis = System.currentTimeMillis(),
+        statusCode = statusCode,
+        statusName = statusName,
+        context = attemptContext(linkAgeMillis),
+    )
+
+    private fun attemptContext(linkAgeMillis: Long? = null): ConnectionAttemptContext {
+        val session = sessions.current()
+        return ConnectionAttemptContext(
+            sessionId = session?.id,
+            trigger = attemptTrigger,
+            reconnectAttempt = reconnectAttempt,
+            linkAgeMillis = linkAgeMillis ?: session?.linkAgeMillis(SystemClock.elapsedRealtime()),
+            bondState = bondStateSnapshot(connectedDevice?.bondState),
+        )
+    }
+
+    private fun bondStateSnapshot(bondState: Int?): BondStateSnapshot = when (bondState) {
+        BluetoothDevice.BOND_NONE -> BondStateSnapshot.None
+        BluetoothDevice.BOND_BONDING -> BondStateSnapshot.Bonding
+        BluetoothDevice.BOND_BONDED -> BondStateSnapshot.Bonded
+        else -> BondStateSnapshot.Unknown
+    }
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == mainHandler.looper) block() else mainHandler.post(block)
+    }
+
+    private fun isCurrent(callbackGatt: BluetoothGatt): Boolean = sessions.isCurrent(callbackGatt)
 
     private fun log(message: String) {
         connectionEventJournal.record(message)
@@ -799,6 +885,5 @@ internal class AndroidBikeConnection(
         const val AwaitedWriteTimeoutMillis = 30_000L
         const val ConnectionTimeoutMillis = 20_000L
         const val DefaultAttMtu = 23
-        const val MaxFrameEntries = 30
     }
 }

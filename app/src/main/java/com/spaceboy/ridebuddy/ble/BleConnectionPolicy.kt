@@ -12,6 +12,23 @@ internal fun reconnectDelayMillis(attempt: Int): Long? {
     return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(attempt, 5))
 }
 
+/**
+ * Whether a launch-time automatic connection may start.
+ *
+ * [AndroidBikeConnection] owns automatic retries. Once its bounded schedule has been exhausted,
+ * only a fresh BLE appearance or an explicit user action may resume; recreating the UI must not
+ * quietly hand the stack a new retry budget.
+ */
+internal fun shouldAutoConnectOnLaunch(state: BikeConnectionState): Boolean = when (state) {
+    BikeConnectionState.Disconnected -> true
+    is BikeConnectionState.Failed -> !state.retriesExhausted
+    BikeConnectionState.Scanning,
+    is BikeConnectionState.Connecting,
+    is BikeConnectionState.Authenticating,
+    is BikeConnectionState.Connected,
+    -> false
+}
+
 internal fun shouldStartConnection(
     currentTarget: BikeConnectionTarget?,
     requestedTarget: BikeConnectionTarget,

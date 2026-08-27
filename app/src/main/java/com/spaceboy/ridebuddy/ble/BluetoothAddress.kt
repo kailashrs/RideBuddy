@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.ble
 
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
+
 /** Immutable 48-bit Bluetooth address used internally without string round-trips. */
 class BluetoothAddress private constructor(private val packed: Long) {
     fun toLong(): Long = packed
@@ -66,8 +68,13 @@ class BluetoothAddress private constructor(private val packed: Long) {
  * target carries the packed [address] and the user-visible [deviceName]; the platform
  * [android.bluetooth.BluetoothDevice] is looked up on demand from the adapter when a
  * connection is established.
+ *
+ * [trigger] travels with the request so diagnostics can distinguish a user-initiated connect from
+ * one a companion presence callback asked for. Automatic retries are owned by the connection
+ * itself and are never expressed as a new target.
  */
 data class BikeConnectionTarget(
     val address: BluetoothAddress,
     val deviceName: String,
+    val trigger: ConnectionAttemptTrigger = ConnectionAttemptTrigger.UserRequest,
 )

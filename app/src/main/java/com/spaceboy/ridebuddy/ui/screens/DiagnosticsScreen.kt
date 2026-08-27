@@ -118,8 +118,24 @@ fun DiagnosticsScreen(
             rows = listOf(
                 "Last error" to (diagnostics.lastError ?: "None"),
                 "Error time" to (diagnostics.lastErrorAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
+                "Error category" to (diagnostics.lastFailure?.category?.name ?: "—"),
+                "Error context" to (diagnostics.lastFailure?.contextLine() ?: "—"),
+                "Automatic retries" to (diagnostics.suppressionReason ?: "Active"),
             ),
         )
+
+        diagnostics.lastSuccessfulLink?.let { link ->
+            DiagnosticSection(
+                title = "Last successful link",
+                rows = listOf(
+                    "Session" to link.sessionId.toString(),
+                    "ATT MTU" to (link.attMtu?.let { "$it bytes" } ?: "—"),
+                    "GATT services" to link.servicesDiscovered.toString(),
+                    "Established" to (link.establishedAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
+                    "Held for" to (link.durationMillis?.let { "${it / 1_000}s" } ?: "—"),
+                ),
+            )
+        }
 
         if (diagnostics.serviceSnapshot.isNotEmpty()) {
             DiagnosticSection(

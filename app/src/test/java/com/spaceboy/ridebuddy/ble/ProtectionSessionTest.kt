@@ -93,7 +93,7 @@ class ProtectionSessionTest {
     }
 
     @Test
-    fun `verification timeout clears acceptance and requests reconnect`() {
+    fun `verification timeout preserves acceptance and requests reconnect`() {
         val session = session(accepted = true)
         session.begin()
 
@@ -101,11 +101,11 @@ class ProtectionSessionTest {
 
         assertTrue(action is ProtectionAction.Fail)
         action as ProtectionAction.Fail
-        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
     }
 
     @Test
-    fun `challenge timeout clears acceptance and requests reconnect`() {
+    fun `challenge timeout requests reconnect without treating transport loss as rejection`() {
         val session = session(accepted = false)
         session.begin()
         session.onChallengeSubscriptionReady()
@@ -114,7 +114,7 @@ class ProtectionSessionTest {
 
         assertTrue(action is ProtectionAction.Fail)
         action as ProtectionAction.Fail
-        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
     }
 
     @Test
@@ -128,15 +128,26 @@ class ProtectionSessionTest {
     }
 
     @Test
-    fun `response completion without a challenge path fails explicitly`() {
+    fun `response completion without a challenge path restarts the link without discarding acceptance`() {
         val session = session(accepted = false)
 
         val action = session.onProtectionResponseWritten()
 
         assertTrue(action is ProtectionAction.Fail)
         action as ProtectionAction.Fail
-        assertEquals(ProtectionFailurePolicy.ClearAcceptance, action.policy)
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
         assertTrue(action.message.contains("without a pending challenge"))
+    }
+
+    @Test
+    fun `challenge before the session began restarts the link without discarding acceptance`() {
+        val session = session(accepted = false)
+
+        val action = session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
     }
 
     @Test
@@ -194,7 +205,7 @@ class ProtectionSessionTest {
     }
 
     @Test
-    fun `required profile failure always clears acceptance and reconnects`() {
+    fun `required profile failure is terminal without clearing protection acceptance`() {
         val session = session(accepted = true)
         session.begin()
 
@@ -202,7 +213,7 @@ class ProtectionSessionTest {
 
         assertTrue(action is ProtectionAction.Fail)
         action as ProtectionAction.Fail
-        assertEquals(ProtectionFailurePolicy.ClearAcceptanceAndReconnect, action.policy)
+        assertEquals(ProtectionFailurePolicy.Stop, action.policy)
     }
 
     @Test

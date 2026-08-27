@@ -4,9 +4,17 @@ import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
 
 internal enum class ProtectionFailurePolicy {
+    /** Terminal for this attempt: the profile or endpoint cannot support the handshake. */
     Stop,
+
+    /**
+     * The bike rejected the credential itself. This is the only policy allowed to discard stored
+     * protection acceptance; stale local state and dropped links must never reach it.
+     */
     ClearAcceptance,
-    ClearAcceptanceAndReconnect,
+
+    /** Retire the link and try again with a clean session, keeping stored acceptance. */
+    Reconnect,
 }
 
 internal sealed interface ProtectionAction {
@@ -130,17 +138,21 @@ internal class ProtectionSession(
                 Resume.ContinueReady(current.path),
             )
 
+            // Our own session bookkeeping is stale, not the bike rejecting us. Retire the link
+            // and start a clean handshake; the stored acceptance is still valid.
             State.Idle -> ProtectionAction.Fail(
-                "Bike sent an authentication challenge before the session began",
-                ProtectionFailurePolicy.ClearAcceptance,
+                "Authentication challenge arrived before the session began; restarting the link",
+                ProtectionFailurePolicy.Reconnect,
             )
         }
     }
 
     fun onProtectionResponseWritten(): ProtectionAction {
+        // A response callback with nothing pending is a stale or duplicated callback, not a
+        // rejection: the bike never told us the credential was wrong.
         val responding = state as? State.Responding ?: return ProtectionAction.Fail(
-            "Authentication response completed without a pending challenge",
-            ProtectionFailurePolicy.ClearAcceptance,
+            "Authentication response completed without a pending challenge; restarting the link",
+            ProtectionFailurePolicy.Reconnect,
         )
         if (responding.pendingChallenges.size > 1) {
             state = responding.copy(pendingChallenges = responding.pendingChallenges.drop(1))
@@ -190,7 +202,7 @@ internal class ProtectionSession(
 
     fun onRequiredProfileFailure(message: String): ProtectionAction = ProtectionAction.Fail(
         message,
-        ProtectionFailurePolicy.ClearAcceptanceAndReconnect,
+        ProtectionFailurePolicy.Stop,
     )
 
     fun onVerificationTimeout(): ProtectionAction = when (val current = state) {
@@ -209,7 +221,7 @@ internal class ProtectionSession(
     fun onChallengeTimeout(): ProtectionAction = if (state == State.AwaitingChallenge) {
         ProtectionAction.Fail(
             "Motorcycle authentication challenge timed out",
-            ProtectionFailurePolicy.ClearAcceptanceAndReconnect,
+            ProtectionFailurePolicy.Reconnect,
         )
     } else {
         ProtectionAction.None
@@ -224,20 +236,15 @@ internal class ProtectionSession(
         return ProtectionAction.WriteResponse(response)
     }
 
+    // The bike itself refused our protocol: it offered a challenge this build cannot answer.
+    // That is a peer-side rejection, so the stored shortcut is genuinely no longer valid.
     private fun unsupportedChallengeFailure(): ProtectionAction = ProtectionAction.Fail(
         "Bike sent an unsupported authentication challenge",
-        when (state) {
-            is State.Verifying,
-            is State.Ready,
-            is State.Responding,
-            -> ProtectionFailurePolicy.ClearAcceptanceAndReconnect
-
-            else -> ProtectionFailurePolicy.ClearAcceptance
-        },
+        ProtectionFailurePolicy.ClearAcceptance,
     )
 
     private fun verificationTimeoutFailure(): ProtectionAction = ProtectionAction.Fail(
         "Protected session verification timed out",
-        ProtectionFailurePolicy.ClearAcceptanceAndReconnect,
+        ProtectionFailurePolicy.Reconnect,
     )
 }

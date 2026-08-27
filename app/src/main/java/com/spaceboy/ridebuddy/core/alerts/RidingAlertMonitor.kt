@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.data.RideRecorder
@@ -65,6 +66,11 @@ class RidingAlertMonitor(
     fun weatherAlert(message: String): Boolean = settings.settings.value.weatherAlerts &&
         alert("weather", "Riding weather", "$message Weather data by Open-Meteo.com.")
 
+    /**
+     * Returns whether this alert cleared its cooldown, which is what decides whether the caller
+     * also routes it to the TFT. Posting the phone notification is a separate concern: with
+     * notification access denied it is skipped, but the alert itself still counts as raised.
+     */
     private fun alert(key: String, title: String, message: String): Boolean {
         val now = System.currentTimeMillis()
         val canAlert = synchronized(lastAlertAt) {
@@ -75,6 +81,7 @@ class RidingAlertMonitor(
             }
         }
         if (!canAlert) return false
+        if (!NotificationManagerCompat.from(appContext).areNotificationsEnabled()) return true
         notifications.notify(
             key.hashCode(),
             NotificationCompat.Builder(appContext, ChannelId)

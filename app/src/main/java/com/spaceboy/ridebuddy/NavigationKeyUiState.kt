@@ -4,23 +4,6 @@ import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKeyPolicy
 import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrapResult
 
-internal class NavigationKeyOperationGuard {
-    private var active = false
-
-    @Synchronized
-    fun tryAcquire(): Boolean {
-        if (active) return false
-        active = true
-        return true
-    }
-
-    @Synchronized
-    fun release() {
-        check(active) { "Navigation key operation was not active" }
-        active = false
-    }
-}
-
 internal fun navigationKeyStateFor(
     result: ConfigureResult,
     apiKey: String,

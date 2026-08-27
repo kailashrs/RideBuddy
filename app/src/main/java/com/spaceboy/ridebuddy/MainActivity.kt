@@ -2,7 +2,6 @@ package com.spaceboy.ridebuddy
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -13,6 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.viewModels
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
@@ -30,19 +33,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
-import com.spaceboy.ridebuddy.ble.BleCaptureState
+import com.spaceboy.ridebuddy.ble.shouldAutoConnectOnLaunch
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
-import com.spaceboy.ridebuddy.core.navigation.GuidanceState
+import com.spaceboy.ridebuddy.core.diagnostics.diagnosticsReport
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.data.AppSettings
-import com.spaceboy.ridebuddy.data.InsightPeriod
-import com.spaceboy.ridebuddy.data.LiveRideMetrics
-import com.spaceboy.ridebuddy.data.RideInsights
-import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.domain.BikeIdentity
-import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.data.toCsv
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.service.BikeConnectionService
 import com.spaceboy.ridebuddy.ui.MainScreen
@@ -197,6 +195,12 @@ class MainActivity : ComponentActivity() {
                 } else {
                     MainScreenRoute(uiState, settings, bikeAssociation, mainScreenActions)
                 }
+                uiState.tftTestConfirmation?.let { message ->
+                    TftTestConfirmationDialog(
+                        message = message,
+                        onResolved = viewModel::resolveTftTestConfirmation,
+                    )
+                }
             }
         }
     }
@@ -252,55 +256,22 @@ class MainActivity : ComponentActivity() {
         bikeAssociation: BikeAssociationState,
         actions: MainScreenActions,
     ) {
-        val showingNavigationSettings = uiState.isNavigationSettingsOpen
-        val showingDiagnostics = uiState.isDiagnosticsOpen
-        val liveVisible = !showingNavigationSettings && !showingDiagnostics &&
-            uiState.selectedDestination == TopLevelDestination.Live
-        val historyVisible = !showingNavigationSettings && !showingDiagnostics &&
-            uiState.selectedDestination == TopLevelDestination.History
-        val insightsVisible = !showingNavigationSettings && !showingDiagnostics &&
-            uiState.selectedDestination == TopLevelDestination.Insights
-        val infoVisible = !showingNavigationSettings && !showingDiagnostics &&
-            uiState.selectedDestination == TopLevelDestination.Info
-        val moreVisible = !showingNavigationSettings && !showingDiagnostics &&
-            uiState.selectedDestination == TopLevelDestination.More
-
         MainScreenContent(
             modifier = modifier,
             state = MainScreenState(
                 uiState = uiState,
-                connectionState = if (liveVisible || infoVisible || showingDiagnostics) {
-                    viewModel.connectionState.collectAsStateWithLifecycle().value
-                } else BikeConnectionState.Disconnected,
-                telemetry = if (liveVisible) viewModel.telemetry.collectAsStateWithLifecycle().value else null,
-                identity = if (infoVisible || showingDiagnostics) {
-                    viewModel.identity.collectAsStateWithLifecycle().value
-                } else BikeIdentity(),
-                diagnostics = if (liveVisible || showingDiagnostics) {
-                    viewModel.diagnostics.collectAsStateWithLifecycle().value
-                } else BleDiagnostics(),
-                bleCapture = if (moreVisible || showingDiagnostics) {
-                    viewModel.bleCapture.collectAsStateWithLifecycle().value
-                } else BleCaptureState(),
-                activeRide = if (liveVisible) viewModel.activeRide.collectAsStateWithLifecycle().value else null,
-                liveRideSamples = if (liveVisible) {
-                    viewModel.liveRideSamples.collectAsStateWithLifecycle().value
-                } else emptyList(),
-                liveRideMetrics = if (liveVisible) {
-                    viewModel.liveRideMetrics.collectAsStateWithLifecycle().value
-                } else LiveRideMetrics(),
-                rides = if (liveVisible || historyVisible || insightsVisible || moreVisible) {
-                    viewModel.rides.collectAsStateWithLifecycle().value
-                } else emptyList(),
-                insights = if (insightsVisible) {
-                    viewModel.insights.collectAsStateWithLifecycle().value
-                } else RideInsights(),
-                insightPeriod = if (insightsVisible) {
-                    viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value
-                } else InsightPeriod.ThirtyDays,
-                guidance = if (liveVisible) {
-                    viewModel.guidance.collectAsStateWithLifecycle().value
-                } else GuidanceState(),
+                connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value,
+                telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value,
+                identity = viewModel.identity.collectAsStateWithLifecycle().value,
+                diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value,
+                bleCapture = viewModel.bleCapture.collectAsStateWithLifecycle().value,
+                activeRide = viewModel.activeRide.collectAsStateWithLifecycle().value,
+                liveRideSamples = viewModel.liveRideSamples.collectAsStateWithLifecycle().value,
+                liveRideMetrics = viewModel.liveRideMetrics.collectAsStateWithLifecycle().value,
+                rides = viewModel.rides.collectAsStateWithLifecycle().value,
+                insights = viewModel.insights.collectAsStateWithLifecycle().value,
+                insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value,
+                guidance = viewModel.guidance.collectAsStateWithLifecycle().value,
                 settings = settings,
                 bikeAssociation = bikeAssociation,
                 notificationAccessEnabled = notificationAccessEnabled,
@@ -535,93 +506,71 @@ class MainActivity : ComponentActivity() {
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
     private fun startNavigation(rawDestination: String) {
-        val destination = rawDestination.trim()
-        if (destination.isEmpty() || destination.length > MaxDestinationInputLength) {
-            viewModel.showMessage(getString(R.string.destination_too_long))
-            return
-        }
-        navigationStartJob?.cancel()
         viewModel.uiState.value.autoStartSharedDestination
             ?.requestId
             ?.let(viewModel::completeAutoStartSharedDestination)
-        lifecycleScope.launch { startNavigation(destination, autoStartRequestId = null) }
+        lifecycleScope.launch { startNavigation(rawDestination, autoStartRequestId = null) }
     }
 
+    /**
+     * The single navigation-start path. A newer request always cancels the one in flight, and an
+     * auto-start request that has been superseded or consumed elsewhere is abandoned silently.
+     */
     private suspend fun startNavigation(rawDestination: String, autoStartRequestId: Long?) {
         val currentJob = currentCoroutineContext().job
         navigationStartJob?.takeIf { it !== currentJob }?.cancel()
         navigationStartJob = currentJob
-        val container = appContainer
+
+        fun autoStartSuperseded(): Boolean = autoStartRequestId != null &&
+            viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
+
+        fun abandon(errorMessage: String? = null) {
+            autoStartRequestId?.let { viewModel.restoreAutoStartSharedDestination(it, errorMessage) }
+        }
+
         var navigationStartAttemptId: Long? = null
         try {
-            val destinationInput = rawDestination.trim()
-            if (destinationInput.isEmpty() || destinationInput.length > MaxDestinationInputLength) {
+            val destination = rawDestination.trim()
+            if (destination.isEmpty() || destination.length > MaxDestinationInputLength) {
                 autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
                 viewModel.showMessage(getString(R.string.destination_too_long))
                 return
             }
-            if (autoStartRequestId != null &&
-                viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
-            ) {
-                return
-            }
+            if (autoStartSuperseded()) return
             navigationStartAttemptId = viewModel.beginNavigationStart()
+
             if (viewModel.uiState.value.navigationKey.isLoading) {
-                autoStartRequestId?.let { requestId ->
-                    viewModel.restoreAutoStartSharedDestination(requestId)
-                }
+                abandon()
                 viewModel.showMessage("Navigation setup is still loading")
                 return
             }
             if (!viewModel.uiState.value.navigationKey.isConfigured) {
-                autoStartRequestId?.let { requestId ->
-                    viewModel.restoreAutoStartSharedDestination(requestId)
-                }
+                abandon()
                 viewModel.openNavigationSettings()
                 viewModel.showMessage("Add a Google Navigation API key first")
                 return
             }
-            val result = container.destinationParser.parse(destinationInput)
-            if (autoStartRequestId != null &&
-                viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
-            ) {
-                return
-            }
-            result.fold(
-                onSuccess = { destination ->
-                    try {
-                        startActivity(
-                            NavigationActivity.intent(
-                                this@MainActivity,
-                                destination.latitude,
-                                destination.longitude,
-                                destination.title,
-                            ),
-                        )
-                        navigationStartStopGuard.beginStart()
-                        autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
-                        viewModel.clearSharedDestination()
-                    } catch (error: Exception) {
-                        val message = error.message ?: "Could not start navigation"
-                        autoStartRequestId?.let { requestId ->
-                            viewModel.restoreAutoStartSharedDestination(requestId, message)
-                        }
-                        viewModel.showMessage(message)
-                    }
+
+            val parsed = appContainer.destinationParser.parse(destination)
+            if (autoStartSuperseded()) return
+            parsed.fold(
+                onSuccess = { place ->
+                    startActivity(
+                        NavigationActivity.intent(this, place.latitude, place.longitude, place.title),
+                    )
+                    navigationStartStopGuard.beginStart()
+                    autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
+                    viewModel.clearSharedDestination()
                 },
                 onFailure = { error ->
                     val message = error.message ?: "Could not read that destination"
-                    autoStartRequestId?.let { requestId ->
-                        viewModel.restoreAutoStartSharedDestination(requestId, message)
-                    }
+                    abandon(message)
                     viewModel.showMessage(message)
                 },
             )
         } finally {
             navigationStartAttemptId?.let(viewModel::finishNavigationStart)
-            if (navigationStartJob === currentJob) {
-                navigationStartJob = null
-            }
+            if (navigationStartJob === currentJob) navigationStartJob = null
         }
     }
 
@@ -683,41 +632,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exportDiagnostics() {
-        val value = viewModel.diagnostics.value
-        val identity = viewModel.identity.value
-        val report = buildString {
-            appendLine("RideBuddy diagnostics")
-            appendLine("Connection: ${viewModel.connectionState.value}")
-            appendLine("Companion link ready: ${value.authenticated}")
-            appendLine("Protection phase: ${getString(value.protectionPhase.labelResource())}")
-            appendLine(
-                "Protection path: ${value.protectionPath?.let { getString(it.labelResource()) } ?: "unknown"}",
-            )
-            appendLine("Bonded: ${value.bonded ?: "unknown"}")
-            appendLine("Active GATT operation: ${value.activeGattOperation ?: "none"}")
-            appendLine("RSSI: ${value.rssi ?: "unknown"} dBm")
-            appendLine("Telemetry rate: %.2f Hz".format(value.telemetryHz))
-            appendLine("ATT MTU: ${value.attMtu ?: "unknown"}")
-            appendLine("Services: ${value.servicesDiscovered}")
-            appendLine("Notifications: ${value.notificationsReceived}")
-            appendLine("Descriptor writes: ${value.descriptorWritesCompleted}")
-            appendLine("Characteristic reads: ${value.readsCompleted}")
-            appendLine("Characteristic writes: ${value.writesCompleted}")
-            appendLine("Malformed frames: ${value.malformedTelemetryFrames}")
-            appendLine("Dropped ride frames: ${value.droppedRawTelemetryFrames}")
-            appendLine("VIN: ${identity.vin ?: "unknown"}")
-            appendLine("Cluster software: ${identity.clusterSoftwareVersion ?: "unknown"}")
-            appendLine(
-                "Last successful link: ${identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime) ?: "never"}",
-            )
-            appendLine("Last error: ${value.lastError ?: "none"}")
-            appendLine("\nGATT snapshot")
-            value.serviceSnapshot.forEach(::appendLine)
-            appendLine("\nRecent events")
-            value.recentEvents.forEach(::appendLine)
-            appendLine("\nRecent frames")
-            value.recentFrames.forEach(::appendLine)
-        }
+        val diagnostics = viewModel.diagnostics.value
+        val report = diagnosticsReport(
+            connectionState = viewModel.connectionState.value,
+            diagnostics = diagnostics,
+            identity = viewModel.identity.value,
+            protectionPhaseLabel = getString(diagnostics.protectionPhase.labelResource()),
+            protectionPathLabel = diagnostics.protectionPath?.let { getString(it.labelResource()) },
+        )
         launchExternalActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/plain")
@@ -744,58 +666,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exportRideHistory() {
-        val rides = viewModel.rides.value
+        val csv = viewModel.rides.value.toCsv()
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
+            val file = withContext(Dispatchers.IO) {
                 runCatching {
-                    val exportDir = File(cacheDir, "exports").also { directory ->
-                        check(directory.exists() || directory.mkdirs()) { "Could not create the export directory" }
-                    }
-                    File(exportDir, "ride_history.csv").also { output ->
-                        output.bufferedWriter().use { writer ->
-                            writer.appendLine("started_at,ended_at,start_area,end_area,distance_km,duration_ms,average_speed_kph,maximum_speed_kph,average_rpm,maximum_rpm,average_mileage_km_per_litre,estimated_fuel_l,zero_to_60_ms,zero_to_100_ms")
-                            rides.forEach { ride ->
-                                fun String.escapeCsv() = "\"${replace("\"", "\"\"")}\""
-                                writer.appendLine(
-                                    listOf(
-                                        ride.startedAtMillis,
-                                        ride.endedAtMillis,
-                                        (ride.startArea ?: "").escapeCsv(),
-                                        (ride.endArea ?: "").escapeCsv(),
-                                        ride.distanceKilometres,
-                                        ride.durationMillis,
-                                        ride.averageSpeedKph,
-                                        ride.maximumSpeedKph,
-                                        ride.averageRpm,
-                                        ride.maximumRpm,
-                                        ride.averageMileageKilometresPerLitre ?: "",
-                                        ride.estimatedFuelLitres ?: "",
-                                        ride.zeroToSixtyMillis ?: "",
-                                        ride.zeroToHundredMillis ?: "",
-                                    ).joinToString(","),
-                                )
-                            }
-                        }
-                    }
+                    val exportDir = File(cacheDir, "exports")
+                    exportDir.mkdirs()
+                    File(exportDir, "ride_history.csv").apply { writeText(csv) }
                 }
+            }.getOrNull()
+            if (file == null) {
+                viewModel.showMessage("Could not export ride history")
+                return@launch
             }
-            result.fold(
-                onSuccess = { file ->
-                    runCatching {
-                        val uri = FileProvider.getUriForFile(this@MainActivity, "${packageName}.fileprovider", file)
-                        startActivity(
-                            Intent.createChooser(
-                                Intent(Intent.ACTION_SEND)
-                                    .setType("text/csv")
-                                    .putExtra(Intent.EXTRA_SUBJECT, "RideBuddy ride history")
-                                    .putExtra(Intent.EXTRA_STREAM, uri)
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                "Export ride history",
-                            ),
-                        )
-                    }.onFailure { viewModel.showMessage("Could not share ride history") }
-                },
-                onFailure = { viewModel.showMessage("Could not export ride history") },
+            val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
+            launchExternalActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND)
+                        .setType("text/csv")
+                        .putExtra(Intent.EXTRA_SUBJECT, "RideBuddy ride history")
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                    "Export ride history",
+                ),
+                R.string.ride_history_share_unavailable,
             )
         }
     }
@@ -833,19 +727,11 @@ class MainActivity : ComponentActivity() {
                         viewModel.showMessage("TFT test result discarded because the bike started moving")
                         return@launch
                     }
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Confirm TFT display")
-                        .setMessage(
-                            "The Bluetooth stack accepted ${result.acceptedWrites} test writes. " +
-                                "While parked, did you see the maneuver, distance, test text, speed limit, and clear state on the TFT?",
-                        )
-                        .setPositiveButton("Looks correct") { _, _ ->
-                            viewModel.showMessage("TFT display test completed")
-                        }
-                        .setNegativeButton("Did not appear") { _, _ ->
-                            viewModel.showMessage("TFT display test needs investigation")
-                        }
-                        .show()
+                    viewModel.askTftTestConfirmation(
+                        "The Bluetooth stack accepted ${result.acceptedWrites} test writes. " +
+                            "While parked, did you see the maneuver, distance, test text, speed limit, " +
+                            "and clear state on the TFT?",
+                    )
                 }
             }
         }
@@ -856,14 +742,38 @@ class MainActivity : ComponentActivity() {
         if (!settings.onboardingComplete) return
         if (!nearbyDeviceAccessGranted) return
         val bike = appContainer.bikeCompanionManager.state.value.bike ?: return
-        val state = viewModel.connectionState.value
-        if (state !is BikeConnectionState.Disconnected && state !is BikeConnectionState.Failed) return
+        if (!shouldAutoConnectOnLaunch(viewModel.connectionState.value)) return
         // Only burn the one-shot gate once every precondition is satisfied; otherwise
         // a cold start with missing permissions would permanently disable auto-connect.
         if (!viewModel.consumeAutoConnectAttempt()) return
-        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
+        if (!BikeConnectionService.reconnect(
+                this,
+                bike,
+                launchedFromVisibleActivity = true,
+                automatic = true,
+            )
+        ) {
             viewModel.showMessage("Unable to start connection service")
         }
+    }
+
+    @Composable
+    private fun TftTestConfirmationDialog(message: String, onResolved: (Boolean) -> Unit) {
+        AlertDialog(
+            onDismissRequest = { onResolved(false) },
+            title = { Text(stringResource(R.string.tft_test_confirm_title)) },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { onResolved(true) }) {
+                    Text(stringResource(R.string.tft_test_confirm_yes))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { onResolved(false) }) {
+                    Text(stringResource(R.string.tft_test_confirm_no))
+                }
+            },
+        )
     }
 
     private companion object {

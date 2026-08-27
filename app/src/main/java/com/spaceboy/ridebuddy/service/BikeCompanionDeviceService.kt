@@ -4,6 +4,7 @@ import android.companion.CompanionDeviceService
 import android.companion.DevicePresenceEvent
 import com.spaceboy.ridebuddy.appContainer
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
+import com.spaceboy.ridebuddy.core.companion.BleAppearanceDecision
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 
 /** System-bound presence receiver. It deliberately does not masquerade as a wearable profile. */
@@ -27,18 +28,42 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
             return
         }
         when (companionPresenceAction(event.event)) {
-            CompanionPresenceAction.EnsureConnected -> {
+            CompanionPresenceAction.EvaluateBleAppearance -> {
+                when (container.bikeConnectionDemand.onBleAppeared()) {
+                    BleAppearanceDecision.IgnoreDuplicate -> {
+                        container.connectionEventJournal.record(
+                            "Companion event: duplicate $eventLabel ignored",
+                        )
+                        return
+                    }
+
+                    BleAppearanceDecision.IgnoreWhileSuppressed -> {
+                        container.connectionEventJournal.record(
+                            "Companion event: $eventLabel ignored after manual disconnect",
+                        )
+                        return
+                    }
+
+                    BleAppearanceDecision.RequestConnection -> Unit
+                }
                 val state = container.bikeConnection.connectionState.value
                 if (shouldRequestPresenceReconnect(state)) {
                     container.connectionEventJournal.record(
                         "Companion event: $eventLabel; requesting connection",
                     )
-                    BikeConnectionService.reconnect(this, bike)
+                    BikeConnectionService.reconnect(this, bike, automatic = true)
                 } else {
                     container.connectionEventJournal.record(
                         "Companion event: $eventLabel; connection already active",
                     )
                 }
+            }
+
+            CompanionPresenceAction.MarkBleAbsent -> {
+                container.bikeConnectionDemand.onBleDisappeared()
+                container.connectionEventJournal.record(
+                    "Companion event: $eventLabel; next BLE appearance may reconnect",
+                )
             }
 
             CompanionPresenceAction.KeepConnection -> container.connectionEventJournal.record(
@@ -53,20 +78,19 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
 }
 
 internal enum class CompanionPresenceAction {
-    EnsureConnected,
+    EvaluateBleAppearance,
+    MarkBleAbsent,
     KeepConnection,
     Ignore,
 }
 
 internal fun companionPresenceAction(event: Int): CompanionPresenceAction = when (event) {
-    DevicePresenceEvent.EVENT_BLE_APPEARED,
-    DevicePresenceEvent.EVENT_BT_CONNECTED,
-    -> CompanionPresenceAction.EnsureConnected
+    DevicePresenceEvent.EVENT_BLE_APPEARED -> CompanionPresenceAction.EvaluateBleAppearance
+    DevicePresenceEvent.EVENT_BLE_DISAPPEARED -> CompanionPresenceAction.MarkBleAbsent
 
-    // BLE scanning and Bluetooth connectivity are independent CDM presence sources. Neither
-    // negative event is authoritative for the app-owned GATT link; its callback and bounded
-    // reconnect policy remain the source of truth.
-    DevicePresenceEvent.EVENT_BLE_DISAPPEARED,
+    // Classic Bluetooth/HID connectivity is independent of the app-owned GATT link. These
+    // events are informative only and must not reset its bounded reconnect policy.
+    DevicePresenceEvent.EVENT_BT_CONNECTED,
     DevicePresenceEvent.EVENT_BT_DISCONNECTED,
     -> CompanionPresenceAction.KeepConnection
     else -> CompanionPresenceAction.Ignore

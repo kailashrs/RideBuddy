@@ -1,6 +1,6 @@
 # Aprilia RS 457 BLE protocol map
 
-Status: static analysis of `apriliaindia.apk` (package `com.piaggio.apriliaindia`, version 1.3). The motorcycle-side behavior, GATT service UUID, characteristic properties, firmware-version differences, and safe write rates still require a stationary live-bike capture.
+Status: static analysis of `apriliaindia.apk` (package `com.piaggio.apriliaindia`, version 1.3), plus the captured advertisement below. The motorcycle-side behavior, GATT service UUID, characteristic properties, firmware-version differences, and safe write rates still require a stationary live-bike capture — the advertisement is the only part confirmed against hardware so far.
 
 ## Executive summary
 
@@ -11,6 +11,43 @@ RideBuddy intentionally accepts only the RS 457/Tuono 457 name family for now. T
 The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. The dashboard first requires an Android Bluetooth bond. For a first-time protected connection it enables indications on `8610`, handles the challenge in its characteristic-change callback, writes the corresponding six-byte response to `8620`, and persists a protection-accepted flag. Later connections with that flag bypass `8610` and enable the normal subscription set directly. Generic read callback code exists elsewhere in the APK, but the India dashboard connection path does not proactively read `8610`, the VIN, or the software version.
 
 The protocol exposes useful read-only telemetry and a fixed-function TFT interface. It does not expose a general framebuffer or any confirmed ECU control surface.
+
+## Advertisement (captured)
+
+Recorded from the dev bike on the vivo X200 Ultra (Android 16), read back out of the
+CompanionDeviceManager association record that the picker created:
+
+```text
+mAdvertiseFlags=6, mServiceUuids=[00001812-0000-1000-8000-00805f9b34fb],
+mServiceSolicitationUuids=[], mManufacturerSpecificData={}, mServiceData={},
+mTxPowerLevel=<none>, mDeviceName=RS457_IDE1B7, rssi=-66, eventType=27
+```
+
+What this pins down:
+
+| Field | Value | Consequence |
+| --- | --- | --- |
+| Service UUIDs | `0x1812` (HOGP) only | The one UUID a scan filter may key on. No vendor UUID is advertised — `d6328aea…` is discoverable only after connecting. |
+| Flags | `6` = LE General Discoverable + **BR/EDR Not Supported** | The advertising interface is LE-only. |
+| `eventType` | `27` — legacy, connectable, scannable, **scan response** | Android merged the advertisement and scan response, so name and UUID arrive in one `ScanRecord` and may be ANDed in a single filter. |
+| Name | `RS457_IDE1B7` | Present in the merged record, so `setNamePattern` sees it. |
+
+The bike also appears in Android's HID host as
+`addr:…e1:b7[public][BT_TRANSPORT_LE]` with `HOGP connection state`, confirming it is a
+real HID-over-GATT peripheral rather than merely advertising the UUID.
+
+Two bonded records share the name `RS457_IDE1B7`:
+
+| Address | Transport | Class of device | Role |
+| --- | --- | --- | --- |
+| `…E1:B7` | LE | `0x001F00` uncategorized | The GATT/HOGP interface this app talks to |
+| `…C8:5C` | BR/EDR (typed DUAL) | `0x240418` Audio/Video, headphones | The bike's audio endpoint |
+
+Because the two share an advertised name, the picker cannot be scoped by name alone —
+this is what the `0x1812` scan filter in `BikeCompanionManager.associate()` is for. Note
+the OEM app does no UUID filtering at all: it calls `startScan` with an **empty**
+`ScanFilter` list and `SCAN_MODE_LOW_LATENCY`, then substring-matches the name inside its
+own callback.
 
 ## UUIDs
 

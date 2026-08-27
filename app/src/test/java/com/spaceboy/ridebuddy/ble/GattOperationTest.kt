@@ -1,7 +1,9 @@
 package com.spaceboy.ridebuddy.ble
 
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothStatusCodes
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
+import com.spaceboy.ridebuddy.domain.ConnectionFailureCategory
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -133,6 +135,7 @@ class GattOperationTest {
             GattFailureAction.ResetGattAndReconnect,
             gattFailureAction(
                 source = GattFailureSource.CallbackTimeout,
+                status = null,
                 attempt = 0,
                 maxRetries = 2,
             ),
@@ -140,12 +143,170 @@ class GattOperationTest {
     }
 
     @Test
-    fun synchronousAndStatusFailuresUseTheSameBoundedRetryPolicy() {
-        listOf(GattFailureSource.SynchronousStart, GattFailureSource.StatusCallback).forEach { source ->
-            assertEquals(GattFailureAction.RetryCurrentGatt, gattFailureAction(source, 0, maxRetries = 2))
-            assertEquals(GattFailureAction.RetryCurrentGatt, gattFailureAction(source, 1, maxRetries = 2))
-            assertEquals(GattFailureAction.CompleteFailure, gattFailureAction(source, 2, maxRetries = 2))
-        }
+    fun synchronousStartFailuresUseBoundedDelayedRetries() {
+        assertEquals(
+            GattFailureAction.RetryCurrentGattAfterDelay,
+            gattFailureAction(GattFailureSource.SynchronousStart, null, 0, maxRetries = 2),
+        )
+        assertEquals(
+            GattFailureAction.RetryCurrentGattAfterDelay,
+            gattFailureAction(GattFailureSource.SynchronousStart, null, 1, maxRetries = 2),
+        )
+        assertEquals(
+            GattFailureAction.CompleteFailure,
+            gattFailureAction(GattFailureSource.SynchronousStart, null, 2, maxRetries = 2),
+        )
         assertEquals(GattStartAction.HandleSynchronousFailure, gattStartAction(started = false))
+        assertEquals(200L, gattOperationRetryDelayMillis(0))
+        assertEquals(400L, gattOperationRetryDelayMillis(1))
+        assertEquals(800L, gattOperationRetryDelayMillis(2))
+    }
+
+    @Test
+    fun genericGattAndSecurityFailuresRetireTheCurrentConnection() {
+        listOf(0x85, 5, 8, 12, 15).forEach { status ->
+            assertEquals(
+                GattFailureAction.ResetGattAndReconnect,
+                gattFailureAction(GattFailureSource.StatusCallback, status, 0, maxRetries = 2),
+            )
+        }
+    }
+
+    @Test
+    fun congestionRetriesAfterDelayButProtocolErrorsComplete() {
+        assertEquals(
+            GattFailureAction.RetryCurrentGattAfterDelay,
+            gattFailureAction(GattFailureSource.StatusCallback, 143, 0, maxRetries = 2),
+        )
+        assertEquals(
+            GattFailureAction.CompleteFailure,
+            gattFailureAction(GattFailureSource.StatusCallback, 143, 2, maxRetries = 2),
+        )
+        assertEquals(
+            GattFailureAction.CompleteFailure,
+            gattFailureAction(GattFailureSource.StatusCallback, 3, 0, maxRetries = 2),
+        )
+    }
+
+    @Test
+    fun operationStatusLabelsDoNotConfuseAttAuthorizationWithLinkTimeout() {
+        assertEquals("insufficient authorization", gattOperationStatusLabel(8))
+        assertEquals("generic GATT error", gattOperationStatusLabel(0x85))
+        assertEquals("connection congested", gattOperationStatusLabel(143))
+    }
+
+    @Test
+    fun synchronousRejectionReasonsAreClassifiedInsteadOfCollapsedToRetry() {
+        assertEquals(
+            GattStartRejection.Busy,
+            gattStartRejectionFor(BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY),
+        )
+        assertEquals(
+            GattStartRejection.NotPermitted,
+            gattStartRejectionFor(BluetoothStatusCodes.ERROR_GATT_WRITE_NOT_ALLOWED),
+        )
+        assertEquals(
+            GattStartRejection.LinkUnusable,
+            gattStartRejectionFor(BluetoothStatusCodes.ERROR_DEVICE_NOT_BONDED),
+        )
+        assertEquals(GattStartRejection.Unknown, gattStartRejectionFor(BluetoothStatusCodes.ERROR_UNKNOWN))
+    }
+
+    @Test
+    fun deterministicStartRejectionsAreNotRetried() {
+        assertEquals(
+            GattFailureAction.CompleteFailure,
+            gattFailureAction(
+                source = GattFailureSource.SynchronousStart,
+                status = BluetoothStatusCodes.ERROR_GATT_WRITE_NOT_ALLOWED,
+                attempt = 0,
+                maxRetries = 2,
+                rejection = GattStartRejection.NotPermitted,
+            ),
+        )
+    }
+
+    @Test
+    fun unusableLinkRejectionsRetireTheSessionInsteadOfRetryingOnIt() {
+        assertEquals(
+            GattFailureAction.ResetGattAndReconnect,
+            gattFailureAction(
+                source = GattFailureSource.SynchronousStart,
+                status = BluetoothStatusCodes.ERROR_DEVICE_NOT_BONDED,
+                attempt = 0,
+                maxRetries = 2,
+                rejection = GattStartRejection.LinkUnusable,
+            ),
+        )
+    }
+
+    @Test
+    fun busyStartRejectionsKeepTheBoundedRetry() {
+        assertEquals(
+            GattFailureAction.RetryCurrentGattAfterDelay,
+            gattFailureAction(
+                source = GattFailureSource.SynchronousStart,
+                status = BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY,
+                attempt = 0,
+                maxRetries = 2,
+                rejection = GattStartRejection.Busy,
+            ),
+        )
+        assertEquals(
+            GattFailureAction.CompleteFailure,
+            gattFailureAction(
+                source = GattFailureSource.SynchronousStart,
+                status = BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY,
+                attempt = 2,
+                maxRetries = 2,
+                rejection = GattStartRejection.Busy,
+            ),
+        )
+    }
+
+    @Test
+    fun status133IsReportedAsLinkLossRatherThanAnAuthenticationFailure() {
+        assertEquals(
+            ConnectionFailureCategory.LinkLost,
+            gattFailureCategory(GattFailureSource.StatusCallback, 0x85),
+        )
+        assertEquals("GATT_ERROR", gattStatusName(0x85))
+    }
+
+    @Test
+    fun onlyUnambiguousSecurityStatusesAreReportedAsAuthenticationRejection() {
+        listOf(5, 0x0C, 15).forEach { status ->
+            assertEquals(
+                ConnectionFailureCategory.AuthenticationRejected,
+                gattFailureCategory(GattFailureSource.StatusCallback, status),
+            )
+        }
+        // Android reuses 8 for both GATT_INSUFFICIENT_AUTHORIZATION and GATT_CONNECTION_TIMEOUT.
+        assertEquals(
+            ConnectionFailureCategory.LinkLost,
+            gattFailureCategory(GattFailureSource.StatusCallback, 8),
+        )
+        // 0x93 is the framework-only BluetoothGatt.GATT_CONNECTION_TIMEOUT value, which never
+        // arrives on the wire but must classify the same way if a stack ever reports it.
+        assertEquals(
+            ConnectionFailureCategory.LinkLost,
+            gattFailureCategory(GattFailureSource.StatusCallback, 0x93),
+        )
+    }
+
+    @Test
+    fun timeoutsAndCongestionAreCategorisedApart() {
+        assertEquals(
+            ConnectionFailureCategory.LinkLost,
+            gattFailureCategory(GattFailureSource.CallbackTimeout, null),
+        )
+        assertEquals(
+            ConnectionFailureCategory.Transient,
+            gattFailureCategory(GattFailureSource.StatusCallback, 143),
+        )
+        assertEquals(
+            ConnectionFailureCategory.Deterministic,
+            gattFailureCategory(GattFailureSource.StatusCallback, 3),
+        )
     }
 }

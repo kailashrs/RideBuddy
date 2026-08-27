@@ -28,40 +28,44 @@ class RideLocationTracker(context: Context) : LocationListener {
     private val appContext = context.applicationContext
     private val mutableLocation = MutableStateFlow<RideLocation?>(null)
     val location: StateFlow<RideLocation?> = mutableLocation.asStateFlow()
-    private var activeProvider: String? = null
+    private var registered = false
 
+    /**
+     * Route recording only accepts GPS fixes; a network fix is far too coarse to integrate into a
+     * ride trace, so there is no fallback provider. The registration outlives the provider being
+     * switched off mid-ride, so updates resume by themselves once GPS is back.
+     */
     @SuppressLint("MissingPermission")
     fun start(): Boolean {
         stop()
-        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
             return false
-        }
-        val provider = when {
-            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> return false
         }
         return runCatching {
             val request = LocationRequest.Builder(LocationUpdateIntervalMillis)
                 .setMinUpdateDistanceMeters(MinimumLocationDistanceMetres)
                 .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
                 .build()
-            manager.requestLocationUpdates(provider, request, appContext.mainExecutor, this)
-            activeProvider = provider
-            runCatching { manager.getLastKnownLocation(provider) }
-                .onSuccess { location -> location?.let(::onLocationChanged) }
-                .onFailure { error -> Log.d(LogTag, "No cached ride location available", error) }
+            manager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                request,
+                appContext.mainExecutor,
+                this,
+            )
+            registered = true
+            manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let(::onLocationChanged)
             true
         }.onFailure { error ->
             Log.w(LogTag, "Could not start ride location updates", error)
-            activeProvider = null
+            registered = false
         }.getOrDefault(false)
     }
 
     fun stop() {
-        runCatching { manager.removeUpdates(this) }
-            .onFailure { error -> Log.w(LogTag, "Could not stop ride location updates", error) }
-        activeProvider = null
+        manager.removeUpdates(this)
+        registered = false
         mutableLocation.value = null
     }
 
@@ -81,8 +85,9 @@ class RideLocationTracker(context: Context) : LocationListener {
         )
     }
 
+    /** A disabled provider invalidates the fix but keeps the registration for when it returns. */
     override fun onProviderDisabled(provider: String) {
-        if (provider == activeProvider) mutableLocation.value = null
+        if (registered && provider == LocationManager.GPS_PROVIDER) mutableLocation.value = null
     }
 
     private companion object {

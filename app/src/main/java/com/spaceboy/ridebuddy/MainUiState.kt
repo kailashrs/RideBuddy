@@ -115,6 +115,8 @@ data class MainUiState(
     val transientMessage: String? = null,
     val isNavigationStarting: Boolean = false,
     val navigationStartAttemptId: Long? = null,
+    /** Body of the parked TFT-validation prompt, or null when nothing is awaiting confirmation. */
+    val tftTestConfirmation: String? = null,
 )
 
 data class AutoStartSharedDestinationRequest(

@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.ble
 import android.bluetooth.BluetoothGattCharacteristic
 import android.os.Handler
 import android.os.SystemClock
+import com.spaceboy.ridebuddy.domain.ConnectionFailureCategory
 import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
 import java.util.UUID
@@ -23,7 +24,7 @@ internal class ProtectionCoordinator(
     private val markAccepted: () -> Unit,
     private val clearAcceptance: () -> Unit,
     private val onAuthenticated: (String, ProtectionPath?) -> Unit,
-    private val onFailure: (String) -> Unit,
+    private val onFailure: (String, ConnectionFailureCategory) -> Unit,
     private val onReconnectRequired: (String) -> Unit,
     private val updateDiagnostics: (ProtectionPhase, ProtectionPath?) -> Unit,
     private val log: (String) -> Unit,
@@ -102,7 +103,7 @@ internal class ProtectionCoordinator(
                 "Could not enable required motorcycle data (${uuid.shortName()})",
             ) ?: ProtectionAction.Fail(
                 "Protection session is missing after a required subscription failure",
-                ProtectionFailurePolicy.ClearAcceptanceAndReconnect,
+                ProtectionFailurePolicy.Stop,
             ),
         )
     }
@@ -118,7 +119,7 @@ internal class ProtectionCoordinator(
             ProtectionAction.SubscribeChallenge -> {
                 val challenge = characteristic(BleCharacteristics.ProtectionChallenge)
                 if (challenge == null) {
-                    onFailure("Authentication challenge endpoint is missing")
+                    onFailure("Authentication challenge endpoint is missing", ConnectionFailureCategory.Deterministic)
                 } else {
                     enqueue(GattOperation.Subscribe(challenge))
                 }
@@ -128,7 +129,7 @@ internal class ProtectionCoordinator(
                 handler.removeCallbacksAndMessages(challengeTimeoutToken)
                 val response = characteristic(BleCharacteristics.ProtectionResponse)
                 if (response == null) {
-                    onFailure("Authentication response endpoint is missing")
+                    onFailure("Authentication response endpoint is missing", ConnectionFailureCategory.Deterministic)
                 } else {
                     log("Queueing protection response")
                     enqueue(
@@ -154,7 +155,10 @@ internal class ProtectionCoordinator(
         val subscriptions = BleCharacteristics.PostAuthenticationSubscriptions.map { uuid ->
             GattOperation.Subscribe(
                 characteristic(uuid) ?: run {
-                    onFailure("Motorcycle companion profile lost ${uuid.shortName()}")
+                    onFailure(
+                        "Motorcycle companion profile lost ${uuid.shortName()}",
+                        ConnectionFailureCategory.Deterministic,
+                    )
                     return
                 },
             )
@@ -181,16 +185,17 @@ internal class ProtectionCoordinator(
 
     private fun handleFailure(failure: ProtectionAction.Fail) {
         when (failure.policy) {
-            ProtectionFailurePolicy.Stop -> onFailure(failure.message)
+            // A profile or endpoint problem is deterministic; it is not the bike rejecting us.
+            ProtectionFailurePolicy.Stop ->
+                onFailure(failure.message, ConnectionFailureCategory.Deterministic)
+
+            // Only this policy is reached by a confirmed protocol-level rejection.
             ProtectionFailurePolicy.ClearAcceptance -> {
                 clearAcceptance()
-                onFailure(failure.message)
+                onFailure(failure.message, ConnectionFailureCategory.AuthenticationRejected)
             }
 
-            ProtectionFailurePolicy.ClearAcceptanceAndReconnect -> {
-                clearAcceptance()
-                onReconnectRequired(failure.message)
-            }
+            ProtectionFailurePolicy.Reconnect -> onReconnectRequired(failure.message)
         }
     }
 

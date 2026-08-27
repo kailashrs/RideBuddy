@@ -90,17 +90,17 @@ class BikeCompanionManager internal constructor(
 
         // The CDM picker is scoped by both the bike's name family and the
         // SIG-standard HID-over-GATT service UUID. The combination is what
-        // disambiguates the bike (HOGP, advertises 0x1812) from the same-name
-        // classic-BT headset (`20:72:1B:28:C8:5C` uses HFP and does not
-        // advertise 0x1812 over BLE).
+        // disambiguates the bike's LE interface (HOGP, advertises 0x1812) from
+        // its BR/EDR audio endpoint (`…C8:5C`), which Android reports as DUAL
+        // under the same advertised name. See BikeHogpServiceUuidString for the
+        // captured scan record both halves of this filter were verified against.
         //
         // ParcelUuid is constructed here rather than as a top-level constant
         // because Robolectric's stub of android.os.ParcelUuid is partial and
         // can't be safely initialized from a JVM unit-test classloader.
-        val hogpServiceUuid: ParcelUuid =
-            requireNotNull(ParcelUuid.fromString(BikeHogpServiceUuidString)) {
-                "SIG-standard HID UUID constant could not be parsed"
-            }
+        // fromString throws on malformed input rather than returning null, and
+        // the argument is a compile-time constant, so there is nothing to guard.
+        val hogpServiceUuid: ParcelUuid = ParcelUuid.fromString(BikeHogpServiceUuidString)
         val scanFilter = ScanFilter.Builder()
             .setServiceUuid(hogpServiceUuid)
             .build()
