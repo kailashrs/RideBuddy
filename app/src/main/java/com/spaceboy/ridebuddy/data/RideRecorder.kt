@@ -239,8 +239,11 @@ class RideRecorder(
         const val MaxLiveSamples = 600
         const val MaxStoredSamples = 36_000
         const val MaxAccelerationSampleGapMillis = 2_500L
-        private const val LiveSampleEventBufferCapacity = 256
-        private const val LiveSampleEmitIntervalMillis = 250L
+        // Telemetry arrives about every 250 ms, so these are sized against that rate rather
+        // than against a fast stream: a 250 ms throttle would have let every single frame
+        // through and copied the whole live window four times a second for nothing.
+        private const val LiveSampleEventBufferCapacity = 8
+        private const val LiveSampleEmitIntervalMillis = 1_000L
         private const val LogTag = "RideRecorder"
         private val RecordingDispatcher = Dispatchers.Default.limitedParallelism(1)
     }

@@ -2,14 +2,11 @@ package com.spaceboy.ridebuddy.ble
 
 import com.spaceboy.ridebuddy.domain.TelemetryReading
 import java.util.ArrayDeque
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 internal data class TelemetryAcceptance(
     val valid: Boolean,
@@ -17,32 +14,33 @@ internal data class TelemetryAcceptance(
     val droppedRawTelemetryFrames: Long,
 )
 
-/** Publishes full-rate ride data and a separately mileage-smoothed UI stream. */
+/**
+ * Publishes full-rate ride data and a separately mileage-smoothed UI stream.
+ *
+ * The cluster sends telemetry at about 4 Hz and [RideRecorder][com.spaceboy.ridebuddy.data.RideRecorder]
+ * is its only consumer, so [rawBufferCapacity] is several seconds of slack. Frames are handed over
+ * with `tryEmit`, which never suspends the GATT callback thread: a frame that cannot be buffered is
+ * dropped and counted rather than stalling the link. Reaching that counter means the consumer has
+ * stopped keeping up with a 4 Hz stream, which is why it is surfaced in diagnostics.
+ *
+ * All state here is confined to the connection's main handler, which is the only caller of [accept]
+ * and [reset].
+ */
 internal class BikeTelemetryStream(
-    scope: CoroutineScope,
+    rawBufferCapacity: Int = RawTelemetryBufferCapacity,
 ) {
     private val timestamps = ArrayDeque<Long>()
     private val mileageSmoother = LiveMileageSmoother()
-    private val rawQueue = BoundedTelemetryQueue(RawTelemetryBufferCapacity)
-    private val rawQueueWakeups = Channel<Unit>(Channel.CONFLATED)
-    private val mutableRawTelemetry = MutableSharedFlow<TelemetryReading>()
+    private var droppedRawTelemetryFrames = 0L
+    private val mutableRawTelemetry = MutableSharedFlow<TelemetryReading>(
+        extraBufferCapacity = rawBufferCapacity,
+    )
     private val mutableTelemetry = MutableStateFlow<TelemetryFrame?>(null)
     private val mutableLatestReading = MutableStateFlow<TelemetryReading?>(null)
 
     val rawTelemetry: SharedFlow<TelemetryReading> = mutableRawTelemetry
     val telemetry: StateFlow<TelemetryFrame?> = mutableTelemetry.asStateFlow()
     val latestReading: StateFlow<TelemetryReading?> = mutableLatestReading.asStateFlow()
-
-    init {
-        scope.launch {
-            for (ignored in rawQueueWakeups) {
-                while (true) {
-                    val reading = rawQueue.poll() ?: break
-                    mutableRawTelemetry.emit(reading)
-                }
-            }
-        }
-    }
 
     fun accept(
         payload: ByteArray,
@@ -58,7 +56,7 @@ internal class BikeTelemetryStream(
             ?: return TelemetryAcceptance(
                 valid = false,
                 telemetryHz = telemetryHz,
-                droppedRawTelemetryFrames = rawQueue.droppedCount,
+                droppedRawTelemetryFrames = droppedRawTelemetryFrames,
             )
         val reading = TelemetryReading(
             frame = frame,
@@ -69,8 +67,7 @@ internal class BikeTelemetryStream(
         )
         mutableLatestReading.value = reading
         mutableTelemetry.value = mileageSmoother.smooth(frame)
-        val droppedRawTelemetryFrames = rawQueue.offer(reading)
-        rawQueueWakeups.trySend(Unit)
+        if (!mutableRawTelemetry.tryEmit(reading)) droppedRawTelemetryFrames++
         return TelemetryAcceptance(
             valid = true,
             telemetryHz = telemetryHz,
@@ -81,7 +78,7 @@ internal class BikeTelemetryStream(
     fun reset() {
         timestamps.clear()
         mileageSmoother.reset()
-        rawQueue.reset()
+        droppedRawTelemetryFrames = 0L
         mutableTelemetry.value = null
         mutableLatestReading.value = null
     }
@@ -92,34 +89,6 @@ internal class BikeTelemetryStream(
 
     private companion object {
         const val TelemetryWindowMillis = 5_000L
-        const val RawTelemetryBufferCapacity = 256
-    }
-}
-
-internal class BoundedTelemetryQueue(private val capacity: Int) {
-    private val readings = ArrayDeque<TelemetryReading>(capacity)
-    private var mutableDroppedCount = 0L
-
-    init {
-        require(capacity > 0) { "Telemetry queue capacity must be positive" }
-    }
-
-    val droppedCount: Long
-        get() = synchronized(readings) { mutableDroppedCount }
-
-    fun offer(reading: TelemetryReading): Long = synchronized(readings) {
-        if (readings.size == capacity) {
-            readings.removeFirst()
-            mutableDroppedCount++
-        }
-        readings.addLast(reading)
-        mutableDroppedCount
-    }
-
-    fun poll(): TelemetryReading? = synchronized(readings) { readings.pollFirst() }
-
-    fun reset() = synchronized(readings) {
-        readings.clear()
-        mutableDroppedCount = 0L
+        const val RawTelemetryBufferCapacity = 16
     }
 }

@@ -1,5 +1,8 @@
 package com.spaceboy.ridebuddy.data
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Ride(
     val id: Long,
     val startedAtMillis: Long,

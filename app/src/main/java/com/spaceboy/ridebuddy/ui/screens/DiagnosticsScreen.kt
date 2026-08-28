@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -25,12 +26,12 @@ import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
-import com.spaceboy.ridebuddy.domain.BleDiagnostics
+import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
 import com.spaceboy.ridebuddy.ui.labelResource
 
 @Composable
 fun DiagnosticsScreen(
-    diagnostics: BleDiagnostics,
+    live: LiveTelemetryStreams,
     bleCapture: BleCaptureState,
     connectionState: BikeConnectionState,
     identity: BikeIdentity,
@@ -39,6 +40,8 @@ fun DiagnosticsScreen(
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Diagnostics is a live readout, so it is the one screen that should follow the frame rate.
+    val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
     val companionLinkStatus = stringResource(
         if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
     )

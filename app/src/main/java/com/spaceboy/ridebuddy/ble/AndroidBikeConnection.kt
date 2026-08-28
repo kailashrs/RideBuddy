@@ -88,7 +88,7 @@ internal class AndroidBikeConnection(
     private var authenticatedAtMillis: Long? = null
     private val nextWriteRequestId = AtomicLong()
     private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val telemetryStream = BikeTelemetryStream(telemetryScope)
+    private val telemetryStream = BikeTelemetryStream()
 
     private val mutableConnectionState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
     private val diagnosticsRecorder = BleDiagnosticsRecorder(connectionEventJournal.events.value)

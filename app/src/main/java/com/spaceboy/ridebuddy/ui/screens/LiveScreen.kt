@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
 import com.spaceboy.ridebuddy.R
@@ -61,11 +62,11 @@ import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.DistanceUnits
-import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
 import com.spaceboy.ridebuddy.ui.theme.TelemetryHero
 import com.spaceboy.ridebuddy.ui.theme.statusColors
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
@@ -88,11 +89,7 @@ fun LiveScreen(
     sharedDestinationError: String?,
     isNavigationStarting: Boolean,
     connectionState: BikeConnectionState,
-    telemetry: TelemetryFrame?,
-    activeRide: ActiveRide?,
-    liveSamples: List<RideSample>,
-    liveMetrics: LiveRideMetrics,
-    diagnostics: BleDiagnostics,
+    live: LiveTelemetryStreams,
     lastRide: Ride?,
     guidance: GuidanceState,
     units: DistanceUnits,
@@ -126,9 +123,12 @@ fun LiveScreen(
     ) {
         ConnectionCard(connectionState, onConnectBike, onDisconnectBike)
 
-        if (connectionState is BikeConnectionState.Connected && telemetry != null) {
-            TelemetryCard(telemetry, activeRide, units, onDetails = { showLiveDetails = true })
-        }
+        TelemetrySection(
+            live = live,
+            connectionState = connectionState,
+            units = units,
+            onDetails = { showLiveDetails = true },
+        )
 
         Text(
             text = "Navigate",
@@ -334,11 +334,7 @@ fun LiveScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
             LiveDetailsSheet(
-                frame = telemetry,
-                activeRide = activeRide,
-                samples = liveSamples,
-                metrics = liveMetrics,
-                diagnostics = diagnostics,
+                live = live,
                 units = units,
                 level = liveDetailLevel,
                 onLevelChanged = { liveDetailLevel = it },
@@ -379,6 +375,24 @@ fun LiveScreen(
             }
         }
     }
+}
+
+/**
+ * Reads the frame-rate streams as late as possible. Everything above it on the Live screen — the
+ * connection card, the navigate card, the last-ride card — must not re-compose at 4 Hz, so the
+ * telemetry read lives here rather than in [LiveScreen]'s own scope.
+ */
+@Composable
+private fun TelemetrySection(
+    live: LiveTelemetryStreams,
+    connectionState: BikeConnectionState,
+    units: DistanceUnits,
+    onDetails: () -> Unit,
+) {
+    if (connectionState !is BikeConnectionState.Connected) return
+    val frame = live.telemetry.collectAsStateWithLifecycle().value ?: return
+    val activeRide = live.activeRide.collectAsStateWithLifecycle().value
+    TelemetryCard(frame, activeRide, units, onDetails)
 }
 
 @Composable
@@ -595,15 +609,18 @@ private fun TelemetryCard(
 
 @Composable
 private fun LiveDetailsSheet(
-    frame: TelemetryFrame?,
-    activeRide: ActiveRide?,
-    samples: List<RideSample>,
-    metrics: LiveRideMetrics,
-    diagnostics: BleDiagnostics,
+    live: LiveTelemetryStreams,
     units: DistanceUnits,
     level: LiveDetailLevel,
     onLevelChanged: (LiveDetailLevel) -> Unit,
 ) {
+    // Confined to the sheet: while it is open the rider is looking at live values, so following
+    // the frame rate here is the point. Closing the sheet stops the work.
+    val frame = live.telemetry.collectAsStateWithLifecycle().value
+    val activeRide = live.activeRide.collectAsStateWithLifecycle().value
+    val samples = live.rideSamples.collectAsStateWithLifecycle().value
+    val metrics = live.rideMetrics.collectAsStateWithLifecycle().value
+    val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
     val locale = LocalConfiguration.current.locales[0]
     val chartSamples = remember(samples) { samples.downsampleForChart() }
     Column(

@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui
 
+import androidx.compose.runtime.Immutable
 import com.spaceboy.ridebuddy.MainUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
 import com.spaceboy.ridebuddy.ble.BleCaptureState
@@ -18,17 +19,32 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
+import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * The streams that update at the bike's telemetry frame rate.
+ *
+ * They are handed down as flows rather than values on purpose: reading them where the screens are
+ * chosen would invalidate the whole content tree four times a second, so History, Insights and
+ * Settings would re-compose at 4 Hz while the rider is not even looking at Live. Each screen
+ * collects only the streams it actually draws, as late as it can.
+ */
+@Immutable
+data class LiveTelemetryStreams(
+    val telemetry: StateFlow<TelemetryFrame?>,
+    val diagnostics: StateFlow<BleDiagnostics>,
+    val activeRide: StateFlow<ActiveRide?>,
+    val rideSamples: StateFlow<List<RideSample>>,
+    val rideMetrics: StateFlow<LiveRideMetrics>,
+)
+
+@Immutable
 data class MainScreenState(
     val uiState: MainUiState,
     val connectionState: BikeConnectionState,
-    val telemetry: TelemetryFrame?,
     val identity: BikeIdentity,
-    val diagnostics: BleDiagnostics,
     val bleCapture: BleCaptureState,
-    val activeRide: ActiveRide?,
-    val liveRideSamples: List<RideSample>,
-    val liveRideMetrics: LiveRideMetrics,
+    val live: LiveTelemetryStreams,
     val rides: List<Ride>,
     val insights: RideInsights,
     val insightPeriod: InsightPeriod,
@@ -40,6 +56,7 @@ data class MainScreenState(
     val backgroundLocationGranted: Boolean,
 )
 
+@Immutable
 data class MainScreenActions(
     val onDestinationSelected: (TopLevelDestination) -> Unit,
     val onOpenNavigationSettings: () -> Unit,

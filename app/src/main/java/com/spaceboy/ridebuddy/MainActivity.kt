@@ -46,6 +46,7 @@ import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import com.spaceboy.ridebuddy.service.BikeConnectionService
 import com.spaceboy.ridebuddy.ui.MainScreen
 import com.spaceboy.ridebuddy.ui.MainScreenActions
+import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
 import com.spaceboy.ridebuddy.ui.MainScreenContent
 import com.spaceboy.ridebuddy.ui.MainScreenState
 import com.spaceboy.ridebuddy.ui.OnboardingScreen
@@ -56,6 +57,8 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -209,8 +212,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun OnboardingRoute(uiState: MainUiState, bikeAssociation: BikeAssociationState) {
         val connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value
-        val telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value
-        val diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value
+        // The checklist needs two booleans, not the frames themselves. Collecting the frames would
+        // re-compose the whole checklist four times a second while the bike is connected.
+        val telemetryReceiving by remember(viewModel) {
+            viewModel.telemetry.map { frame -> frame != null }.distinctUntilChanged()
+        }.collectAsStateWithLifecycle(false)
+        val authenticated by remember(viewModel) {
+            viewModel.diagnostics.map { it.authenticated }.distinctUntilChanged()
+        }.collectAsStateWithLifecycle(false)
         OnboardingScreen(
             connectionState = connectionState,
             bikeAssociated = bikeAssociation.bike != null,
@@ -220,8 +229,8 @@ class MainActivity : ComponentActivity() {
             notificationAccessEnabled = notificationAccessEnabled,
             appNotificationPermissionGranted = appNotificationPermissionGranted,
             legacyCallPermissionGranted = legacyCallPermissionGranted,
-            telemetryReceiving = telemetry != null,
-            authenticated = diagnostics.authenticated,
+            telemetryReceiving = telemetryReceiving,
+            authenticated = authenticated,
             navigationConfigured = uiState.navigationKey.isConfigured,
             onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
             onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
@@ -257,18 +266,23 @@ class MainActivity : ComponentActivity() {
         bikeAssociation: BikeAssociationState,
         actions: MainScreenActions,
     ) {
+        val live = remember(viewModel) {
+            LiveTelemetryStreams(
+                telemetry = viewModel.telemetry,
+                diagnostics = viewModel.diagnostics,
+                activeRide = viewModel.activeRide,
+                rideSamples = viewModel.liveRideSamples,
+                rideMetrics = viewModel.liveRideMetrics,
+            )
+        }
         MainScreenContent(
             modifier = modifier,
             state = MainScreenState(
                 uiState = uiState,
                 connectionState = viewModel.connectionState.collectAsStateWithLifecycle().value,
-                telemetry = viewModel.telemetry.collectAsStateWithLifecycle().value,
                 identity = viewModel.identity.collectAsStateWithLifecycle().value,
-                diagnostics = viewModel.diagnostics.collectAsStateWithLifecycle().value,
                 bleCapture = viewModel.bleCapture.collectAsStateWithLifecycle().value,
-                activeRide = viewModel.activeRide.collectAsStateWithLifecycle().value,
-                liveRideSamples = viewModel.liveRideSamples.collectAsStateWithLifecycle().value,
-                liveRideMetrics = viewModel.liveRideMetrics.collectAsStateWithLifecycle().value,
+                live = live,
                 rides = viewModel.rides.collectAsStateWithLifecycle().value,
                 insights = viewModel.insights.collectAsStateWithLifecycle().value,
                 insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value,

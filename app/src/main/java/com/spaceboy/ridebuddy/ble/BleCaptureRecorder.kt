@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ble
 
+import androidx.compose.runtime.Immutable
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -107,6 +108,7 @@ class BleCaptureRecorder internal constructor(
     }
 }
 
+@Immutable
 data class BleCaptureState(
     val enabled: Boolean = false,
     val entries: List<BleCaptureEntry> = emptyList(),

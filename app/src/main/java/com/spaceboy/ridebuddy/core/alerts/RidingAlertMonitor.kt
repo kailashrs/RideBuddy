@@ -12,7 +12,6 @@ import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -30,8 +29,10 @@ class RidingAlertMonitor(
     fun start() {
         createChannel()
         scope.launch {
-            connection.telemetry.collectLatest { frame ->
-                frame ?: return@collectLatest
+            // The body never suspends, so collectLatest only bought four coroutine
+            // cancellations a second.
+            connection.telemetry.collect { frame ->
+                frame ?: return@collect
                 val preferences = settings.settings.value
                 if (preferences.overspeedAlerts && frame.speedKilometresPerHour >= preferences.overspeedThresholdKph) {
                     alert(

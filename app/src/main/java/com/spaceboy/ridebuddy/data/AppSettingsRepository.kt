@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.Immutable
 import androidx.core.content.edit
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,8 @@ enum class DistanceUnits {
 enum class ThemeMode { System, Light, Dark }
 enum class TftTextMode { Full, Compact }
 
+/** Replaced wholesale on every change, never mutated in place, so Compose may skip on it. */
+@Immutable
 data class AppSettings(
     val distanceUnits: DistanceUnits = DistanceUnits.defaultFor(Locale.getDefault()),
     val voiceGuidance: Boolean = true,

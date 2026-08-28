@@ -233,7 +233,7 @@ internal fun MainScreenContent(
         if (uiState.isDiagnosticsOpen) {
             DiagnosticsScreen(
                 modifier = modifier,
-                diagnostics = diagnostics,
+                live = live,
                 bleCapture = bleCapture,
                 connectionState = connectionState,
                 identity = identity,
@@ -251,11 +251,7 @@ internal fun MainScreenContent(
                 sharedDestinationError = uiState.sharedDestinationError,
                 isNavigationStarting = uiState.isNavigationStarting,
                 connectionState = connectionState,
-                telemetry = telemetry,
-                activeRide = activeRide,
-                liveSamples = liveRideSamples,
-                liveMetrics = liveRideMetrics,
-                diagnostics = diagnostics,
+                live = live,
                 lastRide = rides.firstOrNull(),
                 guidance = guidance,
                 units = settings.distanceUnits,

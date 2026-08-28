@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.domain
 
+import androidx.compose.runtime.Immutable
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
 import kotlinx.coroutines.flow.StateFlow
@@ -106,6 +107,7 @@ enum class ProtectionPath {
     ChallengeIndication,
 }
 
+@Immutable
 data class BleDiagnostics(
     val authenticated: Boolean = false,
     val protectionPhase: ProtectionPhase = ProtectionPhase.Idle,
