@@ -183,6 +183,33 @@ iArr[7] = iArrQ[0];  // MSB             this.N}
 The two obfuscated stdlib calls inside `q()` resolve as `kotlin.collections.x.L` = `reversed()`
 (it delegates to `Collections.reverse`) and `x.W` = `withIndex()`.
 
+### Every data field is written twice
+
+`DashboardActivity.o1()` sends each navigation data field inside a `for (i < 2)` loop, blocking on
+`delay(200ms)` after every transmission via its own interval constant
+(`data.bluetooth.looper.a.b = 200`):
+
+| Loop | Payload builder | Characteristic |
+| --- | --- | --- |
+| 1 | `clusterConnect.p()` | `8210` maneuver |
+| 2 | `clusterConnect.f()` | `8230` trip |
+| 3 | `clusterConnect.r()` | `8220` speed limit |
+| 4 | `clusterConnect.d()` | `8240` text row three |
+| 5 | `clusterConnect.c()/e()/d()` | `8240` text rows one to three |
+
+The session (`8260`), status (`8270`) and clear (`8250`) packets are *not* looped. RideBuddy makes
+the same split: data frames carry `replayForCluster`, control batches do not.
+
+This is deliberate OEM behavior rather than a decompiler artifact, and it is the reason
+`ClusterReplayCount = 2` and `MinimumWriteIntervalMillis = 200L` exist in `TftNavigationBridge`.
+Neither is a workaround for a RideBuddy bug, and removing either would diverge from the only
+implementation known to drive this cluster.
+
+The OEM repeats parts of the call path too, and RideBuddy currently does not: caller state
+(`8730`) plus name (`8710`) and number (`8760`) go out three times on an incoming call, the number
+(`8760`) twice more, and the state (`8730`) twice when a call is accepted. Whether the cluster
+needs that repetition is unverified — see the call section of the validation checklist.
+
 So 500 m goes out as `F4 01 00`. Sending it big-endian (`00 01 F4`) is read by the cluster as
 roughly 16 million metres, and any distance under 256 m collapses to zero — RideBuddy shipped that
 inversion until it was corrected against this derivation.

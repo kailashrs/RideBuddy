@@ -591,6 +591,15 @@ class TftNavigationBridge(
             BleCharacteristics.NavigationSpeedLimit,
             BleCharacteristics.NavigationTrip,
         )
+        /**
+         * Both values are the OEM's, not a workaround — do not "optimise" them away.
+         *
+         * `DashboardActivity.o1()` writes each navigation field inside a `for (i < 2)` loop and
+         * blocks on `delay(200ms)` after every transmission, using its own BLE interval constant
+         * (`data.bluetooth.looper.a.b = 200`). It does this for 8210, 8220, 8230 and 8240 — the
+         * data fields — and not for the session, status or clear packets, which is the same split
+         * this bridge makes between `latestData` and `controlBatches`.
+         */
         const val MinimumWriteIntervalMillis = 200L
         const val ClusterReplayCount = 2
         const val FailedWriteRetryMillis = 1_000L

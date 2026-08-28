@@ -20,7 +20,8 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 ## Calls and background navigation
 
 1. Only after the TFT test, enable caller display and call controls separately. Test an incoming call from a second phone; verify answer, reject, and end actions against the chosen default dialer.
-2. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
+2. Watch specifically for caller name or number that fails to appear, or appears late. The OEM app writes the call packets two or three times with 200 ms gaps and RideBuddy writes them once; if the cluster misses a single write, that difference is where it will show. Record the outcome either way, because it decides whether the call path needs the same replay the navigation path already has.
+3. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
 
 ## Evidence to retain
 
