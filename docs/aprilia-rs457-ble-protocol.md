@@ -200,10 +200,24 @@ The two obfuscated stdlib calls inside `q()` resolve as `kotlin.collections.x.L`
 The session (`8260`), status (`8270`) and clear (`8250`) packets are *not* looped. RideBuddy makes
 the same split: data frames carry `replayForCluster`, control batches do not.
 
-This is deliberate OEM behavior rather than a decompiler artifact, and it is the reason
-`ClusterReplayCount = 2` and `MinimumWriteIntervalMillis = 200L` exist in `TftNavigationBridge`.
-Neither is a workaround for a RideBuddy bug, and removing either would diverge from the only
-implementation known to drive this cluster.
+This is deliberate OEM behavior rather than a decompiler artifact.
+
+**RideBuddy currently does not replay.** `ClusterReplayCount` is set to 1, writing each field once
+and relying on its serialized operation queue instead of blind repetition. This is an untested
+departure from the only implementation known to drive this cluster, taken because two passes made a
+full guidance update take about two seconds to drain against a roughly 1 Hz feed, which left
+distance-to-turn visibly stale near a maneuver.
+
+The reasoning is weakest for `8210`, `8220` and `8230`. Those are written as ATT Write Commands
+(the OEM uses write type `1`, and RideBuddy matches it), so nothing at any layer the phone controls
+can observe whether the cluster consumed them — a serialized queue cannot substitute for an
+acknowledgement that the protocol never provides. `8240` is an acknowledged write (type `2`) in both
+implementations, so the argument is stronger there.
+
+Settle it with a parked test: if maneuver, distance, speed limit or text fail to appear or update
+late, restore the OEM behavior by reverting the commit that set the count to 1.
+`MinimumWriteIntervalMillis = 200L` is unaffected and should stay — it is the OEM's inter-write
+pacing, which is a separate thing from the replay.
 
 The OEM repeats parts of the call path too, and RideBuddy currently does not: caller state
 (`8730`) plus name (`8710`) and number (`8760`) go out three times on an incoming call, the number

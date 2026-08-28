@@ -592,16 +592,25 @@ class TftNavigationBridge(
             BleCharacteristics.NavigationTrip,
         )
         /**
-         * Both values are the OEM's, not a workaround — do not "optimise" them away.
+         * The 200 ms spacing is the OEM's own BLE interval constant
+         * (`data.bluetooth.looper.a.b = 200`) and should stay.
          *
-         * `DashboardActivity.o1()` writes each navigation field inside a `for (i < 2)` loop and
-         * blocks on `delay(200ms)` after every transmission, using its own BLE interval constant
-         * (`data.bluetooth.looper.a.b = 200`). It does this for 8210, 8220, 8230 and 8240 — the
-         * data fields — and not for the session, status or clear packets, which is the same split
-         * this bridge makes between `latestData` and `controlBatches`.
+         * The replay count is deliberately **1**, which is a departure from the OEM.
+         * `DashboardActivity.o1()` writes each navigation data field inside a `for (i < 2)` loop —
+         * 8210, 8220, 8230 and 8240, but not the session, status or clear packets. RideBuddy sends
+         * each once instead, on the reasoning that its serialized operation queue, callback
+         * correlation and failure classification make the OEM's blind repetition unnecessary.
+         *
+         * That reasoning is untested, and it does not obviously cover 8210, 8220 and 8230, which
+         * are ATT Write Commands: nothing at any layer this app controls can observe whether the
+         * cluster consumed them. The gain is responsiveness — at two passes a full guidance update
+         * took about two seconds to drain against a roughly 1 Hz feed, so distance-to-turn lagged.
+         *
+         * If a parked test shows maneuver, distance, speed limit or text failing to appear or
+         * updating late, restore the OEM behaviour by reverting the commit that set this to 1.
          */
         const val MinimumWriteIntervalMillis = 200L
-        const val ClusterReplayCount = 2
+        const val ClusterReplayCount = 1
         const val FailedWriteRetryMillis = 1_000L
         const val MaxConsecutiveWriteFailures = 3
         const val ArrivalDisplayMillis = 2_000L

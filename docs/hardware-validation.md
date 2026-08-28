@@ -15,7 +15,8 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 1. Leave **TFT navigation output**, **Caller display**, and **TFT call controls** off for the read-only phase.
 2. At 0 km/h, run **Settings → Developer tools → Stationary TFT validation** and confirm that the cluster enters and then clears the navigation state.
 3. Enable **TFT navigation output** and send one stationary navigation destination. Verify maneuver, trip, text, speed-limit, arrival, reroute, and clear states one at a time before using active guidance.
-4. Disable the setting while a test route is open, end navigation, and confirm no stale navigation data appears after the clear packet.
+4. Watch for any field that fails to appear or updates late. RideBuddy writes each navigation field once where the OEM writes it twice, and `8210`, `8220` and `8230` are unacknowledged writes, so a cluster that drops one gives no error — a missing or stale field is the only symptom. If that happens, revert the commit that set `ClusterReplayCount` to 1 and retest.
+5. Disable the setting while a test route is open, end navigation, and confirm no stale navigation data appears after the clear packet.
 
 ## Calls and background navigation
 
