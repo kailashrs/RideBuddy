@@ -8,6 +8,12 @@ enum class ConnectionAttemptTrigger {
     /** A companion BLE_APPEARED edge asked for a fresh attempt. */
     PresenceAppearance,
 
+    /**
+     * The one automatic attempt an app launch is allowed to make. No BLE appearance was involved,
+     * so it must not be reported as one.
+     */
+    AppLaunch,
+
     /** The bounded backoff schedule owned by the connection controller. */
     AutomaticReconnect,
 

@@ -90,7 +90,7 @@ class GattOperationSchedulerTest {
         scheduler.enqueue(normal)
 
         assertEquals(listOf(active, critical, normal), scheduler.clear())
-        assertTrue(scheduler.hasNoActiveOperation())
+        assertNull(scheduler.active())
         assertNull(scheduler.beginNext())
     }
 

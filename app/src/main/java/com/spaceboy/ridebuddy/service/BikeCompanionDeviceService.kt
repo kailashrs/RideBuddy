@@ -6,6 +6,7 @@ import com.spaceboy.ridebuddy.appContainer
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.companion.BleAppearanceDecision
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 
 /** System-bound presence receiver. It deliberately does not masquerade as a wearable profile. */
 class BikeCompanionDeviceService : CompanionDeviceService() {
@@ -51,7 +52,11 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
                     container.connectionEventJournal.record(
                         "Companion event: $eventLabel; requesting connection",
                     )
-                    BikeConnectionService.reconnect(this, bike, automatic = true)
+                    BikeConnectionService.reconnect(
+                        this,
+                        bike,
+                        trigger = ConnectionAttemptTrigger.PresenceAppearance,
+                    )
                 } else {
                     container.connectionEventJournal.record(
                         "Companion event: $eventLabel; connection already active",

@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.ble
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothGatt
+import java.lang.ref.WeakReference
 
 /**
  * One transport instance and the state that must be scoped to it.
@@ -25,9 +26,15 @@ internal class GattSession<T : Any>(
     var connectedAtElapsedRealtime: Long? = null
         private set
 
-    val isClosed: Boolean get() = closed
-
     fun owns(candidate: T?): Boolean = candidate === transport
+
+    /**
+     * A weak handle on the transport, for registry bookkeeping only. It is deliberately weak: the
+     * registry has to recognise this instance for as long as it can still deliver a callback, and
+     * that is exactly as long as the framework keeps it reachable. Handing out a strong reference
+     * instead would keep every retired `BluetoothGatt` alive for the life of the process.
+     */
+    internal fun weakTransport(): WeakReference<T> = WeakReference(transport)
 
     /** The live transport, or null once the session has been retired. */
     fun openTransport(): T? = if (closed) null else transport
@@ -50,18 +57,20 @@ internal class GattSession<T : Any>(
 }
 
 /**
- * Tracks the live session and a short history of retired ones.
+ * Tracks the live session and every retired one that can still deliver a callback.
  *
  * The history is what lets a late callback be recognised as belonging to an already-closed session
- * instead of being closed a second time.
+ * instead of being closed a second time. It is kept weakly rather than capped at a fixed length: a
+ * capped history evicted transports that were still able to call back, and the fallback for an
+ * unrecognised instance is to close it — which is precisely the second close the guarantee forbids.
+ * A weak entry survives for as long as the transport itself does, and no longer.
  */
 internal class GattSessionRegistry<T : Any>(
     private val closeTransport: (transport: T, disconnectFirst: Boolean) -> Unit,
-    private val retainedRetiredSessions: Int = DefaultRetainedRetiredSessions,
 ) {
     private var nextId = 0L
     private var activeSession: GattSession<T>? = null
-    private val retiredSessions = ArrayDeque<GattSession<T>>()
+    private val retiredTransports = mutableListOf<WeakReference<T>>()
 
     fun current(): GattSession<T>? = activeSession
 
@@ -84,7 +93,10 @@ internal class GattSessionRegistry<T : Any>(
     fun isCurrent(transport: T): Boolean = activeSession?.owns(transport) == true
 
     /** True when the callback came from a session this registry has already closed. */
-    fun isRetired(transport: T): Boolean = retiredSessions.any { session -> session.owns(transport) }
+    fun isRetired(transport: T): Boolean {
+        forgetCollectedTransports()
+        return retiredTransports.any { retired -> retired.get() === transport }
+    }
 
     /**
      * Closes a transport that was created but never adopted, for example one whose connection
@@ -97,12 +109,13 @@ internal class GattSessionRegistry<T : Any>(
     }
 
     private fun remember(session: GattSession<T>) {
-        retiredSessions.addLast(session)
-        while (retiredSessions.size > retainedRetiredSessions) retiredSessions.removeFirst()
+        forgetCollectedTransports()
+        retiredTransports += session.weakTransport()
     }
 
-    private companion object {
-        const val DefaultRetainedRetiredSessions = 4
+    /** A transport the garbage collector has taken cannot deliver another callback. */
+    private fun forgetCollectedTransports() {
+        retiredTransports.removeAll { retired -> retired.get() == null }
     }
 }
 

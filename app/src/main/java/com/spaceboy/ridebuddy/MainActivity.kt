@@ -42,6 +42,7 @@ import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.toCsv
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import com.spaceboy.ridebuddy.service.BikeConnectionService
 import com.spaceboy.ridebuddy.ui.MainScreen
 import com.spaceboy.ridebuddy.ui.MainScreenActions
@@ -750,7 +751,7 @@ class MainActivity : ComponentActivity() {
                 this,
                 bike,
                 launchedFromVisibleActivity = true,
-                automatic = true,
+                trigger = ConnectionAttemptTrigger.AppLaunch,
             )
         ) {
             viewModel.showMessage("Unable to start connection service")

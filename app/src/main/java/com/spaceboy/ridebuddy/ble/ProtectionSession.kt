@@ -34,6 +34,14 @@ internal sealed interface ProtectionAction {
  * by [AndroidBikeConnection]; this class accepts protocol events and returns the next serialized
  * side effect. Stale duplicate callbacks are ignored, while events that would create an impossible
  * state fail explicitly.
+ *
+ * Two things here are worth separating. Answering a recognised challenge whenever it arrives is
+ * OEM-derived: the India app handles `8610` from a single stateless callback with no notion of a
+ * phase, so it answers a late challenge exactly as it answers the first. Everything about
+ * *resuming* afterwards — [Resume], [State.Responding.deferredEvidence], and the verification
+ * timeout they interact with — is this app's own addition, because this app has a verification
+ * phase that the OEM does not. Those paths are defensive: no capture shows the cluster issuing a
+ * second challenge, and the OEM code cannot tell us whether it does.
  */
 internal class ProtectionSession(
     private val previouslyAccepted: Boolean,
@@ -52,6 +60,15 @@ internal class ProtectionSession(
         data class Ready(val path: ProtectionPath) : State
     }
 
+    /**
+     * Where a completed response write returns to.
+     *
+     * [BeginVerification] is the observed case: the first challenge of a fresh pairing. The other
+     * two describe a challenge arriving after verification has already started, which has not been
+     * observed on hardware. They are reachable only on the fresh-pairing path, which stays
+     * subscribed to the challenge endpoint for the life of the link; the stored-acceptance path
+     * never subscribes to it, so no challenge can arrive there at all.
+     */
     private sealed interface Resume {
         val path: ProtectionPath
 
@@ -95,15 +112,13 @@ internal class ProtectionSession(
         else -> ProtectionAction.None
     }
 
-    fun onChallengeSubscriptionReady(): ProtectionAction = when (state) {
-        State.SubscribingChallenge -> {
-            state = State.AwaitingChallenge
-            ProtectionAction.None
-        }
-
-        // The indication can arrive before Android reports the successful CCCD write.
-        is State.Responding -> ProtectionAction.None
-        else -> ProtectionAction.None
+    /**
+     * The indication can arrive before Android reports the successful CCCD write, so every state
+     * other than [State.SubscribingChallenge] is a callback that has already been overtaken.
+     */
+    fun onChallengeSubscriptionReady(): ProtectionAction {
+        if (state == State.SubscribingChallenge) state = State.AwaitingChallenge
+        return ProtectionAction.None
     }
 
     fun onChallenge(value: ByteArray): ProtectionAction {
@@ -188,12 +203,14 @@ internal class ProtectionSession(
             ProtectionAction.CompleteAuthentication(evidence)
         }
 
-        is State.Responding -> if (
-            current.resume is Resume.ContinueVerification && current.deferredEvidence == null
-        ) {
-            state = current.copy(deferredEvidence = evidence)
-            ProtectionAction.None
-        } else {
+        // Defensive rather than observed. If a challenge ever does interrupt verification, the
+        // evidence that would finish it must survive the in-flight response: acting on it would
+        // claim a session the bike has not acknowledged, and dropping it would let this app's own
+        // verification timeout retire a healthy link. So it is held for the write callback.
+        is State.Responding -> {
+            if (current.isAwaitingFirstEvidence()) {
+                state = current.copy(deferredEvidence = evidence)
+            }
             ProtectionAction.None
         }
 
@@ -207,13 +224,8 @@ internal class ProtectionSession(
 
     fun onVerificationTimeout(): ProtectionAction = when (val current = state) {
         is State.Verifying -> verificationTimeoutFailure()
-        is State.Responding -> if (
-            current.resume is Resume.ContinueVerification && current.deferredEvidence == null
-        ) {
-            verificationTimeoutFailure()
-        } else {
-            ProtectionAction.None
-        }
+        is State.Responding ->
+            if (current.isAwaitingFirstEvidence()) verificationTimeoutFailure() else ProtectionAction.None
 
         else -> ProtectionAction.None
     }
@@ -226,6 +238,15 @@ internal class ProtectionSession(
     } else {
         ProtectionAction.None
     }
+
+    /**
+     * Re-authenticating mid-verification, with the evidence that would finish it still missing.
+     * The same condition decides both that evidence is worth holding and that a verification
+     * timeout is a real failure rather than a write that is about to complete. See [Resume] for
+     * why this state is defensive rather than something the cluster is known to produce.
+     */
+    private fun State.Responding.isAwaitingFirstEvidence(): Boolean =
+        resume is Resume.ContinueVerification && deferredEvidence == null
 
     private fun startResponse(
         challenge: ByteArray,

@@ -34,11 +34,6 @@ object TftPacketEncoder {
         }
     }
 
-    fun textRows(text: String, maxRows: Int = 3): List<ByteArray> {
-        val chunks = utf8Chunks(text, bytesPerRow = 16, maxRows = maxRows.coerceIn(1, 3))
-        return chunks.mapIndexed(::textRow)
-    }
-
     /**
      * Produces all three cluster rows so shorter replacement text also clears
      * characters left behind by the previous navigation or alert message.

@@ -56,8 +56,6 @@ internal class GattOperationScheduler {
         removeMatching(criticalQueue, predicate) + removeMatching(normalQueue, predicate)
     }
 
-    fun hasNoActiveOperation(): Boolean = synchronized(lock) { activeOperation == null }
-
     fun clear(): List<GattOperation> = synchronized(lock) {
         buildList {
             activeOperation?.let(::add)

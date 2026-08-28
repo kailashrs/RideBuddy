@@ -88,7 +88,8 @@ class BikeConnectionService : Service() {
         when (intent?.action) {
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
             ActionRestartConnect -> {
-                val automatic = intent.getBooleanExtra(ExtraAutomaticRequest, false)
+                val trigger = intent.connectionTriggerExtra()
+                val automatic = trigger.isAutomatic()
                 if (automatic && !container.bikeConnectionDemand.canStartAutomaticConnection()) {
                     container.connectionEventJournal.record(
                         "Automatic connection request ignored after manual disconnect",
@@ -108,11 +109,7 @@ class BikeConnectionService : Service() {
                         BikeConnectionTarget(
                             address = address,
                             deviceName = name,
-                            trigger = if (automatic) {
-                                ConnectionAttemptTrigger.PresenceAppearance
-                            } else {
-                                ConnectionAttemptTrigger.UserRequest
-                            },
+                            trigger = trigger,
                         ),
                     )
                 } else {
@@ -245,6 +242,12 @@ class BikeConnectionService : Service() {
     private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
         BluetoothAddress.fromBytes(getByteArrayExtra(ExtraAddressBytes))
 
+    /** An intent from an older process may carry a name this build no longer knows. */
+    private fun Intent.connectionTriggerExtra(): ConnectionAttemptTrigger =
+        getStringExtra(ExtraTrigger)?.let { name ->
+            ConnectionAttemptTrigger.entries.firstOrNull { trigger -> trigger.name == name }
+        } ?: ConnectionAttemptTrigger.UserRequest
+
     companion object {
         internal const val NotificationId = 457
         internal const val ActionDisconnect = "com.spaceboy.ridebuddy.action.DISCONNECT_BIKE"
@@ -253,7 +256,7 @@ class BikeConnectionService : Service() {
         private const val ExtraAddressBytes = "address_bytes"
         private const val ExtraName = "name"
         private const val ExtraVisibleActivityLaunch = "visible_activity_launch"
-        private const val ExtraAutomaticRequest = "automatic_request"
+        private const val ExtraTrigger = "attempt_trigger"
 
         fun disconnect(context: Context) {
             val appContext = context.applicationContext
@@ -269,10 +272,10 @@ class BikeConnectionService : Service() {
             context: Context,
             bike: AssociatedBike,
             launchedFromVisibleActivity: Boolean = false,
-            automatic: Boolean = false,
+            trigger: ConnectionAttemptTrigger = ConnectionAttemptTrigger.UserRequest,
         ): Boolean {
             val appContainer = context.applicationContext.appContainer
-            if (automatic && !appContainer.bikeConnectionDemand.canStartAutomaticConnection()) {
+            if (trigger.isAutomatic() && !appContainer.bikeConnectionDemand.canStartAutomaticConnection()) {
                 appContainer.connectionEventJournal.record(
                     "Automatic connection request ignored after manual disconnect",
                 )
@@ -285,7 +288,7 @@ class BikeConnectionService : Service() {
                     .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
                     .putExtra(ExtraName, bike.name)
                     .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity)
-                    .putExtra(ExtraAutomaticRequest, automatic),
+                    .putExtra(ExtraTrigger, trigger.name),
             )
             if (!started) {
                 context.appContainer.bikeConnection.notifyStartFailed(
@@ -303,6 +306,12 @@ class BikeConnectionService : Service() {
         }
     }
 }
+
+/**
+ * Whether the stack, rather than the rider, asked for this attempt. Automatic attempts are the ones
+ * a manual disconnect suppresses; an explicit request clears that suppression instead.
+ */
+internal fun ConnectionAttemptTrigger.isAutomatic(): Boolean = this != ConnectionAttemptTrigger.UserRequest
 
 internal fun shouldTrackRideLocation(
     locationForegroundEnabled: Boolean,

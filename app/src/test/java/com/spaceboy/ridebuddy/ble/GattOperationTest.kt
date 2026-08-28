@@ -126,7 +126,6 @@ class GattOperationTest {
         )
 
         assertEquals(BikeWriteMode.NoResponsePreferred, operation.mode)
-        assertEquals(GattStartAction.AwaitCallback, gattStartAction(started = true))
     }
 
     @Test
@@ -156,7 +155,6 @@ class GattOperationTest {
             GattFailureAction.CompleteFailure,
             gattFailureAction(GattFailureSource.SynchronousStart, null, 2, maxRetries = 2),
         )
-        assertEquals(GattStartAction.HandleSynchronousFailure, gattStartAction(started = false))
         assertEquals(200L, gattOperationRetryDelayMillis(0))
         assertEquals(400L, gattOperationRetryDelayMillis(1))
         assertEquals(800L, gattOperationRetryDelayMillis(2))
@@ -186,13 +184,6 @@ class GattOperationTest {
             GattFailureAction.CompleteFailure,
             gattFailureAction(GattFailureSource.StatusCallback, 3, 0, maxRetries = 2),
         )
-    }
-
-    @Test
-    fun operationStatusLabelsDoNotConfuseAttAuthorizationWithLinkTimeout() {
-        assertEquals("insufficient authorization", gattOperationStatusLabel(8))
-        assertEquals("generic GATT error", gattOperationStatusLabel(0x85))
-        assertEquals("connection congested", gattOperationStatusLabel(143))
     }
 
     @Test

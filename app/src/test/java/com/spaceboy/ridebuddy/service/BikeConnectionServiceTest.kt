@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.service
 
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -35,6 +36,13 @@ class BikeConnectionServiceTest {
             ConnectionServiceStateAction.PublishNotification,
             connectionServiceStateAction(BikeConnectionState.Authenticating("bike"), receivedStartCommand = true),
         )
+    }
+
+    @Test
+    fun `every trigger except an explicit request is suppressed by a manual disconnect`() {
+        assertFalse(ConnectionAttemptTrigger.UserRequest.isAutomatic())
+        assertTrue(ConnectionAttemptTrigger.PresenceAppearance.isAutomatic())
+        assertTrue(ConnectionAttemptTrigger.AppLaunch.isAutomatic())
     }
 
     @Test

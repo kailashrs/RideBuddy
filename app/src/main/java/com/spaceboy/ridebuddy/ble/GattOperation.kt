@@ -59,11 +59,6 @@ internal fun gattStartRejectionLabel(rejection: GattStartRejection): String = wh
     GattStartRejection.Unknown -> "rejected by the Bluetooth stack"
 }
 
-internal enum class GattStartAction {
-    AwaitCallback,
-    HandleSynchronousFailure,
-}
-
 internal enum class GattFailureSource {
     SynchronousStart,
     StatusCallback,
@@ -80,9 +75,6 @@ internal enum class GattOperationPriority {
     Normal,
     Critical,
 }
-
-internal fun gattStartAction(started: Boolean): GattStartAction =
-    if (started) GattStartAction.AwaitCallback else GattStartAction.HandleSynchronousFailure
 
 internal fun gattFailureAction(
     source: GattFailureSource,
@@ -163,22 +155,6 @@ internal fun gattStatusName(status: Int): String = when (status) {
 
 internal fun gattOperationRetryDelayMillis(attempt: Int): Long =
     minOf(1_000L, 200L shl attempt.coerceIn(0, 2))
-
-internal fun gattOperationStatusLabel(status: Int): String = when (status) {
-    BluetoothGatt.GATT_SUCCESS -> "success"
-    BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION -> "insufficient authentication"
-    BluetoothGatt.GATT_INSUFFICIENT_AUTHORIZATION -> "insufficient authorization"
-    GattInsufficientEncryptionKeySize -> "insufficient encryption key size"
-    BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION -> "insufficient encryption"
-    BluetoothGatt.GATT_INVALID_OFFSET -> "invalid offset"
-    BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH -> "invalid attribute length"
-    BluetoothGatt.GATT_CONNECTION_CONGESTED -> "connection congested"
-    GattBusy -> "GATT busy"
-    GattGenericError -> "generic GATT error"
-    BluetoothGatt.GATT_CONNECTION_TIMEOUT -> "GATT connection timeout"
-    BluetoothGatt.GATT_FAILURE -> "GATT failure"
-    else -> "status $status"
-}
 
 private const val GattBusy = 0x84
 private const val GattGenericError = 0x85

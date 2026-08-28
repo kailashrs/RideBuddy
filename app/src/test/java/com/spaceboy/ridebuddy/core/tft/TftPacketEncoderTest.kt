@@ -23,10 +23,10 @@ class TftPacketEncoderTest {
     }
 
     @Test
-    fun textIsSplitIntoThreeSixteenByteRows() {
-        val rows = TftPacketEncoder.textRows("1234567890abcdefghijklmnopqrstuv")
+    fun textIsSplitIntoSixteenByteRows() {
+        val rows = TftPacketEncoder.displayTextRows("1234567890abcdefghijklmnopqrstuv")
 
-        assertEquals(2, rows.size)
+        assertEquals(2, rows.count(::isPopulated))
         assertEquals(0, rows[0][1].toInt())
         assertEquals(1, rows[1][1].toInt())
         assertEquals(0x2E, rows[1].last().toInt() and 0xFF)
@@ -34,7 +34,7 @@ class TftPacketEncoderTest {
 
     @Test
     fun textRowMatchesOemLengthAndTerminatorLayout() {
-        val row = TftPacketEncoder.textRows("A", maxRows = 1).single()
+        val row = TftPacketEncoder.displayTextRows("A", maxContentRows = 1).first()
 
         assertArrayEquals(byteArrayOf(4, 0, 5, 'A'.code.toByte(), 0x2E), row)
         assertEquals(row.size, row[2].toInt() and 0xFF)
@@ -42,10 +42,10 @@ class TftPacketEncoderTest {
 
     @Test
     fun textRowsNeverSplitUtf8CodePoints() {
-        val rows = TftPacketEncoder.textRows("MG रोड դեպի café 🚦 आगे")
+        val rows = TftPacketEncoder.displayTextRows("MG रोड դեպի café 🚦 आगे")
 
         rows.forEach { row ->
-            val payloadLength = (row[2].toInt() and 0xFF) - 4
+            val payloadLength = payloadLength(row)
             val decoded = row.copyOfRange(3, 3 + payloadLength).toString(Charsets.UTF_8)
             assertFalse(decoded.contains('\uFFFD'))
             assert(payloadLength <= 16)
@@ -54,7 +54,9 @@ class TftPacketEncoderTest {
 
     @Test
     fun compactTextUsesOneRow() {
-        assertEquals(1, TftPacketEncoder.textRows("A road name longer than one row", maxRows = 1).size)
+        val rows = TftPacketEncoder.displayTextRows("A road name longer than one row", maxContentRows = 1)
+
+        assertEquals(1, rows.count(::isPopulated))
     }
 
     @Test
@@ -81,4 +83,8 @@ class TftPacketEncoderTest {
             TftPacketEncoder.session(80),
         )
     }
+
+    private fun payloadLength(row: ByteArray): Int = (row[2].toInt() and 0xFF) - 4
+
+    private fun isPopulated(row: ByteArray): Boolean = payloadLength(row) > 0
 }

@@ -38,7 +38,6 @@ class GattSessionTest {
         assertFalse(session.close(disconnectFirst = true))
 
         assertEquals(1, transport.closeCount)
-        assertTrue(session.isClosed)
         assertNull(session.openTransport())
     }
 
@@ -67,7 +66,7 @@ class GattSessionTest {
 
         registry.retireCurrent(disconnectFirst = true)
 
-        assertTrue(session.isClosed)
+        assertNull(session.openTransport())
         assertTrue(transport.disconnectedFirst)
         assertFalse(registry.isCurrent(transport))
         assertTrue(registry.isRetired(transport))
@@ -99,8 +98,8 @@ class GattSessionTest {
         val first = registry.open(firstTransport, openedAtElapsedRealtime = 0L)
         val second = registry.open(secondTransport, openedAtElapsedRealtime = 10L)
 
-        assertTrue(first.isClosed)
-        assertFalse(second.isClosed)
+        assertNull(first.openTransport())
+        assertSame(secondTransport, second.openTransport())
         assertNotEquals(first.id, second.id)
         assertSame(second, registry.current())
         assertEquals(1, firstTransport.closeCount)
@@ -121,18 +120,21 @@ class GattSessionTest {
     }
 
     @Test
-    fun `retired history is bounded but still covers recent sessions`() {
-        val registry = GattSessionRegistry(::closeTransport, retainedRetiredSessions = 2)
-        val transports = List(4) { index -> FakeTransport("t$index") }
+    fun `every retired session stays recognisable, however much the link churned`() {
+        val registry = registry()
+        val transports = List(12) { index -> FakeTransport("t$index") }
 
         transports.forEach { transport -> registry.open(transport, openedAtElapsedRealtime = 0L) }
         registry.retireCurrent(disconnectFirst = false)
 
-        // Every transport was closed exactly once even though only the newest are remembered.
-        transports.forEach { transport -> assertEquals(1, transport.closeCount) }
-        assertTrue(registry.isRetired(transports[3]))
-        assertTrue(registry.isRetired(transports[2]))
-        assertFalse(registry.isRetired(transports[0]))
-        assertEquals(4, closures.size)
+        // A very late callback from the oldest session must still be recognised rather than
+        // closed a second time, so the history cannot be capped at a handful of entries.
+        transports.forEach { transport ->
+            assertEquals(1, transport.closeCount)
+            assertTrue(registry.isRetired(transport))
+            assertFalse(registry.isCurrent(transport))
+        }
+        assertEquals(12, closures.size)
+        assertFalse(registry.isRetired(FakeTransport("never opened")))
     }
 }

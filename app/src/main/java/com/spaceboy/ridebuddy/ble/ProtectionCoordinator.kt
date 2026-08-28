@@ -38,10 +38,11 @@ internal class ProtectionCoordinator(
         get() = session?.phase ?: ProtectionPhase.Idle
 
     fun begin(previouslyAccepted: Boolean) {
-        session = ProtectionSession(previouslyAccepted = previouslyAccepted)
+        val started = ProtectionSession(previouslyAccepted = previouslyAccepted)
+        session = started
         syncDiagnostics()
         log("Services ready; authenticating${if (previouslyAccepted) " with stored acceptance" else ""}")
-        handle(session?.begin() ?: ProtectionAction.Fail("Authentication session is missing"))
+        handle(started.begin())
     }
 
     fun reset() {
@@ -150,7 +151,6 @@ internal class ProtectionCoordinator(
     }
 
     private fun beginPostAuthenticationVerification() {
-        syncDiagnostics()
         log("Starting post-authentication verification via ${session?.path?.name ?: "unknown path"}")
         val subscriptions = BleCharacteristics.PostAuthenticationSubscriptions.map { uuid ->
             GattOperation.Subscribe(

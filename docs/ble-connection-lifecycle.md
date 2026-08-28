@@ -22,12 +22,21 @@ from silently handing the stack a new budget.
 
 `EVENT_BT_CONNECTED` is classic-Bluetooth/HID connectivity. It is journaled and otherwise ignored.
 
+`ConnectionAttemptTrigger` names which of these paths started an attempt, and the launch-time
+attempt has its own value (`AppLaunch`). It is automatic in the sense that a manual disconnect
+suppresses it, but no BLE appearance produced it, so it is not reported as `PresenceAppearance`.
+
 ## 2. A session is closed exactly once
 
 Android keeps delivering callbacks from a `BluetoothGatt` after the app stops using it, so the
-handle cannot be a nullable field. `GattSessionRegistry` owns the live session and a short history
-of retired ones; `GattSession.close()` is idempotent and reports whether it did the work. A callback
+handle cannot be a nullable field. `GattSessionRegistry` owns the live session and remembers every
+retired one; `GattSession.close()` is idempotent and reports whether it did the work. A callback
 from a retired instance is recognised and dropped, never closed a second time.
+
+The retired history is held as weak references rather than capped at a fixed length. A cap is not
+safe here: once an entry is evicted, a late callback from that instance is no longer recognised, and
+the fallback for an unrecognised handle is to close it — the second close the rule forbids. A weak
+entry lasts exactly as long as the instance that could still call back.
 
 ## 3. Failures are classified before they are acted on
 
