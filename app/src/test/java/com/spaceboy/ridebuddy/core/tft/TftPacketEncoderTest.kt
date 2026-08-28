@@ -1,6 +1,8 @@
 package com.spaceboy.ridebuddy.core.tft
 
 import com.google.android.libraries.mapsplatform.turnbyturn.model.Maneuver
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,7 +10,7 @@ import org.junit.Test
 
 class TftPacketEncoderTest {
     @Test
-    fun maneuverPacketUsesOemBigEndianDistanceLayout() {
+    fun maneuverPacketUsesOemLittleEndianDistanceLayout() {
         val packet = TftPacketEncoder.maneuver(
             current = Maneuver.TURN_LEFT,
             next = Maneuver.TURN_RIGHT,
@@ -17,8 +19,67 @@ class TftPacketEncoderTest {
         )
 
         assertArrayEquals(
-            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 1, 2, 3, 0x2E),
+            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 3, 2, 1, 0x2E),
             packet,
+        )
+    }
+
+    /**
+     * The regression this guards: written most-significant byte first, every distance below
+     * 65,536 m — which is nearly all of them — reached the cluster as a wildly different value,
+     * and anything under 256 m arrived as zero.
+     */
+    @Test
+    fun shortManeuverDistanceKeepsItsLowByteFirst() {
+        val packet = TftPacketEncoder.maneuver(
+            current = Maneuver.TURN_RIGHT,
+            next = 0,
+            roundaboutExit = 0,
+            distanceMetres = 500,
+        )
+
+        // 500 == 0x0001F4, so the OEM puts F4 in the first distance byte.
+        assertArrayEquals(byteArrayOf(0xF4.toByte(), 1, 0), packet.copyOfRange(5, 8))
+    }
+
+    @Test
+    fun tripPacketMatchesOemFieldAndByteOrder() {
+        val arrival = ZonedDateTime.of(2026, 3, 14, 9, 26, 0, 0, ZoneId.systemDefault())
+
+        val packet = TftPacketEncoder.trip(
+            arrivalEpochMillis = arrival.toInstant().toEpochMilli(),
+            destinationDistanceMetres = 0x01_02_03,
+            maneuverDistanceMetres = 500,
+        )
+
+        assertArrayEquals(
+            byteArrayOf(
+                3,
+                // The arrival clock is read back from the same instant, so a zone whose DST gap
+                // shifts 09:26 cannot make this flaky.
+                arrival.minute.toByte(),
+                arrival.hour.toByte(),
+                // Destination distance first, then distance to the current maneuver.
+                3, 2, 1,
+                0xF4.toByte(), 1, 0,
+                0x2E,
+            ),
+            packet,
+        )
+    }
+
+    @Test
+    fun distanceFieldsClampToTwentyFourBits() {
+        val packet = TftPacketEncoder.maneuver(
+            current = Maneuver.STRAIGHT,
+            next = 0,
+            roundaboutExit = 0,
+            distanceMetres = Int.MAX_VALUE,
+        )
+
+        assertArrayEquals(
+            byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()),
+            packet.copyOfRange(5, 8),
         )
     }
 

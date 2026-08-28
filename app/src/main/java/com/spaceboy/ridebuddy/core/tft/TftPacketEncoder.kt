@@ -14,7 +14,7 @@ object TftPacketEncoder {
             this[2] = roundaboutExit.coerceIn(0, 255).toByte()
             this[3] = 0xFF.toByte()
             this[4] = clusterManeuver(next).toByte()
-            writeUInt24BigEndian(offset = 5, value = distanceMetres)
+            writeUInt24LittleEndian(offset = 5, value = distanceMetres)
             this[8] = End.toByte()
         }
 
@@ -28,8 +28,8 @@ object TftPacketEncoder {
             this[0] = 3
             this[1] = arrival.minute.toByte()
             this[2] = arrival.hour.toByte()
-            writeUInt24BigEndian(offset = 3, value = destinationDistanceMetres)
-            writeUInt24BigEndian(offset = 6, value = maneuverDistanceMetres)
+            writeUInt24LittleEndian(offset = 3, value = destinationDistanceMetres)
+            writeUInt24LittleEndian(offset = 6, value = maneuverDistanceMetres)
             this[9] = End.toByte()
         }
     }
@@ -95,11 +95,20 @@ object TftPacketEncoder {
         }
     }
 
-    private fun ByteArray.writeUInt24BigEndian(offset: Int, value: Int) {
+    /**
+     * The cluster reads these 24-bit fields least-significant byte first.
+     *
+     * The OEM builder makes this hard to see: `q(int)` renders the value as hex, chunks it into
+     * bytes, reverses, and fills a three-slot array from index 2 downward, producing a
+     * right-aligned *big-endian* array. Every packet builder then emits that array in reverse —
+     * `iArr[5] = q[2]` for the maneuver distance, and the same pattern for both `8230` fields — so
+     * the bytes that reach the wire are little-endian. See docs/aprilia-rs457-ble-protocol.md.
+     */
+    private fun ByteArray.writeUInt24LittleEndian(offset: Int, value: Int) {
         val safe = value.coerceIn(0, 0xFF_FFFF)
-        this[offset] = (safe ushr 16).toByte()
+        this[offset] = safe.toByte()
         this[offset + 1] = (safe ushr 8).toByte()
-        this[offset + 2] = safe.toByte()
+        this[offset + 2] = (safe ushr 16).toByte()
     }
 
     private fun utf8Chunks(text: String, bytesPerRow: Int, maxRows: Int): List<ByteArray> {

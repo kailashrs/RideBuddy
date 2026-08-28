@@ -70,9 +70,9 @@ The CCCD used for notification/indication subscription is the standard descripto
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
 | `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`. |
-| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceField[3], 0x2E]` (9 bytes total). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. |
+| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x2E]` (9 bytes total). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
 | `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x2E]`. |
-| `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, timeField[3], distanceField[3], 0x2E]`; the exact field interpretation needs TFT validation. |
+| `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x2E]`. Both distances are **little-endian**. `minute`/`hour` come from a `Calendar` over an arrival timestamp in the OEM code, but whether the cluster renders them as an arrival clock or a remaining duration still needs TFT validation. |
 | `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4 (i.e. the total packet size including the four framing bytes), capped at 20 for the 16-character row limit. |
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x2E]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x2E]`; observed state values include 80, 82, 83, and 87. |
@@ -154,6 +154,38 @@ The OEM's navigation state is a set of fixed TFT fields rather than a drawing AP
 - `8240`: three short text rows. The first two are populated by splitting one string at 16 characters; the third is independently truncated to 16 characters. UTF-8 is used by the app, but ASCII/Latin text is the safest first live-test assumption.
 - `8250`: clear/reset.
 - `8260` and `8270`: session/status transitions, including recalculation, signal loss, and arrival-related states.
+
+### 24-bit distance fields
+
+`8210` and `8230` carry their distances as three bytes, **least-significant byte first**. This is
+easy to misread from the decompiled builder, so the derivation is recorded here rather than
+re-established each time.
+
+`q(int)` in `ui/btconnect/support/a.java` renders the value as a hex string, chunks it into bytes,
+reverses, and fills a three-slot array from index 2 downward — producing a right-aligned
+*big-endian array*:
+
+```text
+q(500) -> q(0x0001F4) -> ["01","f4"] -> reversed -> arr[2]=0xF4, arr[1]=0x01, arr[0]=0x00
+```
+
+Every packet builder then emits that array **in reverse**, which is what puts the low byte on the
+wire first:
+
+```java
+// maneuver — p()                      // trip — f()
+int[] iArrQ = q((int) this.g);         {this.s, l(), k(),
+iArr[5] = iArrQ[2];  // LSB             iArrQ2[2], iArrQ2[1], iArrQ2[0],  // destination distance
+iArr[6] = iArrQ[1];                     iArrQ[2],  iArrQ[1],  iArrQ[0],   // maneuver distance
+iArr[7] = iArrQ[0];  // MSB             this.N}
+```
+
+The two obfuscated stdlib calls inside `q()` resolve as `kotlin.collections.x.L` = `reversed()`
+(it delegates to `Collections.reverse`) and `x.W` = `withIndex()`.
+
+So 500 m goes out as `F4 01 00`. Sending it big-endian (`00 01 F4`) is read by the cluster as
+roughly 16 million metres, and any distance under 256 m collapses to zero — RideBuddy shipped that
+inversion until it was corrected against this derivation.
 
 The bundled `assets/ble_characteristic.json` lists 42 fixed maneuver labels with IDs 0–41. Production code maps the Mappls maneuver identifiers to TFT values including 1–16, 101–107, 151–158, and 200–205. The label `YEZDI Logo` in the asset is likely copied or stale and should not be treated as an RS 457-specific behavior.
 
