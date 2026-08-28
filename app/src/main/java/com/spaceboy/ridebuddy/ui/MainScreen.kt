@@ -261,6 +261,7 @@ internal fun MainScreenContent(
                 onOpenActiveNavigation = onOpenActiveNavigation,
                 onStopNavigation = onStopNavigation,
                 onSharedDestinationHandled = onSharedDestinationHandled,
+                onCancelNavigationStart = onCancelNavigationStart,
             )
 
             TopLevelDestination.History -> HistoryScreen(modifier, rides, settings.distanceUnits, onRideSelected)

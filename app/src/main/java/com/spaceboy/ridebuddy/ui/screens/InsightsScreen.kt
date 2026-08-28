@@ -22,9 +22,12 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -44,6 +47,7 @@ import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
 import java.util.Calendar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InsightsScreen(
     modifier: Modifier = Modifier,
@@ -75,14 +79,14 @@ fun InsightsScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Periods.forEach { (period, label) ->
-                FilterChip(
+        // Exactly one period is ever selected, which is what a segmented button says and a
+        // filter chip does not. It also gives equal-width segments without the weight() hack.
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            Periods.forEachIndexed { index, (period, label) ->
+                SegmentedButton(
                     selected = selectedPeriod == period,
                     onClick = { onPeriodSelected(period) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = Periods.size),
                     label = {
                         Text(
                             text = label,
@@ -91,7 +95,6 @@ fun InsightsScreen(
                             style = MaterialTheme.typography.labelSmall,
                         )
                     },
-                    modifier = Modifier.weight(1f),
                 )
             }
         }

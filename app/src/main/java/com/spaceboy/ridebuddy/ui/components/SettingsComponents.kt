@@ -4,18 +4,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -74,6 +76,8 @@ internal fun SettingsSliderRow(
     }
 }
 
+/** These choices are exclusive, so Material 3 asks for a segmented button rather than chips. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun <T> SettingsChoiceRow(
     title: String,
@@ -97,18 +101,18 @@ internal fun <T> SettingsChoiceRow(
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        SingleChoiceSegmentedButtonRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
         ) {
-            choices.forEach { choice ->
-                FilterChip(
+            choices.forEachIndexed { index, choice ->
+                SegmentedButton(
                     selected = choice == selectedChoice,
                     onClick = { onSelected(choice) },
-                    label = { Text(choiceLabel(choice)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = choices.size),
                     enabled = enabled,
+                    label = { Text(choiceLabel(choice)) },
                 )
             }
         }
@@ -186,6 +190,8 @@ internal fun SettingsRow(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
+    /** Replaces the navigation chevron for rows whose action is a button rather than the row. */
+    trailingContent: @Composable (() -> Unit)? = null,
 ) {
     val clickModifier = if (onClick != null) {
         modifier.clickable(
@@ -205,8 +211,10 @@ internal fun SettingsRow(
             }
         },
         trailingContent = {
-            if (onClick != null) {
-                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+            when {
+                trailingContent != null -> trailingContent()
+                onClick != null ->
+                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
             }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

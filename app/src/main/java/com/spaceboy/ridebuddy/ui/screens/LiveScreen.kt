@@ -24,19 +24,22 @@ import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,11 +50,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,6 +102,7 @@ fun LiveScreen(
     onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
     onSharedDestinationHandled: () -> Unit,
+    onCancelNavigationStart: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
@@ -257,7 +261,7 @@ fun LiveScreen(
                         }
                     }
                 } else {
-                    TextField(
+                    OutlinedTextField(
                         value = destination,
                         onValueChange = { value ->
                             if (sharedDestinationError != null) onSharedDestinationHandled()
@@ -284,11 +288,6 @@ fun LiveScreen(
                         maxLines = 3,
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.extraLarge,
-                        colors = androidx.compose.material3.TextFieldDefaults.colors(
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent
-                        )
                     )
                     Button(
                         onClick = {
@@ -365,12 +364,23 @@ fun LiveScreen(
     }
 
     if (isNavigationStarting) {
-        Dialog(onDismissRequest = {}) {
+        Dialog(onDismissRequest = onCancelNavigationStart) {
             Card {
-                Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.CircularProgressIndicator()
-                    Spacer(Modifier.width(16.dp))
-                    Text("Finding route...")
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.width(16.dp))
+                        Text("Finding route…")
+                    }
+                    TextButton(
+                        onClick = onCancelNavigationStart,
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("Cancel")
+                    }
                 }
             }
         }
@@ -534,7 +544,7 @@ private fun TelemetryCard(
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val displayedSpeed = UnitFormatter.chartSpeed(frame.speedKilometresPerHour, units).roundToInt()
-    val rpmFraction = (frame.engineRpm / 10500f).coerceIn(0f, 1f)
+    val rpmFraction = (frame.engineRpm / RedlineRpm.toFloat()).coerceIn(0f, 1f)
 
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -583,7 +593,9 @@ private fun TelemetryCard(
                     progress = { rpmFraction },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(16.dp),
+                        .height(16.dp)
+                        // Without this it is announced as a bare progress bar with no value.
+                        .semantics { stateDescription = "${frame.engineRpm} rpm of $RedlineRpm" },
                     color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     strokeCap = StrokeCap.Round
@@ -607,6 +619,7 @@ private fun TelemetryCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LiveDetailsSheet(
     live: LiveTelemetryStreams,
@@ -628,11 +641,15 @@ private fun LiveDetailsSheet(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Live details", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LiveDetailLevel.entries.forEach { option ->
-                FilterChip(
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            LiveDetailLevel.entries.forEachIndexed { index, option ->
+                SegmentedButton(
                     selected = level == option,
                     onClick = { onLevelChanged(option) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = LiveDetailLevel.entries.size,
+                    ),
                     label = { Text(option.label) },
                 )
             }
@@ -710,6 +727,9 @@ private fun LiveChart(title: String, values: List<Double?>, unit: String) {
         }
     }
 }
+
+/** Where the RS 457 tachometer turns red; the gauge fill and its warning colour key off this. */
+private const val RedlineRpm = 10_500
 
 /** Limits a live chart to a drawable amount of data without losing its beginning or latest sample. */
 private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<RideSample> {

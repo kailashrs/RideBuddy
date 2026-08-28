@@ -1,10 +1,8 @@
 package com.spaceboy.ridebuddy.ui.screens
 
 import android.content.pm.PackageManager
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,9 +55,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -78,7 +73,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -403,6 +397,13 @@ fun SettingsScreen(
         item("trip-tracking") {
             TripTrackingSection(settings, settingsActions, speed)
         }
+        item("ride-data") {
+            RideDataSection(
+                rideCount = rideCount,
+                onExportRideHistory = onExportRideHistory,
+                onRequestClearHistory = { confirmClearRideHistory = true },
+            )
+        }
         item("safety-alerts") {
             SafetyAlertsSection(
                 settings = settings,
@@ -422,6 +423,13 @@ fun SettingsScreen(
         item("app-theme") {
             AppThemeSection(settings, settingsActions)
         }
+        item("permissions") {
+            PermissionsSection(
+                onOpenAppPermissions = onOpenAppPermissions,
+                onShowAbout = { showAbout = true },
+                onResetOnboarding = onResetOnboarding,
+            )
+        }
         item("developer-tools") {
             DeveloperToolsSection(
                 settings = settings,
@@ -430,20 +438,6 @@ fun SettingsScreen(
                 onOpenDiagnostics = onOpenDiagnostics,
                 onViewCapture = { showBleCapture = true },
                 onRequestStationaryTest = { confirmTest = true },
-            )
-        }
-        item("permissions") {
-            PermissionsSection(
-                onOpenAppPermissions = onOpenAppPermissions,
-                onShowAbout = { showAbout = true },
-                onResetOnboarding = onResetOnboarding,
-            )
-        }
-        item("ride-data") {
-            RideDataSection(
-                rideCount = rideCount,
-                onExportRideHistory = onExportRideHistory,
-                onRequestClearHistory = { confirmClearRideHistory = true },
             )
         }
     }
@@ -490,18 +484,11 @@ private fun MotorcycleConnectionSection(
         )
         if (bikeAssociation.bike != null) {
             HorizontalDivider(Modifier.padding(start = 56.dp))
-            ListItem(
-                headlineContent = { Text("Bluetooth Pairing") },
-                supportingContent = { Text("${bikeAssociation.bike.address.takeLast(5)} • Paired via Bluetooth") },
-                leadingContent = {
-                    Icon(
-                        Icons.Outlined.BluetoothConnected,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                },
-                trailingContent = { TextButton(onClick = { onRequestForget() }) { Text("Forget") } },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            SettingsRow(
+                icon = Icons.Outlined.BluetoothConnected,
+                title = "Bluetooth Pairing",
+                supportingText = "${bikeAssociation.bike.address.takeLast(5)} • Paired via Bluetooth",
+                trailingContent = { TextButton(onClick = onRequestForget) { Text("Forget") } },
             )
         }
     }
@@ -600,22 +587,16 @@ private fun NavigationAndCallsSection(
         HorizontalDivider(Modifier.padding(start = 56.dp))
         val enabledInstalledCount =
             installedSupportedApps.count { it.packageName in settings.enabledNotificationPackages }
-        ListItem(
-            headlineContent = { Text("Supported apps") },
-            supportingContent = {
-                Text(
-                    if (installedSupportedApps.isEmpty()) "No supported messaging or social apps detected on device"
-                    else "$enabledInstalledCount of ${installedSupportedApps.size} installed apps enabled"
-                )
+        SettingsRow(
+            icon = Icons.Outlined.Apps,
+            title = "Supported apps",
+            supportingText = if (installedSupportedApps.isEmpty()) {
+                "No supported messaging or social apps detected on device"
+            } else {
+                "$enabledInstalledCount of ${installedSupportedApps.size} installed apps enabled"
             },
-            leadingContent = {
-                Box(modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(Icons.Outlined.Apps, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            },
-            trailingContent = { TextButton(onClick = { onManageSupportedApps() }) { Text("Manage") } },
-            modifier = Modifier.clickable { onManageSupportedApps() },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            onClick = onManageSupportedApps,
+            trailingContent = { TextButton(onClick = onManageSupportedApps) { Text("Manage") } },
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsRow(
@@ -873,19 +854,11 @@ private fun DeveloperToolsSection(
     onRequestStationaryTest: () -> Unit,
 ) {
     SettingsSection("Developer tools") {
-        ListItem(
-            headlineContent = { Text("Use only while parked") },
-            supportingContent = {
-                Text(
-                    "For protocol research and troubleshooting. Raw Bluetooth payloads may include personal data; capture only what you intend to inspect or share.",
-                )
-            },
-            leadingContent = {
-                Box(modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        SettingsRow(
+            icon = Icons.Outlined.Info,
+            title = "Use only while parked",
+            supportingText = "For protocol research and troubleshooting. Raw Bluetooth payloads may " +
+                "include personal data; capture only what you intend to inspect or share.",
         )
         HorizontalDivider()
         DeveloperToolsGroupLabel("Connection")
@@ -921,43 +894,24 @@ private fun DeveloperToolsSection(
             onCheckedChange = settingsActions.onBleCaptureEnabledChanged,
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
-        ListItem(
-            headlineContent = { Text("Review captured packets") },
-            supportingContent = {
-                Text(
-                    when {
-                        bleCapture.entries.isEmpty() -> "No packets captured"
-                        bleCapture.droppedEntries > 0 -> "${bleCapture.entries.size} kept • ${bleCapture.droppedEntries} older packets dropped"
-                        else -> "${bleCapture.entries.size} packets kept in memory"
-                    },
-                )
+        SettingsRow(
+            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+            title = "Review captured packets",
+            supportingText = when {
+                bleCapture.entries.isEmpty() -> "No packets captured"
+                bleCapture.droppedEntries > 0 ->
+                    "${bleCapture.entries.size} kept • ${bleCapture.droppedEntries} older packets dropped"
+                else -> "${bleCapture.entries.size} packets kept in memory"
             },
-            leadingContent = {
-                Box(modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.ReceiptLong,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            },
-            trailingContent = { TextButton(onClick = { onViewCapture() }) { Text("View") } },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            trailingContent = { TextButton(onClick = onViewCapture) { Text("View") } },
         )
         HorizontalDivider()
         DeveloperToolsGroupLabel("Display validation")
-        ListItem(
-            headlineContent = { Text("Stationary TFT validation") },
-            supportingContent = {
-                Text("Send diagnostic display writes while the motorcycle is parked.")
-            },
-            leadingContent = {
-                Box(modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(Icons.Outlined.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            },
-            trailingContent = { TextButton(onClick = { onRequestStationaryTest() }) { Text("Run") } },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        SettingsRow(
+            icon = Icons.Outlined.Tv,
+            title = "Stationary TFT validation",
+            supportingText = "Send diagnostic display writes while the motorcycle is parked.",
+            trailingContent = { TextButton(onClick = onRequestStationaryTest) { Text("Run") } },
         )
     }
 }
@@ -999,22 +953,13 @@ private fun RideDataSection(
     onRequestClearHistory: () -> Unit,
 ) {
     SettingsSection("Ride Data & Export") {
-        ListItem(
-            headlineContent = { Text("Ride history") },
-            supportingContent = { Text("$rideCount saved rides stored on this device") },
-            leadingContent = {
-                Box(modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(
-                        Icons.Outlined.History,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            },
+        SettingsRow(
+            icon = Icons.Outlined.History,
+            title = "Ride history",
+            supportingText = "$rideCount saved rides stored on this device",
             trailingContent = {
-                TextButton(onClick = { onRequestClearHistory() }, enabled = rideCount > 0) { Text("Clear") }
+                TextButton(onClick = onRequestClearHistory, enabled = rideCount > 0) { Text("Clear") }
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsRow(

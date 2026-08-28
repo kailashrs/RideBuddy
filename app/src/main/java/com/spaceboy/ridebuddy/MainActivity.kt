@@ -312,6 +312,7 @@ class MainActivity : ComponentActivity() {
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,
         onSharedDestinationHandled = viewModel::clearSharedDestination,
+        onCancelNavigationStart = ::cancelNavigationStart,
         onInsightPeriodSelected = viewModel::selectInsightPeriod,
         onClearRideHistory = viewModel::clearRideHistory,
         onExportRideHistory = ::exportRideHistory,
@@ -587,6 +588,17 @@ class MainActivity : ComponentActivity() {
             navigationStartAttemptId?.let(viewModel::finishNavigationStart)
             if (navigationStartJob === currentJob) navigationStartJob = null
         }
+    }
+
+    /**
+     * Backs out of a route lookup. An auto-started share is handed back to the destination field
+     * rather than discarded, so the rider still has what they shared.
+     */
+    private fun cancelNavigationStart() {
+        navigationStartJob?.cancel()
+        viewModel.uiState.value.autoStartSharedDestination
+            ?.requestId
+            ?.let { requestId -> viewModel.restoreAutoStartSharedDestination(requestId) }
     }
 
     private fun openActiveNavigation() {

@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.RS457Companion" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowLightStatusBar">false</item>
+    <!--
+        Compose paints everything the rider sees; this theme only has to get the window right
+        before the first frame.
+
+        DayNight is the part that matters. The previous light-only parent painted a white window
+        behind a dark-mode app, so every cold start flashed white. The framework has no
+        DayNight.NoActionBar variant, so the action bar is switched off here instead.
+
+        windowLightStatusBar is deliberately absent: enableEdgeToEdge() sets the system-bar
+        appearance at runtime, and a fixed value here only contradicts it.
+    -->
+    <style name="Theme.RS457Companion" parent="android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

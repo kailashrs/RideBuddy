@@ -101,11 +101,21 @@ private val DarkColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF3D3331),
 )
 
-private val HighContrastLightColors = lightColorScheme(
+/**
+ * High contrast raises contrast; it must not change the brand.
+ *
+ * These are derived from the standard schemes rather than built from
+ * `lightColorScheme()` / `darkColorScheme()`, because every role left unnamed by a fresh scheme
+ * falls back to Material's baseline purple. Building them that way turned on an accessibility
+ * setting and recoloured secondary, tertiary, error and half the surfaces to a different palette.
+ */
+private val HighContrastLightColors = LightColors.copy(
     primary = Color(0xFF700007),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFFFDAD6),
     onPrimaryContainer = Color.Black,
+    background = Color.White,
+    onBackground = Color.Black,
     surface = Color.White,
     onSurface = Color.Black,
     surfaceVariant = Color(0xFFF0E4E2),
@@ -116,11 +126,13 @@ private val HighContrastLightColors = lightColorScheme(
     surfaceContainerHigh = Color(0xFFEBE0DE),
 )
 
-private val HighContrastDarkColors = darkColorScheme(
+private val HighContrastDarkColors = DarkColors.copy(
     primary = Color(0xFFFFB4AB),
     onPrimary = Color.Black,
     primaryContainer = Color(0xFFFFDAD6),
     onPrimaryContainer = Color.Black,
+    background = Color.Black,
+    onBackground = Color.White,
     surface = Color.Black,
     onSurface = Color.White,
     surfaceVariant = Color(0xFF292222),
