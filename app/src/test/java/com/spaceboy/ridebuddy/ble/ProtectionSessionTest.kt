@@ -158,50 +158,36 @@ class ProtectionSessionTest {
         assertEquals(ProtectionAction.None, session.begin())
     }
 
+    /**
+     * These two states were previously resumed from in place. They are unreachable on the
+     * stored-acceptance path, which never subscribes to 8610, and unobserved on the fresh-pairing
+     * one — so a challenge arriving there means our own bookkeeping is wrong, and the link is
+     * restarted instead. Stored acceptance survives, which is what makes that cheap.
+     */
     @Test
-    fun `known challenge during verification is answered and verification resumes`() {
+    fun `a challenge during verification restarts the link and keeps acceptance`() {
         val session = session(accepted = true)
         session.begin()
-        val challenge = hex("63 75 A3 A4 63 3B")
 
-        val response = session.onChallenge(challenge)
+        val action = session.onChallenge(hex("63 75 A3 A4 63 3B"))
 
-        assertTrue(response is ProtectionAction.WriteResponse)
-        assertEquals(ProtectionPhase.Responding, session.phase)
-        assertEquals(ProtectionPath.StoredAcceptance, session.path)
-        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
-        assertEquals(ProtectionPhase.Verifying, session.phase)
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
     }
 
     @Test
-    fun `evidence received during renewal response completes after its write callback`() {
-        val session = session(accepted = true)
-        session.begin()
-        session.onChallenge(hex("63 75 A3 A4 63 3B"))
-
-        assertEquals(
-            ProtectionAction.None,
-            session.onPostAuthenticationEvidence("valid telemetry"),
-        )
-        assertEquals(
-            ProtectionAction.CompleteAuthentication("valid telemetry"),
-            session.onProtectionResponseWritten(),
-        )
-        assertEquals(ProtectionPhase.Ready, session.phase)
-    }
-
-    @Test
-    fun `known challenge after readiness is answered without reopening subscriptions`() {
+    fun `a challenge after readiness restarts the link and keeps acceptance`() {
         val session = session(accepted = true)
         session.begin()
         session.onPostAuthenticationEvidence("VIN")
-
-        val response = session.onChallenge(hex("63 75 A3 A4 63 3B"))
-
-        assertTrue(response is ProtectionAction.WriteResponse)
-        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
         assertEquals(ProtectionPhase.Ready, session.phase)
-        assertEquals(ProtectionPath.StoredAcceptance, session.path)
+
+        val action = session.onChallenge(hex("63 75 A3 A4 63 3B"))
+
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
     }
 
     @Test

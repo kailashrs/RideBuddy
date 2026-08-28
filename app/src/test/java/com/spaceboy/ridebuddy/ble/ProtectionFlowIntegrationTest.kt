@@ -61,7 +61,7 @@ class ProtectionFlowIntegrationTest {
     }
 
     @Test
-    fun `recognized re-challenge preempts queued normal work and returns to ready`() {
+    fun `a re-challenge after readiness restarts the link instead of answering in place`() {
         val session = ProtectionSession(previouslyAccepted = true)
         val scheduler = GattOperationScheduler()
         session.begin()
@@ -72,19 +72,13 @@ class ProtectionFlowIntegrationTest {
         )
         scheduler.enqueue(queuedNormal)
 
-        val responseAction = session.onChallenge(hex("63 75 A3 A4 63 3B"))
-        responseAction as ProtectionAction.WriteResponse
-        val responseWrite = GattOperation.Write(
-            characteristic(BleCharacteristics.ProtectionResponse, BluetoothGattCharacteristic.PROPERTY_WRITE),
-            responseAction.value,
-            priority = GattOperationPriority.Critical,
-        )
-        scheduler.enqueue(responseWrite)
+        val action = session.onChallenge(hex("63 75 A3 A4 63 3B"))
 
-        assertSame(responseWrite, scheduler.beginNext())
-        scheduler.complete(responseWrite)
-        assertEquals(ProtectionAction.None, session.onProtectionResponseWritten())
-        assertEquals(ProtectionPhase.Ready, session.phase)
+        // No response write is produced, so nothing preempts the queue; the connection retires
+        // the link and runs a clean handshake, which keeps stored acceptance.
+        assertTrue(action is ProtectionAction.Fail)
+        action as ProtectionAction.Fail
+        assertEquals(ProtectionFailurePolicy.Reconnect, action.policy)
         assertSame(queuedNormal, scheduler.beginNext())
     }
 
