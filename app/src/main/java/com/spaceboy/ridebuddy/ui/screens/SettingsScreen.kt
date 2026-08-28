@@ -177,187 +177,41 @@ fun SettingsScreen(
     var showSupportedAppsDialog by remember { mutableStateOf(false) }
     var showBleCapture by remember { mutableStateOf(false) }
     if (confirmTest) {
-        AlertDialog(
-            onDismissRequest = { confirmTest = false },
-            title = { Text("Test the TFT?") },
-            text = { Text("Keep the motorcycle stationary. The test writes a maneuver, trip distance, text, speed limit and clear state.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmTest = false; onRunStationaryTest()
-                }) { Text("Run test") }
-            },
-            dismissButton = { TextButton(onClick = { confirmTest = false }) { Text("Cancel") } },
+        StationaryTestDialog(
+            onDismiss = { confirmTest = false },
+            onConfirm = { confirmTest = false; onRunStationaryTest() },
         )
     }
     if (confirmForget) {
-        AlertDialog(
-            onDismissRequest = { confirmForget = false },
-            title = { Text("Forget this bike?") },
-            text = { Text("The app will stop reconnecting automatically. You can associate the bike again at any time.") },
-            confirmButton = {
-                Button(
-                    onClick = { confirmForget = false; onForgetBike() },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) { Text("Forget") }
-            },
-            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
+        ForgetBikeDialog(
+            onDismiss = { confirmForget = false },
+            onConfirm = { confirmForget = false; onForgetBike() },
         )
     }
     if (confirmClearRideHistory) {
-        AlertDialog(
-            onDismissRequest = { confirmClearRideHistory = false },
-            title = { Text("Clear all ride history?") },
-            text = { Text("This permanently deletes $rideCount saved rides, their telemetry samples, route data, and performance records from this device. Export anything you want to keep first.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirmClearRideHistory = false
-                        onClearRideHistory()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) { Text("Delete history") }
-            },
-            dismissButton = { TextButton(onClick = { confirmClearRideHistory = false }) { Text("Cancel") } },
+        ClearHistoryDialog(
+            rideCount = rideCount,
+            onDismiss = { confirmClearRideHistory = false },
+            onConfirm = { confirmClearRideHistory = false; onClearRideHistory() },
         )
     }
     if (showAbout) {
-        AlertDialog(
-            onDismissRequest = { showAbout = false },
-            title = { Text("About RideBuddy") },
-            text = {
-                Text(
-                    "Version ${BuildConfig.VERSION_NAME}\n\n" +
-                            "RideBuddy is a third-party companion app for your motorcycle.\n\n" +
-                            "It brings turn-by-turn navigation, speed limits, incoming call controls, and safety alerts directly to your motorcycle's display, while automatically logging your rides and trip statistics privately on your phone.",
-                )
-            },
-            confirmButton = { TextButton(onClick = { showAbout = false }) { Text("Close") } },
-        )
+        AboutDialog(onDismiss = { showAbout = false })
     }
     if (showSupportedAppsDialog) {
-        Dialog(onDismissRequest = { showSupportedAppsDialog = false }) {
-            Surface(
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                ) {
-                    Text(
-                        "Supported notification apps",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Manage notification alerts for messaging and social apps installed on your device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        if (installedSupportedApps.isEmpty()) {
-                            Text(
-                                "No supported apps (WhatsApp, Messages, Instagram, Facebook, Gmail, Outlook, X) were detected on this device.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        } else {
-                            installedSupportedApps.forEach { app ->
-                                val enabled = app.packageName in settings.enabledNotificationPackages
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .toggleable(
-                                            value = enabled,
-                                            role = Role.Switch,
-                                            onValueChange = { value ->
-                                                settingsActions.onNotificationPackageChanged(app.packageName, value)
-                                            },
-                                        )
-                                        .padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            app.label,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            app.packageName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Switch(
-                                        checked = enabled,
-                                        onCheckedChange = null,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(onClick = { showSupportedAppsDialog = false }) {
-                            Text("Done")
-                        }
-                    }
-                }
-            }
-        }
+        SupportedAppsDialog(
+            installedSupportedApps = installedSupportedApps,
+            enabledPackages = settings.enabledNotificationPackages,
+            onPackageChanged = settingsActions.onNotificationPackageChanged,
+            onDismiss = { showSupportedAppsDialog = false },
+        )
     }
     if (showBleCapture) {
-        AlertDialog(
-            onDismissRequest = { showBleCapture = false },
-            title = { Text("BLE capture") },
-            text = {
-                Column(
-                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        "Raw GATT packets can include identifiers and notification text. The capture stays in memory until cleared or the app closes.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    if (bleCapture.entries.isEmpty()) {
-                        Text("No packets captured yet. Enable capture before connecting or using a feature.")
-                    } else {
-                        bleCapture.entries.asReversed().forEach { entry ->
-                            Text(entry.format(), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = onExportBleCapture, enabled = bleCapture.entries.isNotEmpty()) { Text("Share") }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onClearBleCapture, enabled = bleCapture.entries.isNotEmpty()) { Text("Clear") }
-                    TextButton(onClick = { showBleCapture = false }) { Text("Close") }
-                }
-            },
+        BleCaptureDialog(
+            bleCapture = bleCapture,
+            onExport = onExportBleCapture,
+            onClear = onClearBleCapture,
+            onDismiss = { showBleCapture = false },
         )
     }
     LazyColumn(
@@ -972,5 +826,224 @@ private fun DeveloperToolsGroupLabel(label: String) {
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp, end = 16.dp),
+    )
+}
+
+
+@Composable
+private fun StationaryTestDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("Test the TFT?") },
+        text = { Text("Keep the motorcycle stationary. The test writes a maneuver, trip distance, text, speed limit and clear state.") },
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss(); onConfirm()
+            }) { Text("Run test") }
+        },
+        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ForgetBikeDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("Forget this bike?") },
+        text = { Text("The app will stop reconnecting automatically. You can associate the bike again at any time.") },
+        confirmButton = {
+            Button(
+                onClick = { onDismiss(); onConfirm() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) { Text("Forget") }
+        },
+        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ClearHistoryDialog(
+    rideCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("Clear all ride history?") },
+        text = { Text("This permanently deletes $rideCount saved rides, their telemetry samples, route data, and performance records from this device. Export anything you want to keep first.") },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onDismiss()
+                    onConfirm()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) { Text("Delete history") }
+        },
+        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun AboutDialog(
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("About RideBuddy") },
+        text = {
+            Text(
+                "Version ${BuildConfig.VERSION_NAME}\n\n" +
+                        "RideBuddy is a third-party companion app for your motorcycle.\n\n" +
+                        "It brings turn-by-turn navigation, speed limits, incoming call controls, and safety alerts directly to your motorcycle's display, while automatically logging your rides and trip statistics privately on your phone.",
+            )
+        },
+        confirmButton = { TextButton(onClick = { onDismiss() }) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun SupportedAppsDialog(
+    installedSupportedApps: List<SupportedNotificationApp>,
+    enabledPackages: Set<String>,
+    onPackageChanged: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = { onDismiss() }) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 520.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+            ) {
+                Text(
+                    "Supported notification apps",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Manage notification alerts for messaging and social apps installed on your device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (installedSupportedApps.isEmpty()) {
+                        Text(
+                            "No supported apps (WhatsApp, Messages, Instagram, Facebook, Gmail, Outlook, X) were detected on this device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        installedSupportedApps.forEach { app ->
+                            val enabled = app.packageName in enabledPackages
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .toggleable(
+                                        value = enabled,
+                                        role = Role.Switch,
+                                        onValueChange = { value ->
+                                            onPackageChanged(app.packageName, value)
+                                        },
+                                    )
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        app.label,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        app.packageName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = enabled,
+                                    onCheckedChange = null,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = { onDismiss() }) {
+                        Text("Done")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BleCaptureDialog(
+    bleCapture: BleCaptureState,
+    onExport: () -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text("BLE capture") },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Raw GATT packets can include identifiers and notification text. The capture stays in memory until cleared or the app closes.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (bleCapture.entries.isEmpty()) {
+                    Text("No packets captured yet. Enable capture before connecting or using a feature.")
+                } else {
+                    bleCapture.entries.asReversed().forEach { entry ->
+                        Text(entry.format(), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onExport, enabled = bleCapture.entries.isNotEmpty()) { Text("Share") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onClear, enabled = bleCapture.entries.isNotEmpty()) { Text("Clear") }
+                TextButton(onClick = { onDismiss() }) { Text("Close") }
+            }
+        },
     )
 }
