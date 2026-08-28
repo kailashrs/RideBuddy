@@ -28,17 +28,6 @@ internal fun shouldReplayTftNavigation(
     hasLastInfo: Boolean,
 ): Boolean = navigationStarted && outputEnabled && hasLastInfo
 
-internal fun shouldResetTftOutput(
-    sessionActive: Boolean,
-    textAlertActive: Boolean,
-    hasLastInfo: Boolean,
-): Boolean = sessionActive || textAlertActive || hasLastInfo
-
-internal fun arrivalDisplayTimerGeneration(
-    arrivalGeneration: Long?,
-    writeCompletedSuccessfully: Boolean,
-): Long? = arrivalGeneration?.takeIf { writeCompletedSuccessfully }
-
 class TftNavigationBridge(
     private val connection: BikeConnection,
     private val settings: StateFlow<AppSettings>,
@@ -116,10 +105,10 @@ class TftNavigationBridge(
                         }
                         BatchWriteResult.Completed -> consecutiveWriteFailures = 0
                     }
-                    arrivalDisplayTimerGeneration(
-                        arrivalGeneration = batch.arrivalGeneration,
-                        writeCompletedSuccessfully = result == BatchWriteResult.Completed,
-                    )?.let(::scheduleArrivalReset)
+                    // The arrival display only starts counting down once the bike has it.
+                    batch.arrivalGeneration
+                        ?.takeIf { result == BatchWriteResult.Completed }
+                        ?.let(::scheduleArrivalReset)
                     if (batch.clearsCluster) {
                         synchronized(queueLock) { clusterResetNeeded = false }
                     }
@@ -420,11 +409,9 @@ class TftNavigationBridge(
                 sessionGeneration++
                 arrivalPendingGeneration = null
                 textAlertGeneration++
-                clusterResetNeeded = clusterResetNeeded || shouldResetTftOutput(
-                    sessionActive = sessionActive,
-                    textAlertActive = textAlertActive,
-                    hasLastInfo = lastInfo != null,
-                )
+                // Anything that could still be showing on the cluster has to be cleared.
+                clusterResetNeeded = clusterResetNeeded ||
+                    sessionActive || textAlertActive || lastInfo != null
                 sessionActive = false
                 textAlertActive = false
                 textAlertMessage = null

@@ -3,6 +3,8 @@ package com.spaceboy.ridebuddy.data
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
+import java.time.temporal.WeekFields
+import java.util.Locale
 
 object InsightsCalculator {
     fun calculate(
@@ -78,8 +80,40 @@ object InsightsCalculator {
             distanceChangePercent = distanceChange,
             bestZeroToSixtyMillis = current.mapNotNull(Ride::zeroToSixtyMillis).minOrNull(),
             bestZeroToHundredMillis = current.mapNotNull(Ride::zeroToHundredMillis).minOrNull(),
+            distanceTrendKilometres = current
+                .sortedBy(Ride::startedAtMillis)
+                .takeLast(DistanceTrendRides)
+                .map(Ride::distanceKilometres),
+        )
+    }
+
+    /**
+     * Totals since the start of the current week. The week boundary follows [locale] the way the
+     * rider's calendar does — Monday in most of the world, Sunday in some of it.
+     */
+    fun weekSummary(
+        rides: List<Ride>,
+        nowMillis: Long,
+        zone: ZoneId = ZoneId.systemDefault(),
+        locale: Locale = Locale.getDefault(),
+    ): RideWeekSummary {
+        val weekStart = Instant.ofEpochMilli(nowMillis)
+            .atZone(zone)
+            .toLocalDate()
+            .with(WeekFields.of(locale).dayOfWeek(), 1L)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        val week = rides.filter { it.startedAtMillis >= weekStart }
+        if (week.isEmpty()) return RideWeekSummary()
+        return RideWeekSummary(
+            rideCount = week.size,
+            distanceKilometres = week.sumOf(Ride::distanceKilometres),
+            averageDurationMillis = week.sumOf(Ride::durationMillis) / week.size,
+            mileageKilometresPerLitre = week.combinedMileageKilometresPerLitre(),
         )
     }
 
     private const val MillisPerDay = 86_400_000L
+    private const val DistanceTrendRides = 14
 }

@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.data
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -109,6 +110,53 @@ class InsightsCalculatorTest {
 
         assertEquals(0.5, requireNotNull(result.estimatedFuelLitres), 0.0)
         assertEquals(20.0, requireNotNull(result.averageMileageKilometresPerLitre), 0.0)
+    }
+
+    @Test
+    fun `the distance trend follows the period, oldest ride first`() {
+        val day = 86_400_000L
+        val now = 100 * day
+        val rides = listOf(
+            ride(start = now - day, distance = 30.0, durationHours = 1, speed = 30.0),
+            ride(start = now - 2 * day, distance = 20.0, durationHours = 1, speed = 20.0),
+            // Outside the seven-day window, so it must not reach the chart.
+            ride(start = now - 8 * day, distance = 25.0, durationHours = 1, speed = 25.0),
+        )
+
+        val trend = InsightsCalculator
+            .calculate(rides, InsightPeriod.SevenDays, clockAt(now))
+            .distanceTrendKilometres
+
+        assertEquals(listOf(20.0, 30.0), trend)
+    }
+
+    @Test
+    fun `the week summary starts at the locale's first day of the week`() {
+        // 2026-08-27 is a Thursday. With a Monday-first locale the week starts on the 24th,
+        // so the Sunday ride before it is excluded and the Tuesday ride is not.
+        val now = Instant.parse("2026-08-27T12:00:00Z").toEpochMilli()
+        val rides = listOf(
+            ride(start = Instant.parse("2026-08-25T09:00:00Z").toEpochMilli(), distance = 30.0, durationHours = 1, speed = 30.0),
+            ride(start = Instant.parse("2026-08-26T09:00:00Z").toEpochMilli(), distance = 10.0, durationHours = 3, speed = 10.0),
+            ride(start = Instant.parse("2026-08-23T09:00:00Z").toEpochMilli(), distance = 99.0, durationHours = 1, speed = 99.0),
+        )
+
+        val summary = InsightsCalculator.weekSummary(rides, now, fixedZone, Locale.UK)
+
+        assertEquals(2, summary.rideCount)
+        assertEquals(40.0, summary.distanceKilometres, 0.001)
+        assertEquals(2 * 3_600_000L, summary.averageDurationMillis)
+    }
+
+    @Test
+    fun `an empty week reports zeroes rather than a partial summary`() {
+        val now = Instant.parse("2026-08-27T12:00:00Z").toEpochMilli()
+
+        val summary = InsightsCalculator.weekSummary(emptyList(), now, fixedZone, Locale.UK)
+
+        assertEquals(0, summary.rideCount)
+        assertEquals(0.0, summary.distanceKilometres, 0.0)
+        assertNull(summary.mileageKilometresPerLitre)
     }
 
     private fun ride(

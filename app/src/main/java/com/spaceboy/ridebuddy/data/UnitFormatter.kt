@@ -6,17 +6,15 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 object UnitFormatter {
-    fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String {
-        val value = if (units == DistanceUnits.Metric) kilometres else kilometres * KmToMiles
-        val suffix = distanceUnit(units)
-        return "%.$decimals".plus("f $suffix").format(locale, value)
-    }
+    fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String =
+        "%.${decimals}f %s".format(locale, distanceValue(kilometres, units), distanceUnit(units))
 
-    fun speed(kph: Double, units: DistanceUnits, locale: Locale, decimals: Int = 0): String {
-        val value = if (units == DistanceUnits.Metric) kph else kph * KmToMiles
-        val suffix = if (units == DistanceUnits.Metric) "km/h" else "mph"
-        return "%.$decimals".plus("f $suffix").format(locale, value)
-    }
+    fun speed(kph: Double, units: DistanceUnits, locale: Locale, decimals: Int = 0): String =
+        "%.${decimals}f %s".format(locale, chartSpeed(kph, units), speedUnit(units))
+
+    /** The numeric distance in the rider's units, for charts that format their own labels. */
+    fun distanceValue(kilometres: Double, units: DistanceUnits): Double =
+        if (units == DistanceUnits.Metric) kilometres else kilometres * KmToMiles
 
     fun mileage(kilometresPerLitre: Double?, units: DistanceUnits, locale: Locale): String =
         mileageValue(kilometresPerLitre, units, locale)?.let { "%.1f %s".format(locale, it, mileageUnit(units)) }
@@ -34,7 +32,12 @@ object UnitFormatter {
 
     fun mileageUnit(units: DistanceUnits): String = if (units == DistanceUnits.Metric) "km/L" else "mpg"
 
-    fun chartSpeed(kph: Double, units: DistanceUnits): Double = if (units == DistanceUnits.Metric) kph else kph * KmToMiles
+    fun chartSpeed(kph: Double, units: DistanceUnits): Double =
+        if (units == DistanceUnits.Metric) kph else kph * KmToMiles
+
+    /** Inverse of [chartSpeed], for controls that are driven in display units. */
+    fun speedFromChart(value: Double, units: DistanceUnits): Double =
+        if (units == DistanceUnits.Metric) value else value / KmToMiles
     fun fuel(litres: Double?, units: DistanceUnits, locale: Locale): String =
         litres?.takeIf { it.isFinite() && it >= 0.0 }?.let { value ->
             if (units == DistanceUnits.Metric) "%.1f L".format(locale, value)

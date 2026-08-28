@@ -33,14 +33,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.Ride
+import com.spaceboy.ridebuddy.data.RideWeekSummary
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.data.combinedMileageKilometresPerLitre
-import java.util.Calendar
 
 @Composable
 fun HistoryScreen(
     modifier: Modifier = Modifier,
     rides: List<Ride>,
+    weekSummary: RideWeekSummary,
     units: DistanceUnits,
     onRideSelected: (Ride) -> Unit,
 ) {
@@ -71,7 +71,7 @@ fun HistoryScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item { WeeklySummary(rides, units) }
+        item { WeeklySummary(weekSummary, units) }
         items(rides, key = Ride::id) { ride -> RideCard(ride, units, onRideSelected) }
     }
 }
@@ -102,20 +102,8 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
 }
 
 @Composable
-private fun WeeklySummary(rides: List<Ride>, units: DistanceUnits) {
+private fun WeeklySummary(week: RideWeekSummary, units: DistanceUnits) {
     val locale = LocalConfiguration.current.locales[0]
-    val weekStart = remember(rides) {
-        Calendar.getInstance().apply {
-            set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-    }
-    val week = remember(rides, weekStart) {
-        rides.filter { it.startedAtMillis >= weekStart }
-    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
@@ -123,12 +111,12 @@ private fun WeeklySummary(rides: List<Ride>, units: DistanceUnits) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("This week", style = MaterialTheme.typography.titleLarge)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                RideValue("Distance", UnitFormatter.distance(week.sumOf(Ride::distanceKilometres), units, locale))
-                RideValue("Rides", week.size.toString())
-                RideValue("Avg duration", formatDuration(week.map(Ride::durationMillis).average().takeIf(Double::isFinite)?.toLong() ?: 0L))
+                RideValue("Distance", UnitFormatter.distance(week.distanceKilometres, units, locale))
+                RideValue("Rides", week.rideCount.toString())
+                RideValue("Avg duration", formatDuration(week.averageDurationMillis))
             }
             Text(
-                "Average mileage ${UnitFormatter.mileage(week.combinedMileageKilometresPerLitre(), units, locale)}",
+                "Average mileage ${UnitFormatter.mileage(week.mileageKilometresPerLitre, units, locale)}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -134,7 +134,7 @@ class CallNotificationBridge(
         val notification = sbn.notification
         if (!notification.isRideBuddyCallNotification()) return false
         val settings = appSettings.settings.value
-        val intents = notification.extractCallIntents()
+        val intents = notification.extractCallIntents(sbn.packageName)
 
         val caller = notification.extras.person(Notification.EXTRA_CALL_PERSON)
         val name = caller?.name?.toString().orEmpty()
@@ -300,7 +300,7 @@ class CallNotificationBridge(
     private fun AppSettings.callFeatureSettings(): CallFeatureSettings =
         CallFeatureSettings(callerDisplay, tftCallControls)
 
-    private fun Notification.extractCallIntents(): CallIntents {
+    private fun Notification.extractCallIntents(packageName: String): CallIntents {
         val extrasIntents = CallIntents(
             answer = extras.pendingIntent(Notification.EXTRA_ANSWER_INTENT),
             decline = extras.pendingIntent(Notification.EXTRA_DECLINE_INTENT),
@@ -316,6 +316,16 @@ class CallNotificationBridge(
         val answer = find("answer", "accept", "pick up")
         val decline = find("decline", "reject")
         val hangUp = find("hang up", "end call", "disconnect")
+        if (answer == null && decline == null && hangUp == null) {
+            // This search is English-only, and there is no locale-independent way to read a
+            // non-CallStyle dialer's buttons. Say so rather than looking like a silent no-op:
+            // handlebar controls will fall through to the opt-in Telecom path, or do nothing.
+            Log.w(
+                LogTag,
+                "No call actions found for $packageName; it publishes neither CallStyle intents " +
+                    "nor recognisable action labels",
+            )
+        }
         return CallIntents(answer, decline, hangUp)
     }
 

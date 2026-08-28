@@ -56,6 +56,7 @@ enum class InsightPeriod(val days: Int?) {
     AllTime(null),
 }
 
+@Immutable
 data class RideInsights(
     val rideCount: Int = 0,
     val totalDistanceKilometres: Double = 0.0,
@@ -72,6 +73,17 @@ data class RideInsights(
     val distanceChangePercent: Double? = null,
     val bestZeroToSixtyMillis: Long? = null,
     val bestZeroToHundredMillis: Long? = null,
+    /** Distance of the most recent rides in the period, oldest first, for the trend chart. */
+    val distanceTrendKilometres: List<Double> = emptyList(),
+)
+
+/** Totals since the start of the current week, as the rider's locale defines the week. */
+@Immutable
+data class RideWeekSummary(
+    val rideCount: Int = 0,
+    val distanceKilometres: Double = 0.0,
+    val averageDurationMillis: Long = 0,
+    val mileageKilometresPerLitre: Double? = null,
 )
 
 data class RideSample(

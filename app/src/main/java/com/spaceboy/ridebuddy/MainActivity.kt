@@ -286,6 +286,7 @@ class MainActivity : ComponentActivity() {
                 rides = viewModel.rides.collectAsStateWithLifecycle().value,
                 insights = viewModel.insights.collectAsStateWithLifecycle().value,
                 insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value,
+                weekSummary = viewModel.weekSummary.collectAsStateWithLifecycle().value,
                 guidance = viewModel.guidance.collectAsStateWithLifecycle().value,
                 settings = settings,
                 bikeAssociation = bikeAssociation,

@@ -14,11 +14,8 @@ object ProtectionHandshake {
         "32B208EE8603" to "CC6EC3092888",
     )
 
-    fun responseFor(challenge: ByteArray): ByteArray? = responsesByChallenge[
-        challenge.toHex(),
-    ]?.hexToByteArray()
-
-
+    fun responseFor(challenge: ByteArray): ByteArray? =
+        responsesByChallenge[challenge.toHex()]?.hexToByteArray()
 
     private fun String.hexToByteArray(): ByteArray = chunked(2)
         .map { pair -> pair.toInt(16).toByte() }

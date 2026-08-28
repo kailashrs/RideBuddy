@@ -36,7 +36,8 @@ class RideRecorder(
     private val mutableActiveRide = MutableStateFlow<ActiveRide?>(null)
     val activeRide: StateFlow<ActiveRide?> = mutableActiveRide.asStateFlow()
     private var stopJob: Job? = null
-    private val samplesLock = Any()
+    // record(), finishRide(), the connection-state collector and the stop job all run on
+    // RecordingDispatcher, a single-threaded dispatcher, so these need no further guarding.
     private val samples = mutableListOf<RideSample>()
     private val liveWindow = ArrayDeque<RideSample>()
     private val mutableLiveSamples = MutableStateFlow<List<RideSample>>(emptyList())
@@ -62,7 +63,7 @@ class RideRecorder(
                     if (mutableActiveRide.value != null) finishRide(stopCandidate)
                     lastLiveFrame = null
                     lastLiveAtElapsedRealtime = null
-                    synchronized(samplesLock) { liveWindow.clear() }
+                    liveWindow.clear()
                     mutableLiveSamples.value = emptyList()
                 }
             }
@@ -85,25 +86,19 @@ class RideRecorder(
         lastLiveAtElapsedRealtime = nowElapsedRealtime
         mutableLiveSampleEvents.tryEmit(liveSample)
 
-        val snapshotLive = synchronized(samplesLock) {
-            liveWindow.addLast(liveSample)
-            if (liveWindow.size > MaxLiveSamples) liveWindow.removeFirst()
-            if (nowElapsedRealtime - lastLiveEmitAtElapsedRealtime >= LiveSampleEmitIntervalMillis || liveWindow.size <= 1) {
-                lastLiveEmitAtElapsedRealtime = nowElapsedRealtime
-                liveWindow.toList()
-            } else null
-        }
-        if (snapshotLive != null) {
-            mutableLiveSamples.value = snapshotLive
+        liveWindow.addLast(liveSample)
+        if (liveWindow.size > MaxLiveSamples) liveWindow.removeFirst()
+        val dueForEmit = nowElapsedRealtime - lastLiveEmitAtElapsedRealtime >= LiveSampleEmitIntervalMillis
+        if (dueForEmit || liveWindow.size <= 1) {
+            lastLiveEmitAtElapsedRealtime = nowElapsedRealtime
+            mutableLiveSamples.value = liveWindow.toList()
         }
 
         val current = mutableActiveRide.value
         if (current == null) {
             if (frame.speedKilometresPerHour >= settingsRepository.settings.value.rideStartSpeedKph) {
-                synchronized(samplesLock) {
-                    samples.clear()
-                    liveWindow.toList().performancePreRoll(now).forEach(::appendStoredSampleLocked)
-                }
+                samples.clear()
+                liveWindow.toList().performancePreRoll(now).forEach(::appendStoredSample)
                 stopCandidate = null
                 mutableActiveRide.value = ActiveRide.started(now, nowElapsedRealtime, frame)
             }
@@ -114,7 +109,7 @@ class RideRecorder(
         val distanceDelta = distanceDeltaKilometres(current.lastSpeedKph, frame.speedKilometresPerHour, elapsedMillis)
         val updated = current.add(frame, nowElapsedRealtime, distanceDelta)
         mutableActiveRide.value = updated
-        synchronized(samplesLock) { appendStoredSampleLocked(liveSample) }
+        appendStoredSample(liveSample)
 
         val settings = settingsRepository.settings.value
         if (shouldStopRide(frame.speedKilometresPerHour, settings.rideStopSpeedKph)) {
@@ -122,7 +117,7 @@ class RideRecorder(
                 stopCandidate = StopCandidate(
                     endedAtMillis = now,
                     activeRide = updated,
-                    samples = synchronized(samplesLock) { samples.toList() },
+                    samples = samples.toList(),
                 )
                 stopJob = scope.launch(RecordingDispatcher) {
                     delay(((settings.rideStopDelaySeconds.coerceIn(10, 600) * 1_000L)).milliseconds)
@@ -146,11 +141,7 @@ class RideRecorder(
         stopCandidate = null
         val latestActive = mutableActiveRide.getAndUpdate { null } ?: return
         val active = confirmedStop?.activeRide ?: latestActive
-        val completedSamples = synchronized(samplesLock) {
-            val list = confirmedStop?.samples ?: samples.toList()
-            samples.clear()
-            list
-        }
+        val completedSamples = (confirmedStop?.samples ?: samples.toList()).also { samples.clear() }
         if (active.distanceKilometres < MinimumSavedDistanceKm) return
         val start = completedSamples.firstOrNull { it.latitude != null && it.longitude != null }
         val end = completedSamples.lastOrNull { it.latitude != null && it.longitude != null }
@@ -158,7 +149,7 @@ class RideRecorder(
         val zeroToSixty = completedSamples.accelerationTime(60.0)
         val zeroToHundred = completedSamples.accelerationTime(100.0)
         val completedRide = active.toRide(
-            completedRideEndMillis(confirmedStop?.endedAtMillis, System.currentTimeMillis()),
+            confirmedStop?.endedAtMillis ?: System.currentTimeMillis(),
         ).copy(
             startLatitude = start?.latitude,
             startLongitude = start?.longitude,
@@ -222,11 +213,10 @@ class RideRecorder(
         )
     }
 
-    private fun appendStoredSampleLocked(sample: RideSample) {
+    private fun appendStoredSample(sample: RideSample) {
         samples += sample
         if (samples.size <= MaxStoredSamples) return
-        // In-place compaction keeps every other sample. This avoids allocating a new
-        // 18,000-element list while holding samplesLock during a long ride.
+        // In-place compaction keeps every other sample, avoiding a new 18,000-element list.
         var writeIndex = 0
         for (readIndex in samples.indices step 2) {
             samples[writeIndex++] = samples[readIndex]
@@ -262,9 +252,6 @@ internal fun distanceDeltaKilometres(lastSpeedKph: Double, currentSpeedKph: Doub
     else ((lastSpeedKph + currentSpeedKph) / 2.0) * elapsedMillis / 3_600_000.0
 
 internal const val MaxDistanceIntegrationGapMillis = 2_500L
-
-internal fun completedRideEndMillis(confirmedStopAtMillis: Long?, completionTimeMillis: Long): Long =
-    confirmedStopAtMillis ?: completionTimeMillis
 
 internal fun fuelDeltaLitres(
     distanceKilometres: Double,

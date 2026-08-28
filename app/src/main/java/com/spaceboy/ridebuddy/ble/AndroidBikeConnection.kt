@@ -101,7 +101,7 @@ internal class AndroidBikeConnection(
         attemptContext = { attemptContext() },
         onActiveOperationChanged = diagnosticsRecorder::setActiveOperation,
         onFailureRecorded = ::recordConnectionFailure,
-        onResetRequired = ::resetGattAfterOperationFailure,
+        onResetRequired = ::retireLinkAndReconnect,
         onOperationExhausted = ::handleExhaustedOperation,
         log = ::log,
     )
@@ -447,7 +447,7 @@ internal class AndroidBikeConnection(
     private fun onServicesDiscovered(callbackGatt: BluetoothGatt, status: Int) {
         if (!isCurrent(callbackGatt)) return
         if (status != BluetoothGatt.GATT_SUCCESS) {
-            resetGattAfterOperationFailure(
+            retireLinkAndReconnect(
                 connectionFailure(
                     message = "Link lost while discovering services: " +
                         "${gattStatusName(status)} ($status)",
@@ -537,7 +537,7 @@ internal class AndroidBikeConnection(
             false
         }
         if (!started) {
-            resetGattAfterOperationFailure(
+            retireLinkAndReconnect(
                 connectionFailure(
                     message = "Link lost while starting service discovery: rejected by the Bluetooth stack",
                     category = ConnectionFailureCategory.LinkLost,
@@ -667,10 +667,6 @@ internal class AndroidBikeConnection(
             protectionCoordinator.onProtectionResponseWritten()
         }
         operation.completion?.complete(true)
-    }
-
-    private fun resetGattAfterOperationFailure(failure: ConnectionFailure) {
-        retireLinkAndReconnect(failure)
     }
 
     /** The single path that retires a live GATT session and hands the link back to the backoff. */

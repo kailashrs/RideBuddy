@@ -175,7 +175,8 @@ class BikeCompanionManager internal constructor(
         if (refreshResult.isFailure) {
             mutableState.update { state ->
                 state.copy(
-                    bike = preservedAssociationAfterRefreshFailure(state.bike, stored),
+                    // A refresh that could not reach the CDM says nothing about the pairing.
+                    bike = state.bike ?: stored,
                     associationInProgress = false,
                     errorMessage = refreshResult.exceptionOrNull()?.message?.takeIf(String::isNotBlank)
                         ?: "Could not refresh the motorcycle association",
@@ -348,11 +349,6 @@ class BikeCompanionManager internal constructor(
         bikeIdentityRepository.select(bike.bluetoothAddress)
     }
 }
-
-internal fun preservedAssociationAfterRefreshFailure(
-    current: AssociatedBike?,
-    stored: AssociatedBike?,
-): AssociatedBike? = current ?: stored
 
 internal fun protectionAcceptanceToClear(
     previous: AssociatedBike?,

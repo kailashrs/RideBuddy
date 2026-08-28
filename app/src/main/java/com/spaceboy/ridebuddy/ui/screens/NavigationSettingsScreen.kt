@@ -214,7 +214,7 @@ fun NavigationSettingsScreen(
             if (state.isConfigured) {
                 Row(modifier = Modifier.align(Alignment.End)) {
                     TextButton(onClick = onTest, enabled = !keyOperationInProgress) { Text("Test setup") }
-                    androidx.compose.material3.Button(
+                    Button(
                         onClick = {
                             apiKey = ""
                             showApiKey = false

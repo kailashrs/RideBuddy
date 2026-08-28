@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.SegmentedButton
@@ -30,6 +31,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -39,39 +41,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
-import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
-import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InsightsScreen(
     modifier: Modifier = Modifier,
     insights: RideInsights,
-    rides: List<Ride>,
     units: DistanceUnits,
     selectedPeriod: InsightPeriod,
     onPeriodSelected: (InsightPeriod) -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
-    val periodStart = remember(rides, selectedPeriod) {
-        when (selectedPeriod) {
-            InsightPeriod.Today -> Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, 0)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-            else -> selectedPeriod.days?.let { System.currentTimeMillis() - it * 86_400_000L }
-        }
-    }
-    val periodRides = remember(rides, periodStart) {
-        rides.filter { periodStart == null || it.startedAtMillis >= periodStart }
-    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -119,21 +104,21 @@ fun InsightsScreen(
             }
         }
 
-        DistanceTrend(periodRides, units)
+        DistanceTrend(insights.distanceTrendKilometres, units)
 
         MetricGrid(
             listOf(
-                Triple("Rides", insights.rideCount.toString(), Icons.Outlined.Route),
-                Triple("Ride time", formatDuration(insights.totalDurationMillis), Icons.Outlined.Timer),
-                Triple("Fuel estimate", UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale), Icons.Outlined.LocalGasStation),
-                Triple("Avg ride", UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale), Icons.Outlined.Timeline),
-                Triple("Avg duration", formatDuration(insights.averageRideDurationMillis), Icons.Outlined.Timer),
-                Triple("Avg speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
-                Triple("Avg RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
-                Triple("Avg throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
-                Triple("Mileage", UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale), Icons.Outlined.Eco),
-                Triple("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
-                Triple("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
+                InsightMetric("Rides", insights.rideCount.toString(), Icons.Outlined.Route),
+                InsightMetric("Ride time", formatDuration(insights.totalDurationMillis), Icons.Outlined.Timer),
+                InsightMetric("Fuel estimate", UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale), Icons.Outlined.LocalGasStation),
+                InsightMetric("Avg ride", UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale), Icons.Outlined.Timeline),
+                InsightMetric("Avg duration", formatDuration(insights.averageRideDurationMillis), Icons.Outlined.Timer),
+                InsightMetric("Avg speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
+                InsightMetric("Avg RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
+                InsightMetric("Avg throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
+                InsightMetric("Mileage", UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale), Icons.Outlined.Eco),
+                InsightMetric("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
+                InsightMetric("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
             ),
         )
         if (insights.bestZeroToSixtyMillis != null || insights.bestZeroToHundredMillis != null) {
@@ -147,8 +132,8 @@ fun InsightsScreen(
             )
             MetricGrid(
                 listOfNotNull(
-                    insights.bestZeroToSixtyMillis?.let { Triple("Best 0–60", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
-                    insights.bestZeroToHundredMillis?.let { Triple("Best 0–100", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                    insights.bestZeroToSixtyMillis?.let { InsightMetric("Best 0–60", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                    insights.bestZeroToHundredMillis?.let { InsightMetric("Best 0–100", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
                 ),
             )
         }
@@ -161,11 +146,9 @@ fun InsightsScreen(
 }
 
 @Composable
-private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
-    val values = remember(rides, units) {
-        rides.sortedBy(Ride::startedAtMillis).takeLast(14).map {
-            if (units == DistanceUnits.Metric) it.distanceKilometres else it.distanceKilometres * 0.621371192
-        }
+private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnits) {
+    val values = remember(distancesKilometres, units) {
+        distancesKilometres.map { UnitFormatter.distanceValue(it, units) }
     }
     val hasData = values.any { it > 0.0 }
     val color = MaterialTheme.colorScheme.primary
@@ -199,15 +182,18 @@ private fun DistanceTrend(rides: List<Ride>, units: DistanceUnits) {
     }
 }
 
+@Immutable
+private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
+
 @Composable
-private fun MetricGrid(metrics: List<Triple<String, String, ImageVector>>) {
+private fun MetricGrid(metrics: List<InsightMetric>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         metrics.chunked(2).forEach { row ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { (label, value, icon) ->
                     OutlinedCard(modifier = Modifier.weight(1f)) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            androidx.compose.material3.Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
                             Metric(label = label, value = value)
                         }
                     }

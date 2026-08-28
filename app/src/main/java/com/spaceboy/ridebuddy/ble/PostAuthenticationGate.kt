@@ -16,7 +16,7 @@ internal class PostAuthenticationGate(requiredSubscriptions: Collection<UUID>) {
     private val pending = requiredSubscriptions.toMutableSet()
     private var deferredEvidence: String? = null
 
-    val isReady: Boolean
+    private val isReady: Boolean
         get() = pending.isEmpty()
 
     fun acceptEvidence(evidence: String): String? = if (isReady) {

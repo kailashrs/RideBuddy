@@ -5,67 +5,67 @@ import java.util.ArrayDeque
 /**
  * Serializes Android GATT operations while keeping protocol-critical work in a dedicated lane.
  * The active operation is never preempted, but critical work always runs before queued normal work.
+ *
+ * Confined to the connection's main handler, which is the only thread that enqueues, begins,
+ * completes or clears work. The reentrancy hazard [GattOperationCoordinator] guards against —
+ * Android entering a callback synchronously from a `BluetoothGatt` call — happens on that same
+ * thread, so a monitor would not have helped with it either.
  */
 internal class GattOperationScheduler {
-    private val lock = Any()
     private val criticalQueue = ArrayDeque<GattOperation>()
     private val normalQueue = ArrayDeque<GattOperation>()
     private var activeOperation: GattOperation? = null
 
-    fun enqueue(operation: GattOperation, front: Boolean = false): Boolean = synchronized(lock) {
-        add(operation, front)
-        activeOperation == null
+    /** Returns true when nothing is in flight, so the caller should start the queue running. */
+    fun enqueue(operation: GattOperation): Boolean {
+        add(operation, front = false)
+        return activeOperation == null
     }
 
-    fun enqueueAll(operations: List<GattOperation>): Boolean = synchronized(lock) {
+    fun enqueueAll(operations: List<GattOperation>): Boolean {
         operations.forEach { add(it, front = false) }
-        activeOperation == null
+        return activeOperation == null
     }
 
-    fun beginNext(): GattOperation? = synchronized(lock) {
-        if (activeOperation != null) return@synchronized null
-        val next = criticalQueue.pollFirst() ?: normalQueue.pollFirst() ?: return@synchronized null
+    fun beginNext(): GattOperation? {
+        if (activeOperation != null) return null
+        val next = criticalQueue.pollFirst() ?: normalQueue.pollFirst() ?: return null
         activeOperation = next
-        next
+        return next
     }
 
-    fun active(): GattOperation? = synchronized(lock) { activeOperation }
+    fun active(): GattOperation? = activeOperation
 
-    fun activeMatching(predicate: (GattOperation) -> Boolean): GattOperation? = synchronized(lock) {
+    fun activeMatching(predicate: (GattOperation) -> Boolean): GattOperation? =
         activeOperation?.takeIf(predicate)
-    }
 
-    fun isActive(operation: GattOperation): Boolean = synchronized(lock) {
-        activeOperation === operation
-    }
+    fun isActive(operation: GattOperation): Boolean = activeOperation === operation
 
-    fun complete(operation: GattOperation): Boolean = synchronized(lock) {
-        if (activeOperation !== operation) return@synchronized false
+    fun complete(operation: GattOperation): Boolean {
+        if (activeOperation !== operation) return false
         activeOperation = null
-        true
+        return true
     }
 
-    fun retry(operation: GattOperation): Boolean = synchronized(lock) {
-        if (activeOperation !== operation) return@synchronized false
+    /** Puts a retry at the head of its own lane so it keeps its place in the protocol sequence. */
+    fun retry(operation: GattOperation): Boolean {
+        if (activeOperation !== operation) return false
         activeOperation = null
         add(operation.retry(), front = true)
-        true
+        return true
     }
 
-    fun removeQueued(predicate: (GattOperation) -> Boolean): List<GattOperation> = synchronized(lock) {
+    fun removeQueued(predicate: (GattOperation) -> Boolean): List<GattOperation> =
         removeMatching(criticalQueue, predicate) + removeMatching(normalQueue, predicate)
-    }
 
-    fun clear(): List<GattOperation> = synchronized(lock) {
-        buildList {
-            activeOperation?.let(::add)
-            addAll(criticalQueue)
-            addAll(normalQueue)
-        }.also {
-            activeOperation = null
-            criticalQueue.clear()
-            normalQueue.clear()
-        }
+    fun clear(): List<GattOperation> = buildList {
+        activeOperation?.let(::add)
+        addAll(criticalQueue)
+        addAll(normalQueue)
+    }.also {
+        activeOperation = null
+        criticalQueue.clear()
+        normalQueue.clear()
     }
 
     private fun add(operation: GattOperation, front: Boolean) {

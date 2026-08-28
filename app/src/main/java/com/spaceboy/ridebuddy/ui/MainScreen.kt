@@ -264,11 +264,11 @@ internal fun MainScreenContent(
                 onCancelNavigationStart = onCancelNavigationStart,
             )
 
-            TopLevelDestination.History -> HistoryScreen(modifier, rides, settings.distanceUnits, onRideSelected)
+            TopLevelDestination.History ->
+                HistoryScreen(modifier, rides, weekSummary, settings.distanceUnits, onRideSelected)
             TopLevelDestination.Insights -> InsightsScreen(
                 modifier = modifier,
                 insights = insights,
-                rides = rides,
                 units = settings.distanceUnits,
                 selectedPeriod = insightPeriod,
                 onPeriodSelected = onInsightPeriodSelected,

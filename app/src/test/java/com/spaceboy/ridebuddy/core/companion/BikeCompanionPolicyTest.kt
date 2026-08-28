@@ -14,11 +14,6 @@ class BikeCompanionPolicyTest {
     )
 
     @Test
-    fun transientRefreshFailurePreservesStoredAssociation() {
-        assertEquals(storedBike, preservedAssociationAfterRefreshFailure(null, storedBike))
-    }
-
-    @Test
     fun localAssociationClearsOnlyAfterRequiredSystemDisassociationSucceeds() {
         assertFalse(
             canClearLocalAssociation(

@@ -281,15 +281,13 @@ class BikeConnectionService : Service() {
                 )
                 return true
             }
-            val started = ContextCompatBridge.startForegroundService(
-                context,
-                Intent(context, BikeConnectionService::class.java)
-                    .setAction(ActionRestartConnect)
-                    .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
-                    .putExtra(ExtraName, bike.name)
-                    .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity)
-                    .putExtra(ExtraTrigger, trigger.name),
-            )
+            val intent = Intent(context, BikeConnectionService::class.java)
+                .setAction(ActionRestartConnect)
+                .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
+                .putExtra(ExtraName, bike.name)
+                .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity)
+                .putExtra(ExtraTrigger, trigger.name)
+            val started = startSafely(intent) { ContextCompat.startForegroundService(context, intent) }
             if (!started) {
                 context.appContainer.bikeConnection.notifyStartFailed(
                     "Unable to start connection service",
@@ -299,10 +297,8 @@ class BikeConnectionService : Service() {
         }
 
         fun enableLocation(context: Context) {
-            ContextCompatBridge.startService(
-                context,
-                Intent(context, BikeConnectionService::class.java).setAction(ActionEnableLocation),
-            )
+            val intent = Intent(context, BikeConnectionService::class.java).setAction(ActionEnableLocation)
+            startSafely(intent) { context.startService(intent) }
         }
     }
 }
@@ -348,19 +344,13 @@ internal fun connectionRequiresGattShutdown(state: BikeConnectionState): Boolean
     -> true
 }
 
-private object ContextCompatBridge {
-    fun startForegroundService(context: Context, intent: Intent): Boolean = start("foreground", intent) {
-        ContextCompat.startForegroundService(context, intent)
-    }
-
-    fun startService(context: Context, intent: Intent): Boolean = start("service", intent) {
-        context.startService(intent)
-    }
-
-    private fun start(kind: String, intent: Intent, block: () -> Unit): Boolean = runCatching {
-        block()
-        true
-    }.onFailure { error ->
-        Log.w("BikeConnectionService", "Unable to start $kind for ${intent.action}", error)
-    }.getOrDefault(false)
-}
+/**
+ * Android refuses a service start outright in several background states, and the refusal is an
+ * exception rather than a return value. Callers need "did it start", not a crash.
+ */
+private fun startSafely(intent: Intent, start: () -> Unit): Boolean = runCatching {
+    start()
+    true
+}.onFailure { error ->
+    Log.w("BikeConnectionService", "Unable to start service for ${intent.action}", error)
+}.getOrDefault(false)

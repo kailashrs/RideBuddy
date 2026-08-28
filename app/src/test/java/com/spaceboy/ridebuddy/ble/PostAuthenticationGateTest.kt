@@ -21,7 +21,8 @@ class PostAuthenticationGateTest {
 
         assertTrue(finalUpdate.becameReady)
         assertEquals("telemetry", finalUpdate.deferredEvidence)
-        assertTrue(gate.isReady)
+        // Readiness is observable through the gate's own answers, not a separate flag.
+        assertEquals("VIN", gate.acceptEvidence("VIN"))
     }
 
     @Test

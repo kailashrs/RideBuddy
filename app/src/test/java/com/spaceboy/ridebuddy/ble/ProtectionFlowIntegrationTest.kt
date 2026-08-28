@@ -33,7 +33,7 @@ class ProtectionFlowIntegrationTest {
             responseAction.value,
             priority = GattOperationPriority.Critical,
         )
-        scheduler.enqueue(responseWrite, front = true)
+        scheduler.enqueue(responseWrite)
         assertSame(responseWrite, scheduler.beginNext())
         scheduler.complete(responseWrite)
         assertEquals(ProtectionAction.BeginPostAuthentication, session.onProtectionResponseWritten())
@@ -79,7 +79,7 @@ class ProtectionFlowIntegrationTest {
             responseAction.value,
             priority = GattOperationPriority.Critical,
         )
-        scheduler.enqueue(responseWrite, front = true)
+        scheduler.enqueue(responseWrite)
 
         assertSame(responseWrite, scheduler.beginNext())
         scheduler.complete(responseWrite)

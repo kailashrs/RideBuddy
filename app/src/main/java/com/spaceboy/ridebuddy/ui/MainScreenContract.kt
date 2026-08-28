@@ -15,6 +15,7 @@ import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.RideSample
+import com.spaceboy.ridebuddy.data.RideWeekSummary
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
@@ -48,6 +49,7 @@ data class MainScreenState(
     val rides: List<Ride>,
     val insights: RideInsights,
     val insightPeriod: InsightPeriod,
+    val weekSummary: RideWeekSummary,
     val guidance: GuidanceState,
     val settings: AppSettings,
     val bikeAssociation: BikeAssociationState,

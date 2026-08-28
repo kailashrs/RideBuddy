@@ -60,12 +60,6 @@ class RideDistanceIntegrationTest {
         assertNull(unavailable.averageMileageKilometresPerLitre)
     }
 
-    @Test
-    fun `confirmed stop time is preserved while an immediate finish uses completion time`() {
-        assertEquals(2_000L, completedRideEndMillis(2_000L, 12_000L))
-        assertEquals(12_000L, completedRideEndMillis(null, 12_000L))
-    }
-
     private fun frame(mileage: Double?) = TelemetryFrame(
         speedKilometresPerHour = 36.0,
         throttlePercent = 10,

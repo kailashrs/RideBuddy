@@ -450,15 +450,9 @@ fun SettingsScreen(
  */
 @Immutable
 private class SpeedFormat(private val units: DistanceUnits, private val locale: Locale) {
-    private val scale = if (units == DistanceUnits.Imperial) MilesPerKilometre else 1.0
-
-    fun display(kph: Double): Float = (kph * scale).toFloat()
-    fun stored(sliderValue: Float): Double = sliderValue / scale
+    fun display(kph: Double): Float = UnitFormatter.chartSpeed(kph, units).toFloat()
+    fun stored(sliderValue: Float): Double = UnitFormatter.speedFromChart(sliderValue.toDouble(), units)
     fun label(kph: Double): String = UnitFormatter.speed(kph, units, locale)
-
-    private companion object {
-        const val MilesPerKilometre = 0.621371192
-    }
 }
 
 private const val OpenMeteoUrl = "https://open-meteo.com/"
