@@ -26,8 +26,8 @@ android {
         // Navigation SDK 7.9.0 requires the 36.1 compile toolchain.
         //noinspection OldTargetApi
         targetSdk = 36
-        versionCode = 103
-        versionName = "0.2.3"
+        versionCode = 104
+        versionName = "0.2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
