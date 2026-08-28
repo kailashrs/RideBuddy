@@ -38,6 +38,7 @@ import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.diagnostics.diagnosticsReport
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
+import com.spaceboy.ridebuddy.core.tft.StationaryTftSurface
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.toCsv
@@ -339,7 +340,8 @@ class MainActivity : ComponentActivity() {
         onExportDiagnostics = ::exportDiagnostics,
         onExportBleCapture = ::exportBleCapture,
         onClearBleCapture = viewModel::clearBleCapture,
-        onRunStationaryTest = ::runStationaryTftTest,
+        onRunStationaryTest = { runStationaryTest(StationaryTftSurface.Navigation) },
+        onRunStationaryCallTest = { runStationaryTest(StationaryTftSurface.Calls) },
         onLegacyCallControlsChanged = ::setLegacyCallControls,
         onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
         onOpenAppPermissions = ::openAppPermissionSettings,
@@ -722,14 +724,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun runStationaryTftTest() {
+    private fun runStationaryTest(surface: StationaryTftSurface) {
         val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
             viewModel.showMessage("Connect and verify the companion link before testing")
             return
         }
         lifecycleScope.launch {
-            when (val result = container.stationaryTftValidator.run()) {
+            when (val result = container.stationaryTftValidator.run(surface)) {
                 is StationaryTftTestResult.Failed -> {
                     viewModel.showMessage("TFT test stopped after ${result.completedWrites} acknowledged writes")
                 }
@@ -755,10 +757,18 @@ class MainActivity : ComponentActivity() {
                         viewModel.showMessage("TFT test result discarded because the bike started moving")
                         return@launch
                     }
+                    val prompt = when (surface) {
+                        StationaryTftSurface.Navigation ->
+                            "While parked, did you see the maneuver, distance, test text, speed " +
+                                "limit, and clear state on the TFT?"
+
+                        StationaryTftSurface.Calls ->
+                            "While parked, did you see TEST CALLER ring, answer, clear, then show " +
+                                "again as an outgoing call? The number should read 9876543210 — " +
+                                "if it shows +919876543 the cluster is being sent too many digits."
+                    }
                     viewModel.askTftTestConfirmation(
-                        "The Bluetooth stack accepted ${result.acceptedWrites} test writes. " +
-                            "While parked, did you see the maneuver, distance, test text, speed limit, " +
-                            "and clear state on the TFT?",
+                        "The Bluetooth stack accepted ${result.acceptedWrites} test writes. $prompt",
                     )
                 }
             }

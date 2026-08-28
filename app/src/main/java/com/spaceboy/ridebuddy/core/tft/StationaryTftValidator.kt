@@ -10,14 +10,37 @@ import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Runs a bounded, stationary-only sample across every inferred navigation output. */
+/** Which cluster surface a stationary run exercises. They are validated separately. */
+enum class StationaryTftSurface { Navigation, Calls }
+
+/** Runs a bounded, stationary-only sample across one inferred cluster output. */
 class StationaryTftValidator(
     private val connection: BikeConnection,
     private val pauseBetweenWrites: suspend () -> Unit = { delay(200.milliseconds) },
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
-    suspend fun run(nowMillis: Long = System.currentTimeMillis()): StationaryTftTestResult {
-        val frames = buildList {
+    suspend fun run(
+        surface: StationaryTftSurface = StationaryTftSurface.Navigation,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): StationaryTftTestResult {
+        val frames = when (surface) {
+            StationaryTftSurface.Navigation -> navigationFrames(nowMillis)
+            StationaryTftSurface.Calls -> callFrames()
+        }
+        frames.forEachIndexed { index, frame ->
+            safetyStopReason()?.let { reason ->
+                return StationaryTftTestResult.SafetyStopped(reason, index)
+            }
+            if (!connection.writeAndAwait(BikeWrite(frame.characteristic, frame.payload, frame.mode))) {
+                return StationaryTftTestResult.Failed(frame.characteristic, index)
+            }
+            if (index != frames.lastIndex) pauseBetweenWrites()
+        }
+        return StationaryTftTestResult.Succeeded(frames.size)
+    }
+
+    private fun navigationFrames(nowMillis: Long): List<Frame> {
+        return buildList {
             add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(GuidanceStarted)))
             add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(NavigationActive)))
             add(
@@ -51,17 +74,26 @@ class StationaryTftValidator(
             add(Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()))
             add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)))
         }
-        frames.forEachIndexed { index, frame ->
-            safetyStopReason()?.let { reason ->
-                return StationaryTftTestResult.SafetyStopped(reason, index)
-            }
-            if (!connection.writeAndAwait(BikeWrite(frame.characteristic, frame.payload, frame.mode))) {
-                return StationaryTftTestResult.Failed(frame.characteristic, index)
-            }
-            if (index != frames.lastIndex) pauseBetweenWrites()
-        }
-        return StationaryTftTestResult.Succeeded(frames.size)
     }
+
+    /**
+     * Walks the caller display through every state the cluster is ever told about, ending on
+     * [TftCallEncoder.ended] so no invented call is left showing.
+     *
+     * The test number is deliberately longer than the cluster's ten-character field: if the
+     * display shows the trailing ten digits, the OEM truncation rule is being applied correctly.
+     * All three call characteristics are acknowledged writes, so every step here is confirmed by
+     * the peer before the next one is sent.
+     */
+    private fun callFrames(): List<Frame> = listOf(
+        Frame(BleCharacteristics.CallerName, TftCallEncoder.callerName(TestCallerName)),
+        Frame(BleCharacteristics.CallerNumber, TftCallEncoder.callerNumber(TestCallerNumber)),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ringing()),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.accepted()),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ended()),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.outgoing()),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ended()),
+    )
 
     private fun safetyStopReason(): StationaryTftSafetyReason? {
         if (connection.connectionState.value !is BikeConnectionState.Connected) {
@@ -94,6 +126,10 @@ class StationaryTftValidator(
         const val NavigationActive = 132
         const val MaxStationarySpeedKph = 0.5
         const val MaxTelemetryAgeMillis = 2_000L
+        const val TestCallerName = "TEST CALLER"
+
+        /** Thirteen characters, so the cluster should show the last ten: 9876543210. */
+        const val TestCallerNumber = "+919876543210"
     }
 }
 

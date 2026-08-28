@@ -49,6 +49,29 @@ internal fun shouldClearPublishedCall(
 internal fun canUseLegacyCallFallback(enabled: Boolean, permissionGranted: Boolean): Boolean =
     enabled && permissionGranted
 
+/** What the cluster is told on `8730`. Mirrors the OEM's answered/direction encoding. */
+internal enum class TftCallState { Ringing, Answered, Outgoing }
+
+/**
+ * Android publishes an answered incoming call and an outgoing call identically, both as
+ * `CALL_TYPE_ONGOING`, so the notification alone cannot separate them. What does is whether this
+ * key was already on record as ringing: a call that rang here was incoming, and one first seen
+ * already in progress was dialled from this phone.
+ *
+ * A call already running when the listener connects is therefore reported as outgoing. That is
+ * unknowable from the notification and only changes which of two states the cluster shows for a
+ * call that is already up.
+ */
+internal fun tftCallStateFor(
+    callStyleIncoming: Boolean,
+    hasAnswerIntent: Boolean,
+    keyWasAlreadyTracked: Boolean,
+): TftCallState = when {
+    callStyleIncoming || hasAnswerIntent -> TftCallState.Ringing
+    keyWasAlreadyTracked -> TftCallState.Answered
+    else -> TftCallState.Outgoing
+}
+
 internal fun Notification.isRideBuddyCallNotification(): Boolean =
     category == Notification.CATEGORY_CALL ||
             extras.containsKey(Notification.EXTRA_ANSWER_INTENT) ||
@@ -73,7 +96,7 @@ class CallNotificationBridge(
         val hangUpIntent: PendingIntent? = null,
         val callerName: String? = null,
         val callerNumber: String? = null,
-        val ringing: Boolean = false,
+        val callState: TftCallState = TftCallState.Ringing,
         val providerPackage: String? = null,
     )
 
@@ -151,6 +174,11 @@ class CallNotificationBridge(
         ) == Notification.CallStyle.CALL_TYPE_INCOMING
         synchronized(callLock) {
             applyFeatureSettingsLocked(settings.callFeatureSettings())
+            val callState = tftCallStateFor(
+                callStyleIncoming = callStyleIncoming,
+                hasAnswerIntent = intents.answer != null,
+                keyWasAlreadyTracked = activeCall.value.notificationKey == sbn.key,
+            )
             activeCall.value = ActiveCallState(
                 notificationKey = sbn.key,
                 answerIntent = intents.answer,
@@ -158,7 +186,7 @@ class CallNotificationBridge(
                 hangUpIntent = intents.hangUp,
                 callerName = name,
                 callerNumber = number.takeIf(String::isNotBlank),
-                ringing = callStyleIncoming || intents.answer != null,
+                callState = callState,
                 providerPackage = sbn.packageName,
             )
             if (featureSettings.enabled) publishActiveCallLocked(featureSettings)
@@ -224,7 +252,11 @@ class CallNotificationBridge(
             add(
                 BikeWrite(
                     BleCharacteristics.CallState,
-                    if (call.ringing) TftCallEncoder.ringing() else TftCallEncoder.accepted(),
+                    when (call.callState) {
+                        TftCallState.Ringing -> TftCallEncoder.ringing()
+                        TftCallState.Answered -> TftCallEncoder.accepted()
+                        TftCallState.Outgoing -> TftCallEncoder.outgoing()
+                    },
                 ),
             )
         }

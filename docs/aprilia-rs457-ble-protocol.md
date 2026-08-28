@@ -219,10 +219,36 @@ late, restore the OEM behavior by reverting the commit that set the count to 1.
 `MinimumWriteIntervalMillis = 200L` is unaffected and should stay — it is the OEM's inter-write
 pacing, which is a separate thing from the replay.
 
-The OEM repeats parts of the call path too, and RideBuddy currently does not: caller state
-(`8730`) plus name (`8710`) and number (`8760`) go out three times on an incoming call, the number
-(`8760`) twice more, and the state (`8730`) twice when a call is accepted. Whether the cluster
-needs that repetition is unverified — see the call section of the validation checklist.
+The OEM repeats parts of the call path too, and RideBuddy does not: caller state (`8730`) plus name
+(`8710`) and number (`8760`) go out three times on an incoming call, the number (`8760`) twice more,
+and the state (`8730`) twice when a call is accepted. Unlike the navigation fields these are all
+**acknowledged** writes (type `2`), so `writeAndAwait` already confirms delivery and the repetition
+looks like belt-and-braces rather than a protocol requirement. Unverified — see the call section of
+the validation checklist.
+
+### Call state and caller fields
+
+`8730` carries `[0x01, answered, ended, direction]`:
+
+| State | Payload | OEM source |
+| --- | --- | --- |
+| Incoming, ringing | `01 00 00 01` | `a(true, …)` |
+| Answered | `01 01 00 00` | `c(true, …)`, and the `8740` accept path |
+| Outgoing | `01 00 00 02` | `b(true, …)`, held for the whole call |
+| Ended | `01 00 01 00` | `a(false, …)` / `b(false, …)` |
+
+The OEM never marks an outgoing call answered; direction `2` stands until it ends. A missed call
+(`d(…)`) sends no packet at all — its write is optimised out — so there is nothing to reproduce.
+
+`8710` caller name is `[0x0A, up to 19 characters, zero-padded to 20]`, filtered to
+`[A-Za-z0-9 ]` with `Unknown Number` as the fallback. The OEM resolves the name by looking the
+number up in Contacts; RideBuddy takes the name the dialer already put in the notification, which
+needs no `READ_CONTACTS`.
+
+`8760` caller number is unheadered: up to 20 bytes, zero-padded. The OEM writes `takeLast(10)` of
+the raw number, so an international number reaches the cluster without its country code. RideBuddy
+filters to digits and `+` first and then applies the same ten-character rule — the field is sized
+for ten, and sending more overflows it.
 
 So 500 m goes out as `F4 01 00`. Sending it big-endian (`00 01 F4`) is read by the cluster as
 roughly 16 million metres, and any distance under 256 m collapses to zero — RideBuddy shipped that

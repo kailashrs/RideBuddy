@@ -23,6 +23,63 @@ import org.junit.Test
 
 class StationaryTftValidatorTest {
     @Test
+    fun `the call surface walks every state and ends with the call cleared`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = {},
+            elapsedRealtimeMillis = { now },
+        )
+
+        val result = validator.run(StationaryTftSurface.Calls)
+
+        assertEquals(StationaryTftTestResult.Succeeded(7), result)
+        assertEquals(
+            listOf(
+                BleCharacteristics.CallerName,
+                BleCharacteristics.CallerNumber,
+                BleCharacteristics.CallState,
+                BleCharacteristics.CallState,
+                BleCharacteristics.CallState,
+                BleCharacteristics.CallState,
+                BleCharacteristics.CallState,
+            ),
+            connection.writes.map { it.characteristic },
+        )
+        val states = connection.writes
+            .filter { it.characteristic == BleCharacteristics.CallState }
+            .map { it.payload.toList() }
+        assertEquals(
+            listOf(
+                TftCallEncoder.ringing().toList(),
+                TftCallEncoder.accepted().toList(),
+                TftCallEncoder.ended().toList(),
+                TftCallEncoder.outgoing().toList(),
+                // Ends cleared, so no invented call is left showing on the cluster.
+                TftCallEncoder.ended().toList(),
+            ),
+            states,
+        )
+    }
+
+    @Test
+    fun `the call test sends a number long enough to prove the cluster truncation`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = {},
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftSurface.Calls)
+
+        val number = connection.writes.first { it.characteristic == BleCharacteristics.CallerNumber }
+        assertEquals("9876543210", number.payload.copyOfRange(0, 10).toString(Charsets.US_ASCII))
+    }
+
+    @Test
     fun `writes every inferred navigation output and ends by clearing the TFT`() = runBlocking {
         val now = 10_000L
         val connection = RecordingConnection(receivedAtElapsedRealtime = now)

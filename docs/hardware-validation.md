@@ -20,9 +20,12 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 
 ## Calls and background navigation
 
-1. Only after the TFT test, enable caller display and call controls separately. Test an incoming call from a second phone; verify answer, reject, and end actions against the chosen default dialer.
-2. Watch specifically for caller name or number that fails to appear, or appears late. The OEM app writes the call packets two or three times with 200 ms gaps and RideBuddy writes them once; if the cluster misses a single write, that difference is where it will show. Record the outcome either way, because it decides whether the call path needs the same replay the navigation path already has.
-3. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
+1. Run **Settings → Developer tools → Stationary call validation** before involving a second phone. It walks the caller display through ringing, answered, cleared, outgoing, and cleared again, and ends with nothing showing. Confirm each state appears.
+2. Check the number on that test specifically. It is sent as `+919876543210` and the cluster should show `9876543210` — the trailing ten characters. Anything longer means the truncation rule is not reaching the display, and anything shorter means the field is smaller than the OEM's ten.
+3. Only after that, enable caller display and call controls and test a real incoming call from a second phone; verify answer, reject, and end actions against the chosen default dialer.
+4. Place an outgoing call and confirm the cluster distinguishes it from an answered incoming one. RideBuddy infers the direction from whether the notification was ever seen ringing, so a call already in progress when the app starts is reported as outgoing.
+5. Watch for caller name or number that fails to appear, or appears late. The OEM writes each call packet two or three times with 200 ms gaps and RideBuddy writes it once. These are acknowledged writes, so the repetition should be unnecessary — but a missing or late field is what would say otherwise.
+6. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
 
 ## Evidence to retain
 
