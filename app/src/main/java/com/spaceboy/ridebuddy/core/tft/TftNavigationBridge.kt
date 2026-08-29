@@ -304,8 +304,10 @@ class TftNavigationBridge(
             latestData.clear()
             controlBatches.clear()
             arrivalPendingGeneration = arrivalGeneration
-            // No capture covers an arrival session value, and 83 now means "route ready", which
-            // would put the GO prompt back up. The banner is a surface the capture does cover.
+            // Staying at 87 is what the OEM does; it re-asserts the same value rather than moving
+            // the cluster anywhere. The banner is the deliberate difference: the OEM leaves the
+            // last frame up and puts a modal dialog on the phone for the rider to dismiss, which
+            // is not a reasonable thing to ask of someone who has just pulled up.
             controlBatches += WriteBatch(
                 frames = TftPacketEncoder.guidanceTextRows(destinationLabel, ArrivedBanner)
                     .map { payload -> Frame(BleCharacteristics.NavigationText, payload) },
@@ -699,9 +701,10 @@ class TftNavigationBridge(
          * rendering maneuvers. RideBuddy had been writing 80 to start and 87 to shut down, so it
          * was telling the cluster to begin guidance at the exact moment it meant to end it.
          *
-         * Ending is just the clear packet; the OEM sends no session value with it. No capture
-         * covers arrival or rerouting, so those keep their previously assumed values and are
-         * used only where the display can tolerate being wrong.
+         * Ending is just the clear packet; the OEM sends no session value with it. Arrival stays
+         * at 87 — `onNavigationFinished` re-asserts it and raises its "Reached the Destination"
+         * prompt on the phone, never moving the cluster. The OEM's fourth value, 82, is guidance
+         * with more than one destination, which RideBuddy never has.
          */
         const val SessionRouteReady = 83
         const val SessionGuidanceActive = 87
