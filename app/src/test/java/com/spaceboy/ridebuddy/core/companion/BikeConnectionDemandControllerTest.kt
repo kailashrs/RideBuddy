@@ -5,6 +5,29 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BikeConnectionDemandControllerTest {
+    /**
+     * The regression this guards is in the presence service, but the mechanism is here. That
+     * service consumed the appearance before checking whether it could act on it, and while an
+     * attempt was already in flight it then threw the appearance away. The bike is Present from
+     * that point, so every later appearance is a duplicate — and if the in-flight attempt fails
+     * its way to `retriesExhausted`, the app reaches the one state a fresh appearance exists to
+     * resume with no appearance left to resume it, stranded beside a bike that is still
+     * advertising.
+     */
+    @Test
+    fun `an appearance spent while an attempt is in flight leaves nothing to resume with`() {
+        val spent = bikeConnectionDemandTransition(
+            BikeConnectionDemandState(blePresence = ObservedBlePresence.Absent),
+            BikeConnectionDemandEvent.BleAppeared,
+        )
+        assertEquals(BleAppearanceDecision.RequestConnection, spent.appearanceDecision)
+
+        // The bike never went away, so nothing here can ask for a connection again.
+        val later = bikeConnectionDemandTransition(spent.state, BikeConnectionDemandEvent.BleAppeared)
+
+        assertEquals(BleAppearanceDecision.IgnoreDuplicate, later.appearanceDecision)
+    }
+
     @Test
     fun `duplicate BLE appearance cannot reset the reconnect budget`() {
         val transition = bikeConnectionDemandTransition(

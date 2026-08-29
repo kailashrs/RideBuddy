@@ -30,6 +30,19 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
         }
         when (companionPresenceAction(event.event)) {
             CompanionPresenceAction.EvaluateBleAppearance -> {
+                val state = container.bikeConnection.connectionState.value
+                if (!shouldRequestPresenceReconnect(state)) {
+                    // The appearance is deliberately not handed to the demand controller here.
+                    // Consuming it marks the bike Present, which makes the next one a duplicate,
+                    // while the attempt being deferred to can still fail its way to
+                    // retriesExhausted — the very state a fresh appearance exists to resume,
+                    // reached with the appearance already spent. That strands the app in Failed
+                    // with the bike advertising beside it.
+                    container.connectionEventJournal.record(
+                        "Companion event: $eventLabel; an attempt is already in flight",
+                    )
+                    return
+                }
                 when (container.bikeConnectionDemand.onBleAppeared()) {
                     BleAppearanceDecision.IgnoreDuplicate -> {
                         container.connectionEventJournal.record(
@@ -47,21 +60,14 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
 
                     BleAppearanceDecision.RequestConnection -> Unit
                 }
-                val state = container.bikeConnection.connectionState.value
-                if (shouldRequestPresenceReconnect(state)) {
-                    container.connectionEventJournal.record(
-                        "Companion event: $eventLabel; requesting connection",
-                    )
-                    BikeConnectionService.reconnect(
-                        this,
-                        bike,
-                        trigger = ConnectionAttemptTrigger.PresenceAppearance,
-                    )
-                } else {
-                    container.connectionEventJournal.record(
-                        "Companion event: $eventLabel; connection already active",
-                    )
-                }
+                container.connectionEventJournal.record(
+                    "Companion event: $eventLabel; requesting connection",
+                )
+                BikeConnectionService.reconnect(
+                    this,
+                    bike,
+                    trigger = ConnectionAttemptTrigger.PresenceAppearance,
+                )
             }
 
             CompanionPresenceAction.MarkBleAbsent -> {
