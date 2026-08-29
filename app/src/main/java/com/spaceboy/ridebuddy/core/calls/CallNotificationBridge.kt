@@ -113,16 +113,17 @@ class CallNotificationBridge(
     private val callLock = Any()
     private var nextCallWriteGeneration = 0L
     private var publishedCallActive = false
+    private var clusterAcceptsCallWrites = false
     private var featureSettings = appSettings.settings.value.callFeatureSettings()
 
     init {
         scope.launch {
             bikeConnection.controls.collect { event ->
                 // A cluster that has just come up has forgotten the call it was showing.
-                if (event is BikeControlEvent.ClusterReady) publishActiveCall()
+                if (event is BikeControlEvent.ClusterReady) armCallWrites(republish = true)
                 // The cluster believes it is in a call. Republishing is what reconciles the two
                 // views: the phone's notification is the authority on whether one is really up.
-                if (event is BikeControlEvent.ClusterCallActive) publishActiveCall()
+                if (event is BikeControlEvent.ClusterCallActive) armCallWrites(republish = true)
                 if (event is BikeControlEvent.CallAction) {
                     if (!appSettings.settings.value.tftCallControls) return@collect
                     val call = synchronized(callLock) { activeCall.value }
@@ -140,7 +141,20 @@ class CallNotificationBridge(
         }
         scope.launch {
             bikeConnection.connectionState.collect { connectionState ->
-                if (connectionState is BikeConnectionState.Connected) publishActiveCall()
+                if (connectionState is BikeConnectionState.Connected) {
+                    publishActiveCall()
+                } else {
+                    // A cluster that has gone away has to show its side is up again before it is
+                    // worth writing a call to.
+                    synchronized(callLock) { clusterAcceptsCallWrites = false }
+                }
+            }
+        }
+        scope.launch {
+            // The other half of the OEM's readiness flag: whichever lands first, the cluster
+            // announcing itself on 8740 or the first telemetry frame, arms the call writes.
+            bikeConnection.telemetry.collect { frame ->
+                if (frame != null) armCallWrites(republish = false)
             }
         }
         scope.launch {
@@ -231,6 +245,21 @@ class CallNotificationBridge(
         return runCatching { intent.send() }.isSuccess
     }
 
+    /**
+     * The OEM writes nothing about a call until the cluster has shown its own side is up — either
+     * by announcing itself on `8740` or by sending telemetry, which set the same flag — and that
+     * flag gates every call write it makes. Writing earlier reaches a cluster that is not yet
+     * drawing the call screen, so the call is simply missed rather than deferred.
+     */
+    private fun armCallWrites(republish: Boolean) {
+        val publish = synchronized(callLock) {
+            val wasArmed = clusterAcceptsCallWrites
+            clusterAcceptsCallWrites = true
+            republish || !wasArmed
+        }
+        if (publish) publishActiveCall()
+    }
+
     private fun publishActiveCall() {
         synchronized(callLock) {
             applyFeatureSettingsLocked(appSettings.settings.value.callFeatureSettings())
@@ -306,6 +335,8 @@ class CallNotificationBridge(
 
     private fun enqueueCallWrites(writes: List<BikeWrite>) {
         if (writes.isEmpty()) return
+        // Every caller holds callLock, so this reads the armed state without racing it.
+        if (!clusterAcceptsCallWrites) return
         nextCallWriteGeneration++
         pendingCallWrites.trySend(CallWriteRequest(nextCallWriteGeneration, writes))
     }
