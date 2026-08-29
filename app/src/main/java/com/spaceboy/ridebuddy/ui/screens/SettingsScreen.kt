@@ -131,7 +131,6 @@ fun SettingsScreen(
     onClearBleCapture: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onRunStationaryTest: () -> Unit,
-    onRunStationaryCallTest: () -> Unit,
     notificationAccessEnabled: Boolean,
     legacyCallPermissionGranted: Boolean,
     onLegacyCallControlsChanged: (Boolean) -> Unit,
@@ -172,7 +171,6 @@ fun SettingsScreen(
     val locale = LocalConfiguration.current.locales[0]
     val speed = remember(settings.distanceUnits, locale) { SpeedFormat(settings.distanceUnits, locale) }
     var confirmTest by remember { mutableStateOf(false) }
-    var confirmCallTest by remember { mutableStateOf(false) }
     var confirmForget by remember { mutableStateOf(false) }
     var confirmClearRideHistory by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
@@ -182,12 +180,6 @@ fun SettingsScreen(
         StationaryTestDialog(
             onDismiss = { confirmTest = false },
             onConfirm = { confirmTest = false; onRunStationaryTest() },
-        )
-    }
-    if (confirmCallTest) {
-        CallTestDialog(
-            onDismiss = { confirmCallTest = false },
-            onConfirm = { confirmCallTest = false; onRunStationaryCallTest() },
         )
     }
     if (confirmForget) {
@@ -300,7 +292,6 @@ fun SettingsScreen(
                 onOpenDiagnostics = onOpenDiagnostics,
                 onViewCapture = { showBleCapture = true },
                 onRequestStationaryTest = { confirmTest = true },
-                onRequestCallTest = { confirmCallTest = true },
             )
         }
     }
@@ -709,7 +700,6 @@ private fun DeveloperToolsSection(
     onOpenDiagnostics: () -> Unit,
     onViewCapture: () -> Unit,
     onRequestStationaryTest: () -> Unit,
-    onRequestCallTest: () -> Unit,
 ) {
     SettingsSection("Developer tools") {
         SettingsRow(
@@ -768,15 +758,8 @@ private fun DeveloperToolsSection(
         SettingsRow(
             icon = Icons.Outlined.Tv,
             title = "Stationary TFT validation",
-            supportingText = "Send diagnostic navigation writes while the motorcycle is parked.",
+            supportingText = "Send diagnostic navigation and caller writes while parked.",
             trailingContent = { TextButton(onClick = onRequestStationaryTest) { Text("Run") } },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.Call,
-            title = "Stationary call validation",
-            supportingText = "Show a test caller ringing, answered, cleared, and outgoing.",
-            trailingContent = { TextButton(onClick = onRequestCallTest) { Text("Run") } },
         )
     }
 }
@@ -855,32 +838,19 @@ private fun StationaryTestDialog(
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = { Text("Test the TFT?") },
-        text = { Text("Keep the motorcycle stationary. The test writes a maneuver, trip distance, text, speed limit and clear state.") },
+        text = {
+            Text(
+                "Keep the motorcycle stationary and make sure no real call is in progress. The " +
+                    "test writes a maneuver, trip distance, text and speed limit, then shows a " +
+                    "test caller ringing, answered, cleared and outgoing.",
+            )
+        },
         confirmButton = {
             TextButton(onClick = {
                 onDismiss(); onConfirm()
             }) { Text("Run test") }
         },
         dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun CallTestDialog(
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Test the caller display?") },
-        text = {
-            Text(
-                "Keep the motorcycle stationary and make sure no real call is in progress. The " +
-                    "test shows a caller ringing, answered, cleared, and then as an outgoing call.",
-            )
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Run test") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

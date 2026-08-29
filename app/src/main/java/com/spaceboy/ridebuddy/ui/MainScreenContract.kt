@@ -98,7 +98,6 @@ data class MainScreenActions(
     val onExportBleCapture: () -> Unit,
     val onClearBleCapture: () -> Unit,
     val onRunStationaryTest: () -> Unit,
-    val onRunStationaryCallTest: () -> Unit,
     val onLegacyCallControlsChanged: (Boolean) -> Unit,
     val onOpenBackgroundLocationSettings: () -> Unit,
     val onOpenAppPermissions: () -> Unit,

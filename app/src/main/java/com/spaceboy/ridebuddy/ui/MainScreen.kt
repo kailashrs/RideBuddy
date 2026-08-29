@@ -309,7 +309,6 @@ internal fun MainScreenContent(
                 onClearBleCapture = onClearBleCapture,
                 onOpenDiagnostics = onOpenDiagnostics,
                 onRunStationaryTest = onRunStationaryTest,
-                onRunStationaryCallTest = onRunStationaryCallTest,
                 notificationAccessEnabled = notificationAccessEnabled,
                 legacyCallPermissionGranted = legacyCallPermissionGranted,
                 onLegacyCallControlsChanged = onLegacyCallControlsChanged,

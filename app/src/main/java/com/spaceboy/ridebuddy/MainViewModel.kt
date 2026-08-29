@@ -29,6 +29,7 @@ import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -348,21 +349,33 @@ class MainViewModel internal constructor(
         mutableUiState.update { it.copy(transientMessage = message) }
     }
 
-    fun askTftTestConfirmation(message: String) {
+    private var pendingTftConfirmation: CompletableDeferred<Boolean>? = null
+
+    /**
+     * Asks the rider what the cluster showed and suspends until they answer.
+     *
+     * Suspending is the point: the caller runs one phase, asks about it while it is still on the
+     * screen, and only then starts the next. Dismissing counts as "no", so a stray tap outside
+     * the dialog cannot report a surface as good.
+     */
+    suspend fun awaitTftTestConfirmation(message: String): Boolean {
+        val pending = CompletableDeferred<Boolean>()
+        pendingTftConfirmation?.complete(false)
+        pendingTftConfirmation = pending
         mutableUiState.update { it.copy(tftTestConfirmation = message) }
+        return try {
+            pending.await()
+        } finally {
+            if (pendingTftConfirmation === pending) pendingTftConfirmation = null
+            mutableUiState.update { it.copy(tftTestConfirmation = null) }
+        }
     }
 
     fun resolveTftTestConfirmation(displayLooksCorrect: Boolean) {
-        mutableUiState.update { state ->
-            state.copy(
-                tftTestConfirmation = null,
-                transientMessage = if (displayLooksCorrect) {
-                    "TFT display test completed"
-                } else {
-                    "TFT display test needs investigation"
-                },
-            )
-        }
+        val pending = pendingTftConfirmation
+        pendingTftConfirmation = null
+        mutableUiState.update { it.copy(tftTestConfirmation = null) }
+        pending?.complete(displayLooksCorrect)
     }
 
     companion object {

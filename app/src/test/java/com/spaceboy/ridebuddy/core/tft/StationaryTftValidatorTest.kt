@@ -32,7 +32,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run(StationaryTftSurface.Calls)
+        val result = validator.run(StationaryTftPhase.Calls)
 
         assertEquals(StationaryTftTestResult.Succeeded(7), result)
         assertEquals(
@@ -73,7 +73,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        validator.run(StationaryTftSurface.Calls)
+        validator.run(StationaryTftPhase.Calls)
 
         val number = connection.writes.first { it.characteristic == BleCharacteristics.CallerNumber }
         assertEquals("9876543210", number.payload.copyOfRange(0, 10).toString(Charsets.US_ASCII))
@@ -89,7 +89,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run(nowMillis = 1_700_000_000_000L)
+        val result = validator.run(StationaryTftPhase.Navigation, nowMillis = 1_700_000_000_000L)
 
         assertEquals(StationaryTftTestResult.Succeeded(11), result)
         assertEquals(
@@ -135,7 +135,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run()
+        val result = validator.run(StationaryTftPhase.Navigation)
 
         assertEquals(StationaryTftTestResult.Failed(BleCharacteristics.NavigationTrip, 4), result)
         assertEquals(5, connection.writes.size)
@@ -152,7 +152,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run()
+        val result = validator.run(StationaryTftPhase.Navigation)
 
         assertEquals(
             StationaryTftTestResult.SafetyStopped(StationaryTftSafetyReason.TelemetryStale, 0),
@@ -171,7 +171,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run()
+        val result = validator.run(StationaryTftPhase.Navigation)
 
         assertEquals(
             StationaryTftTestResult.SafetyStopped(StationaryTftSafetyReason.BikeMoving, 1),
@@ -190,7 +190,7 @@ class StationaryTftValidatorTest {
             elapsedRealtimeMillis = { now },
         )
 
-        val result = validator.run()
+        val result = validator.run(StationaryTftPhase.Navigation)
 
         assertEquals(
             StationaryTftTestResult.SafetyStopped(StationaryTftSafetyReason.TelemetryStale, 1),

@@ -36,7 +36,7 @@ import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.diagnostics.diagnosticsReport
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
-import com.spaceboy.ridebuddy.core.tft.StationaryTftSurface
+import com.spaceboy.ridebuddy.core.tft.StationaryTftPhase
 import com.spaceboy.ridebuddy.core.tft.StationaryTftTestResult
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.toCsv
@@ -348,8 +348,7 @@ class MainActivity : ComponentActivity() {
         onExportDiagnostics = ::exportDiagnostics,
         onExportBleCapture = ::exportBleCapture,
         onClearBleCapture = viewModel::clearBleCapture,
-        onRunStationaryTest = { runStationaryTest(StationaryTftSurface.Navigation) },
-        onRunStationaryCallTest = { runStationaryTest(StationaryTftSurface.Calls) },
+        onRunStationaryTest = ::runStationaryTest,
         onLegacyCallControlsChanged = ::setLegacyCallControls,
         onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
         onOpenAppPermissions = ::openAppPermissionSettings,
@@ -705,53 +704,76 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun runStationaryTest(surface: StationaryTftSurface) {
+    private fun runStationaryTest() {
         val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
             viewModel.showMessage("Connect and verify the companion link before testing")
             return
         }
         lifecycleScope.launch {
-            when (val result = container.stationaryTftValidator.run(surface)) {
-                is StationaryTftTestResult.Failed -> {
-                    viewModel.showMessage("TFT test stopped after ${result.completedWrites} acknowledged writes")
-                }
-                is StationaryTftTestResult.SafetyStopped -> {
-                    val reason = when (result.reason) {
-                        StationaryTftSafetyReason.Disconnected -> "the bike disconnected"
-                        StationaryTftSafetyReason.NotAuthenticated -> "the motorcycle companion link was not verified"
-                        StationaryTftSafetyReason.TelemetryUnavailable -> "live telemetry was unavailable"
-                        StationaryTftSafetyReason.TelemetryStale -> "live telemetry became stale"
-                        StationaryTftSafetyReason.BikeMoving -> "the bike started moving"
-                    }
-                    viewModel.showMessage(
-                        "TFT test stopped after ${result.completedWrites} acknowledged writes because $reason",
-                    )
-                }
-                is StationaryTftTestResult.Succeeded -> {
-                    val latestTelemetry = container.bikeConnection.latestTelemetryReading.value
-                    if (latestTelemetry == null) {
-                        viewModel.showMessage("TFT test result discarded because stationary telemetry was unavailable")
-                        return@launch
-                    }
-                    if (latestTelemetry.frame.speedKilometresPerHour > 0.5) {
-                        viewModel.showMessage("TFT test result discarded because the bike started moving")
-                        return@launch
-                    }
-                    val prompt = when (surface) {
-                        StationaryTftSurface.Navigation ->
-                            "While parked, did you see the maneuver, distance, test text, speed " +
-                                "limit, and clear state on the TFT?"
+            // A phase that looks wrong does not stop the run. The two surfaces are independent,
+            // and knowing whether the second one also failed is what separates a broken link from
+            // a broken pictogram — asking for it later would mean parking up a second time.
+            val faults = StationaryTftPhase.entries.mapNotNull { phase ->
+                if (!runStationaryPhase(phase)) phase else null
+            }
+            viewModel.showMessage(
+                when {
+                    faults.isEmpty() -> "TFT display test completed"
+                    faults.size == StationaryTftPhase.entries.size ->
+                        "Navigation and caller displays need investigation"
+                    faults.single() == StationaryTftPhase.Navigation ->
+                        "Navigation display needs investigation"
+                    else -> "Caller display needs investigation"
+                },
+            )
+        }
+    }
 
-                        StationaryTftSurface.Calls ->
-                            "While parked, did you see TEST CALLER ring, answer, clear, then show " +
-                                "again as an outgoing call? The number should read 9876543210 — " +
-                                "if it shows +919876543 the cluster is being sent too many digits."
-                    }
-                    viewModel.askTftTestConfirmation(
-                        "The Bluetooth stack accepted ${result.acceptedWrites} test writes. $prompt",
-                    )
+    /** Runs one phase and asks the rider about it. Returns false if it did not look right. */
+    private suspend fun runStationaryPhase(phase: StationaryTftPhase): Boolean {
+        val container = appContainer
+        when (val result = container.stationaryTftValidator.run(phase)) {
+            is StationaryTftTestResult.Failed -> {
+                viewModel.showMessage("TFT test stopped after ${result.completedWrites} acknowledged writes")
+                return false
+            }
+            is StationaryTftTestResult.SafetyStopped -> {
+                val reason = when (result.reason) {
+                    StationaryTftSafetyReason.Disconnected -> "the bike disconnected"
+                    StationaryTftSafetyReason.NotAuthenticated -> "the motorcycle companion link was not verified"
+                    StationaryTftSafetyReason.TelemetryUnavailable -> "live telemetry was unavailable"
+                    StationaryTftSafetyReason.TelemetryStale -> "live telemetry became stale"
+                    StationaryTftSafetyReason.BikeMoving -> "the bike started moving"
                 }
+                viewModel.showMessage(
+                    "TFT test stopped after ${result.completedWrites} acknowledged writes because $reason",
+                )
+                return false
+            }
+            is StationaryTftTestResult.Succeeded -> {
+                val latestTelemetry = container.bikeConnection.latestTelemetryReading.value
+                if (latestTelemetry == null) {
+                    viewModel.showMessage("TFT test result discarded because stationary telemetry was unavailable")
+                    return false
+                }
+                if (latestTelemetry.frame.speedKilometresPerHour > 0.5) {
+                    viewModel.showMessage("TFT test result discarded because the bike started moving")
+                    return false
+                }
+                val prompt = when (phase) {
+                    StationaryTftPhase.Navigation ->
+                        "While parked, did you see the maneuver, distance, test text, speed " +
+                            "limit, and clear state on the TFT?"
+
+                    StationaryTftPhase.Calls ->
+                        "While parked, did you see TEST CALLER ring, answer, clear, then show " +
+                            "again as an outgoing call? The number should read 9876543210 — " +
+                            "if it shows +919876543 the cluster is being sent too many digits."
+                }
+                return viewModel.awaitTftTestConfirmation(
+                    "The Bluetooth stack accepted ${result.acceptedWrites} test writes. $prompt",
+                )
             }
         }
     }

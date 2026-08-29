@@ -13,7 +13,7 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 ## TFT output
 
 1. Leave **TFT navigation output**, **Caller display**, and **TFT call controls** off for the read-only phase.
-2. At 0 km/h, run **Settings → Developer tools → Stationary TFT validation** and confirm that the cluster enters and then clears the navigation state.
+2. At 0 km/h, run **Settings → Developer tools → Stationary TFT validation**. It walks navigation first and asks what the cluster showed, then does the same for the caller display. Confirm the cluster enters and then clears the navigation state.
 3. Enable **TFT navigation output** and send one stationary navigation destination. Verify maneuver, trip, text, speed-limit, arrival, reroute, and clear states one at a time before using active guidance.
 4. Watch for any field that fails to appear or updates late. RideBuddy writes each navigation field once where the OEM writes it twice, and `8210`, `8220` and `8230` are unacknowledged writes, so a cluster that drops one gives no error — a missing or stale field is the only symptom. If that happens, revert the commit that set `ClusterReplayCount` to 1 and retest.
 5. With guidance running, press **EXIT** on the handlebar and confirm navigation stops. Do it twice: once with the navigation screen open, and once with the app backgrounded or the navigation screen closed. The second case is the one that used to fail — guidance keeps running in the background and the exit is handled at process scope now, not by the screen.
@@ -22,7 +22,7 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 
 ## Calls and background navigation
 
-1. Run **Settings → Developer tools → Stationary call validation** before involving a second phone. It walks the caller display through ringing, answered, cleared, outgoing, and cleared again, and ends with nothing showing. Confirm each state appears.
+1. The stationary validation above covers the caller display too, as its second phase: ringing, answered, cleared, outgoing, and cleared again, ending with nothing showing. Answer its second prompt before involving a second phone — a "no" there points at the caller display alone, since navigation was confirmed separately a moment earlier.
 2. Check the number on that test specifically. It is sent as `+919876543210` and the cluster should show `9876543210` — the trailing ten characters. Anything longer means the truncation rule is not reaching the display, and anything shorter means the field is smaller than the OEM's ten.
 3. Only after that, enable caller display and call controls and test a real incoming call from a second phone; verify answer, reject, and end actions against the chosen default dialer.
 4. Place an outgoing call and confirm the cluster distinguishes it from an answered incoming one. RideBuddy infers the direction from whether the notification was ever seen ringing, so a call already in progress when the app starts is reported as outgoing.

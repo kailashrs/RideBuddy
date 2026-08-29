@@ -10,22 +10,33 @@ import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Which cluster surface a stationary run exercises. They are validated separately. */
-enum class StationaryTftSurface { Navigation, Calls }
+/**
+ * The cluster surfaces a stationary run walks, in order.
+ *
+ * They are separate phases because the rider confirms each one before the next begins: a single
+ * question covering both surfaces cannot say which of them was wrong, and by the time it is asked
+ * the evidence for the first has already been cleared off the screen.
+ */
+enum class StationaryTftPhase { Navigation, Calls }
 
-/** Runs a bounded, stationary-only sample across one inferred cluster output. */
+/**
+ * Runs a bounded, stationary-only sample across one cluster output.
+ *
+ * Each phase ends by tidying up after itself — navigation clears, the call sequence ends on
+ * [TftCallEncoder.ended] — so nothing invented is left showing between phases or after the last.
+ */
 class StationaryTftValidator(
     private val connection: BikeConnection,
     private val pauseBetweenWrites: suspend () -> Unit = { delay(200.milliseconds) },
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     suspend fun run(
-        surface: StationaryTftSurface = StationaryTftSurface.Navigation,
+        phase: StationaryTftPhase,
         nowMillis: Long = System.currentTimeMillis(),
     ): StationaryTftTestResult {
-        val frames = when (surface) {
-            StationaryTftSurface.Navigation -> navigationFrames(nowMillis)
-            StationaryTftSurface.Calls -> callFrames()
+        val frames = when (phase) {
+            StationaryTftPhase.Navigation -> navigationFrames(nowMillis)
+            StationaryTftPhase.Calls -> callFrames()
         }
         frames.forEachIndexed { index, frame ->
             safetyStopReason()?.let { reason ->
