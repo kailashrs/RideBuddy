@@ -15,12 +15,11 @@ class TftPacketEncoderTest {
             current = Maneuver.TURN_LEFT,
             next = Maneuver.TURN_RIGHT,
             roundaboutExit = 0,
-            // Rounded to the nearest 10 m as the OEM does: 66051 -> 66050 -> 0x010202.
             distanceMetres = 0x01_02_03,
         )
 
         assertArrayEquals(
-            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 2, 2, 1, 0x00),
+            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 3, 2, 1, 0x00),
             packet,
         )
     }
@@ -84,18 +83,23 @@ class TftPacketEncoderTest {
         )
     }
 
-    /** Rounding keeps the cluster from redrawing the distance for every metre. */
+    /**
+     * The OEM rounds the trip packet's maneuver distance and leaves the 8210 one raw. The capture
+     * shows 277 m on 8210 against 70 m on 8230 in the same second.
+     */
     @Test
-    fun maneuverDistanceIsRoundedToTheNearestTenMetres() {
-        fun distance(m: Int) =
-            TftPacketEncoder.maneuver(Maneuver.TURN_RIGHT, 0, 0, m).copyOfRange(5, 8)
-                .let { it[0].toInt() and 0xFF or ((it[1].toInt() and 0xFF) shl 8) }
+    fun onlyTheTripManeuverDistanceIsRoundedToTenMetres() {
+        val maneuver = TftPacketEncoder.maneuver(Maneuver.TURN_RIGHT, 0, 0, 277)
+        assertEquals(277, le24(maneuver, 5))
 
-        assertEquals(280, distance(277))
-        assertEquals(70, distance(70))
-        assertEquals(0, distance(4))
-        assertEquals(10, distance(5))
+        val trip = TftPacketEncoder.trip(0L, destinationDistanceMetres = 0, maneuverDistanceMetres = 277)
+        assertEquals(280, le24(trip, 6))
     }
+
+    private fun le24(packet: ByteArray, offset: Int): Int =
+        (packet[offset].toInt() and 0xFF) or
+            ((packet[offset + 1].toInt() and 0xFF) shl 8) or
+            ((packet[offset + 2].toInt() and 0xFF) shl 16)
 
     @Test
     fun textIsSplitIntoSixteenByteRows() {
@@ -185,6 +189,32 @@ class TftPacketEncoderTest {
             TftPacketEncoder.session(80),
         )
     }
+
+    /**
+     * Byte-for-byte against frames the OEM actually put on the wire, taken from an HCI capture of
+     * it driving this cluster. If any of these drift, the cluster stops rendering.
+     */
+    @Test
+    fun packetsMatchTheCapturedOemFrames() {
+        assertEquals("05ff5300", TftPacketEncoder.session(83).toHex())
+        assertEquals("05ff5700", TftPacketEncoder.session(87).toHex())
+        assertEquals("ff00", TftPacketEncoder.clear().toHex())
+        assertEquals("020000", TftPacketEncoder.speedLimit(0).toHex())
+        assertEquals(
+            "010600ff0615010000",
+            TftPacketEncoder.pictogram(current = 6, next = 6, distanceMetres = 277).toHex(),
+        )
+
+        val rows = TftPacketEncoder.guidanceTextRows(
+            destination = "Marina Beach Marina Beach Road, ",
+            instruction = "Turn right onto Marina Beach Road",
+        )
+        assertEquals("0400144d6172696e61204265616368204d617200", rows[0].toHex())
+        assertEquals("040114696e6120426561636820526f61642c2000", rows[1].toHex())
+        assertEquals("0402145475726e207269676874206f6e746f2000", rows[2].toHex())
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
     private fun rowText(row: ByteArray): String =
         row.copyOfRange(3, 3 + payloadLength(row)).toString(Charsets.UTF_8)

@@ -20,9 +20,9 @@ object TftPacketEncoder {
             current = clusterManeuver(current, roundaboutExit),
             next = clusterManeuver(next),
             roundaboutExit = roundaboutExit,
-            // The OEM rounds this to the nearest 10 m before sending, so the cluster never has to
-            // redraw for a metre of change. Clamped first: rounding Int.MAX_VALUE overflows.
-            distanceMetres = ((distanceMetres.coerceIn(0, MaxUInt24) + 5) / 10) * 10,
+            // Sent raw. The capture shows the OEM's 8210 distance at 277 m, so this is the one
+            // field it does not round.
+            distanceMetres = distanceMetres,
         )
 
     /**
@@ -62,7 +62,13 @@ object TftPacketEncoder {
             this[1] = arrival.minute.toByte()
             this[2] = arrival.hour.toByte()
             writeUInt24LittleEndian(offset = 3, value = destinationDistanceMetres)
-            writeUInt24LittleEndian(offset = 6, value = maneuverDistanceMetres)
+            // The OEM rounds this second distance to the nearest 10 m and leaves the 8210 one
+            // raw; the capture shows 70 m here against 277 m there. Clamped first because
+            // rounding Int.MAX_VALUE overflows.
+            writeUInt24LittleEndian(
+                offset = 6,
+                value = ((maneuverDistanceMetres.coerceIn(0, MaxUInt24) + 5) / 10) * 10,
+            )
             this[9] = End.toByte()
         }
     }

@@ -590,10 +590,17 @@ internal class AndroidBikeConnection(
             }
 
             BleCharacteristics.NavigationControl -> {
-                when (value.firstOrNull()?.toInt()?.and(0xFF)) {
+                // The handlebar command is byte 1 of a three-byte event, not byte 0: the OEM
+                // reads `value[1]` after checking `value.length == 3`. Reading byte 0 meant the
+                // handlebar could never skip a waypoint or exit navigation.
+                val command = value.takeIf { it.size >= 3 }?.get(1)?.toInt()?.and(0xFF)
+                when (command) {
                     2 -> BikeControlEvent.SkipManeuver
                     3 -> BikeControlEvent.ExitNavigation
-                    else -> null
+                    else -> {
+                        log("Unhandled navigation control ${value.toHex(" ")}")
+                        null
+                    }
                 }?.let(mutableControls::tryEmit)
             }
 

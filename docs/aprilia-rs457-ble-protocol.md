@@ -77,7 +77,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x00]`. See "Session states" below. |
 | `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`; `132` starts navigation and `0` accompanies the clear. |
-| `8280` | bike → phone | TFT navigation control | OEM handles a three-byte event; value 2 skips a waypoint and value 3 exits navigation. |
+| `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`, dispatching 2 to skip a waypoint and 3 to exit navigation. No capture yet shows the value the GO prompt sends, so unrecognised commands are journaled. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
 | `8420` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
