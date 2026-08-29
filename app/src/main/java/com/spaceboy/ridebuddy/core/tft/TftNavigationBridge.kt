@@ -48,6 +48,7 @@ class TftNavigationBridge(
     private var arrivalPendingGeneration: Long? = null
     private var textAlertGeneration = 0L
     private var lastInfo: NavInfo? = null
+    private var destinationLabel: String = ""
 
     init {
         scope.launch {
@@ -123,8 +124,9 @@ class TftNavigationBridge(
         }
     }
 
-    fun start() {
+    fun start(destination: String = "") {
         val queuedReset = synchronized(queueLock) {
+            destinationLabel = destination
             val wasShowingArrival = arrivalPendingGeneration != null
             arrivalPendingGeneration = null
             if (wasShowingArrival) {
@@ -150,11 +152,15 @@ class TftNavigationBridge(
             if (!sessionActive) {
                 controlFrames += Frame(
                     BleCharacteristics.NavigationSession,
-                    TftPacketEncoder.session(SessionGuidanceStarted)
+                    TftPacketEncoder.session(SessionRouteReady)
                 )
                 controlFrames += Frame(
                     BleCharacteristics.NavigationStatus,
                     TftPacketEncoder.status(StatusNavigationActive)
+                )
+                controlFrames += Frame(
+                    BleCharacteristics.NavigationSession,
+                    TftPacketEncoder.session(SessionGuidanceActive)
                 )
                 sessionActive = true
             }
@@ -184,11 +190,14 @@ class TftNavigationBridge(
                     maneuverDistanceMetres = maneuverDistance,
                 ),
             )
-            val displayText = current.fullRoadName?.takeUnless(String::isBlank)
-                ?: current.fullInstructionText.orEmpty()
-            val rowLimit = if (settings.value.tftTextMode == TftTextMode.Compact) 1 else 3
+            val instruction = current.fullInstructionText?.takeUnless(String::isBlank)
+                ?: current.fullRoadName.orEmpty()
+            // Compact keeps the instruction banner and drops the destination lines, which is the
+            // half a rider glances at.
+            val compact = settings.value.tftTextMode == TftTextMode.Compact
+            val destinationText = if (compact) "" else synchronized(queueLock) { destinationLabel }
             if (!synchronized(queueLock) { textAlertActive }) {
-                TftPacketEncoder.displayTextRows(displayText, rowLimit).forEach { payload ->
+                TftPacketEncoder.guidanceTextRows(destinationText, instruction).forEach { payload ->
                     dataFrames += Frame(BleCharacteristics.NavigationText, payload)
                 }
             }
@@ -220,9 +229,28 @@ class TftNavigationBridge(
         wakeWorker.trySend(Unit)
     }
 
-    fun rerouting() = queueControl(
-        Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionRerouting)),
-    )
+    /**
+     * The OEM does not change the session state to reroute. It writes pictogram 203 and puts
+     * "RECALCULATION" on the banner, leaving the session where it is; 82 is its multi-leg
+     * guidance state, which is what RideBuddy had been sending here.
+     */
+    fun rerouting() {
+        val destination = synchronized(queueLock) { destinationLabel }
+        val frames = listOf(
+            Frame(
+                BleCharacteristics.NavigationManeuver,
+                TftPacketEncoder.pictogram(TftPacketEncoder.PictogramRecalculating),
+            ),
+        ) + TftPacketEncoder.guidanceTextRows(destination, RecalculatingBanner)
+            .map { payload -> Frame(BleCharacteristics.NavigationText, payload) }
+        val queued = synchronized(queueLock) {
+            if (!sessionActive || !outputEnabled) false else {
+                controlBatches += WriteBatch(frames = frames, priority = false, sessionGeneration = sessionGeneration)
+                true
+            }
+        }
+        if (queued) wakeWorker.trySend(Unit)
+    }
 
     /** Shows the arrival state briefly, then clears the cluster without racing a newer route. */
     fun arrivedAndStop() {
@@ -238,10 +266,11 @@ class TftNavigationBridge(
             latestData.clear()
             controlBatches.clear()
             arrivalPendingGeneration = arrivalGeneration
+            // No capture covers an arrival session value, and 83 now means "route ready", which
+            // would put the GO prompt back up. The banner is a surface the capture does cover.
             controlBatches += WriteBatch(
-                frames = listOf(
-                    Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionArrived)),
-                ),
+                frames = TftPacketEncoder.guidanceTextRows(destinationLabel, ArrivedBanner)
+                    .map { payload -> Frame(BleCharacteristics.NavigationText, payload) },
                 priority = true,
                 sessionGeneration = arrivalGeneration,
                 arrivalGeneration = arrivalGeneration,
@@ -287,9 +316,13 @@ class TftNavigationBridge(
                         frames = listOf(
                             Frame(
                                 BleCharacteristics.NavigationSession,
-                                TftPacketEncoder.session(SessionGuidanceStarted)
+                                TftPacketEncoder.session(SessionRouteReady)
                             ),
                             Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(StatusNavigationActive)),
+                            Frame(
+                                BleCharacteristics.NavigationSession,
+                                TftPacketEncoder.session(SessionGuidanceActive)
+                            ),
                         ),
                         priority = true,
                         alertGeneration = alertGeneration,
@@ -439,7 +472,6 @@ class TftNavigationBridge(
         if (controlBatches.any(WriteBatch::clearsCluster)) return null
         return WriteBatch(
             frames = listOf(
-                Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionEnded)),
                 Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()),
                 Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)),
             ),
@@ -468,7 +500,7 @@ class TftNavigationBridge(
                             frames = listOf(
                                 Frame(
                                     BleCharacteristics.NavigationSession,
-                                    TftPacketEncoder.session(SessionGuidanceStarted),
+                                    TftPacketEncoder.session(SessionRouteReady),
                                 ),
                                 Frame(
                                     BleCharacteristics.NavigationStatus,
@@ -476,9 +508,10 @@ class TftNavigationBridge(
                                 ),
                                 Frame(
                                     BleCharacteristics.NavigationSession,
-                                    TftPacketEncoder.session(SessionArrived),
+                                    TftPacketEncoder.session(SessionGuidanceActive),
                                 ),
-                            ),
+                            ) + TftPacketEncoder.guidanceTextRows(destinationLabel, ArrivedBanner)
+                                .map { payload -> Frame(BleCharacteristics.NavigationText, payload) },
                             priority = true,
                             sessionGeneration = pendingArrival,
                             arrivalGeneration = pendingArrival,
@@ -614,10 +647,21 @@ class TftNavigationBridge(
         const val FailedWriteRetryMillis = 1_000L
         const val MaxConsecutiveWriteFailures = 3
         const val ArrivalDisplayMillis = 2_000L
-        const val SessionGuidanceStarted = 80
-        const val SessionRerouting = 82
-        const val SessionArrived = 83
-        const val SessionEnded = 87
+        const val ArrivedBanner = "Arrived"
+        const val RecalculatingBanner = "RECALCULATION"
+        /**
+         * Session values as the capture shows the OEM using them, which is not what static
+         * analysis suggested. It writes 83 when a route is ready — the cluster then draws the GO
+         * prompt — and 87 once guidance is running, which is when it draws EXIT and starts
+         * rendering maneuvers. RideBuddy had been writing 80 to start and 87 to shut down, so it
+         * was telling the cluster to begin guidance at the exact moment it meant to end it.
+         *
+         * Ending is just the clear packet; the OEM sends no session value with it. No capture
+         * covers arrival or rerouting, so those keep their previously assumed values and are
+         * used only where the display can tolerate being wrong.
+         */
+        const val SessionRouteReady = 83
+        const val SessionGuidanceActive = 87
         const val StatusNavigationActive = 132
     }
 }

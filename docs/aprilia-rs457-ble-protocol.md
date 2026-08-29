@@ -70,13 +70,13 @@ The CCCD used for notification/indication subscription is the standard descripto
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
 | `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`. |
-| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x2E]` (9 bytes total). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
-| `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x2E]`. |
-| `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x2E]`. Both distances are **little-endian**. `minute`/`hour` come from a `Calendar` over an arrival timestamp in the OEM code, but whether the cluster renders them as an arrival clock or a remaining duration still needs TFT validation. |
-| `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4 (i.e. the total packet size including the four framing bytes), capped at 20 for the 16-character row limit. |
-| `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x2E]`. |
-| `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x2E]`; observed state values include 80, 82, 83, and 87. |
-| `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x2E]`; `132` is emitted by the OEM flow for a status-style update. |
+| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x00]` (9 bytes total). The distance is rounded to the nearest 10 m before sending. The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
+| `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x00]`. The OEM writes it every cycle, including 0. |
+| `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x00]`. Both distances are **little-endian**. `minute`/`hour` come from a `Calendar` over an arrival timestamp in the OEM code, but whether the cluster renders them as an arrival clock or a remaining duration still needs TFT validation. |
+| `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4, capped at 20 for the 16-character row limit. Rows 0 and 1 are the two bottom lines and row 2 is the banner across the top. |
+| `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
+| `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x00]`. See "Session states" below. |
+| `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`; `132` starts navigation and `0` accompanies the clear. |
 | `8280` | bike → phone | TFT navigation control | OEM handles a three-byte event; value 2 skips a waypoint and value 3 exits navigation. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
@@ -154,6 +154,39 @@ The OEM's navigation state is a set of fixed TFT fields rather than a drawing AP
 - `8240`: three short text rows. The first two are populated by splitting one string at 16 characters; the third is independently truncated to 16 characters. UTF-8 is used by the app, but ASCII/Latin text is the safest first live-test assumption.
 - `8250`: clear/reset.
 - `8260` and `8270`: session/status transitions, including recalculation, signal loss, and arrival-related states.
+
+### Packet terminator
+
+Every navigation packet ends with **`0x00`**, not `0x2E`.
+
+Static analysis pointed the wrong way here: the terminator field sits next to a `= 46` assignment,
+so it reads as `0x2E`. An HCI capture of the OEM driving this cluster settles it — its session
+packet is `05 ff 57 00`, its clear is `ff 00`, and its maneuver, trip and text packets all end in a
+zero byte. The `0x2E` field is written and never read.
+
+RideBuddy sent `0x2E` on every navigation packet until this was captured, which is why the cluster
+rendered almost none of them.
+
+### Session states
+
+`8260` carries the navigation session, and the values are not a start/stop pair:
+
+| Value | OEM call site | Meaning |
+| --- | --- | --- |
+| `80` | route selected in the picker | route preview |
+| `83` | `NAVI_DESTINATION_START`, once the route response lands | navigation starting — the cluster draws the **GO** prompt |
+| `82` | `onNavigationStarted` with intermediate waypoints | guidance running, waypoint ahead |
+| `87` | `onNavigationStarted` with a single destination, and again on `onNavigationFinished` | guidance running, final destination ahead — the cluster draws **EXIT** |
+| `0` | teardown | reset |
+
+The captured start sequence is `83` → status `132` → `87`, then the data packets. Ending is the
+clear packet alone; the OEM sends no session value with it.
+
+Arrival has no packet of its own. `onNavigationFinished` re-asserts `87` and shows a dialog on the
+phone; the cluster's arrival appearance comes from the maneuver reaching `200` with zero distance.
+
+Rerouting is **not** a session change either. The OEM writes pictogram `203` with `RECALCULATION`
+on the banner, and pictogram `202` with `SIGNAL LOST` when GPS drops.
 
 ### 24-bit distance fields
 

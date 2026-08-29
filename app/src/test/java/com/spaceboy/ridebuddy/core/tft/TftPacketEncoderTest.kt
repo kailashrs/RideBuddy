@@ -15,11 +15,12 @@ class TftPacketEncoderTest {
             current = Maneuver.TURN_LEFT,
             next = Maneuver.TURN_RIGHT,
             roundaboutExit = 0,
+            // Rounded to the nearest 10 m as the OEM does: 66051 -> 66050 -> 0x010202.
             distanceMetres = 0x01_02_03,
         )
 
         assertArrayEquals(
-            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 3, 2, 1, 0x2E),
+            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 2, 2, 1, 0x00),
             packet,
         )
     }
@@ -62,7 +63,7 @@ class TftPacketEncoderTest {
                 // Destination distance first, then distance to the current maneuver.
                 3, 2, 1,
                 0xF4.toByte(), 1, 0,
-                0x2E,
+                0x00,
             ),
             packet,
         )
@@ -83,6 +84,19 @@ class TftPacketEncoderTest {
         )
     }
 
+    /** Rounding keeps the cluster from redrawing the distance for every metre. */
+    @Test
+    fun maneuverDistanceIsRoundedToTheNearestTenMetres() {
+        fun distance(m: Int) =
+            TftPacketEncoder.maneuver(Maneuver.TURN_RIGHT, 0, 0, m).copyOfRange(5, 8)
+                .let { it[0].toInt() and 0xFF or ((it[1].toInt() and 0xFF) shl 8) }
+
+        assertEquals(280, distance(277))
+        assertEquals(70, distance(70))
+        assertEquals(0, distance(4))
+        assertEquals(10, distance(5))
+    }
+
     @Test
     fun textIsSplitIntoSixteenByteRows() {
         val rows = TftPacketEncoder.displayTextRows("1234567890abcdefghijklmnopqrstuv")
@@ -90,14 +104,14 @@ class TftPacketEncoderTest {
         assertEquals(2, rows.count(::isPopulated))
         assertEquals(0, rows[0][1].toInt())
         assertEquals(1, rows[1][1].toInt())
-        assertEquals(0x2E, rows[1].last().toInt() and 0xFF)
+        assertEquals(0x00, rows[1].last().toInt() and 0xFF)
     }
 
     @Test
     fun textRowMatchesOemLengthAndTerminatorLayout() {
         val row = TftPacketEncoder.displayTextRows("A", maxContentRows = 1).first()
 
-        assertArrayEquals(byteArrayOf(4, 0, 5, 'A'.code.toByte(), 0x2E), row)
+        assertArrayEquals(byteArrayOf(4, 0, 5, 'A'.code.toByte(), 0x00), row)
         assertEquals(row.size, row[2].toInt() and 0xFF)
     }
 
@@ -125,14 +139,41 @@ class TftPacketEncoderTest {
         val rows = TftPacketEncoder.displayTextRows("Rain alert")
 
         assertEquals(3, rows.size)
-        assertArrayEquals(byteArrayOf(4, 1, 4, 0x2E), rows[1])
-        assertArrayEquals(byteArrayOf(4, 2, 4, 0x2E), rows[2])
+        assertArrayEquals(byteArrayOf(4, 1, 4, 0x00), rows[1])
+        assertArrayEquals(byteArrayOf(4, 2, 4, 0x00), rows[2])
+    }
+
+    /**
+     * Rows 0 and 1 are the two bottom lines and row 2 is the top banner. The capture shows the OEM
+     * writing "Marina Beach Mar" / "ina Beach Road, " / "Turn right onto " into exactly that order.
+     */
+    @Test
+    fun guidanceTextPutsTheDestinationBelowAndTheInstructionOnTop() {
+        val rows = TftPacketEncoder.guidanceTextRows(
+            destination = "Marina Beach Marina Beach Road, Chennai",
+            instruction = "Turn right onto Marina Beach Road",
+        )
+
+        assertEquals(3, rows.size)
+        assertEquals("Marina Beach Mar", rowText(rows[0]))
+        assertEquals("ina Beach Road, ", rowText(rows[1]))
+        assertEquals("Turn right onto ", rowText(rows[2]))
+        rows.forEach { assertEquals(0x00, it.last().toInt() and 0xFF) }
+    }
+
+    @Test
+    fun guidanceTextClearsRowsItHasNothingFor() {
+        val rows = TftPacketEncoder.guidanceTextRows(destination = "", instruction = "Head east")
+
+        assertArrayEquals(byteArrayOf(4, 0, 4, 0x00), rows[0])
+        assertArrayEquals(byteArrayOf(4, 1, 4, 0x00), rows[1])
+        assertEquals("Head east", rowText(rows[2]))
     }
 
     @Test
     fun clearPacketMatchesClusterEnvelope() {
         assertArrayEquals(
-            byteArrayOf(0xFF.toByte(), 0x2E),
+            byteArrayOf(0xFF.toByte(), 0x00),
             TftPacketEncoder.clear(),
         )
     }
@@ -140,10 +181,13 @@ class TftPacketEncoderTest {
     @Test
     fun sessionPacketUsesDedicatedSessionEnvelope() {
         assertArrayEquals(
-            byteArrayOf(5, 0xFF.toByte(), 80, 0x2E),
+            byteArrayOf(5, 0xFF.toByte(), 80, 0x00),
             TftPacketEncoder.session(80),
         )
     }
+
+    private fun rowText(row: ByteArray): String =
+        row.copyOfRange(3, 3 + payloadLength(row)).toString(Charsets.UTF_8)
 
     private fun payloadLength(row: ByteArray): Int = (row[2].toInt() and 0xFF) - 4
 

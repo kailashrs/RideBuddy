@@ -5,18 +5,51 @@ import java.time.Instant
 import java.time.ZoneId
 
 object TftPacketEncoder {
-    private const val End = 0x2E
+    /**
+     * Every packet ends with a zero byte.
+     *
+     * Static analysis of the OEM app suggested 0x2E, because the field it terminates with is
+     * declared next to a `= 46` assignment. An HCI capture of the OEM driving this cluster settles
+     * it: its session packet is `05 ff 57 00`, its clear is `ff 00`, and its maneuver, trip and
+     * text packets all end the same way. The 0x2E field is written but never read.
+     */
+    private const val End = 0x00
 
     fun maneuver(current: Int, next: Int, roundaboutExit: Int, distanceMetres: Int): ByteArray =
-        ByteArray(9).apply {
-            this[0] = 1
-            this[1] = clusterManeuver(current, roundaboutExit).toByte()
-            this[2] = roundaboutExit.coerceIn(0, 255).toByte()
-            this[3] = 0xFF.toByte()
-            this[4] = clusterManeuver(next).toByte()
-            writeUInt24LittleEndian(offset = 5, value = distanceMetres)
-            this[8] = End.toByte()
-        }
+        pictogram(
+            current = clusterManeuver(current, roundaboutExit),
+            next = clusterManeuver(next),
+            roundaboutExit = roundaboutExit,
+            // The OEM rounds this to the nearest 10 m before sending, so the cluster never has to
+            // redraw for a metre of change. Clamped first: rounding Int.MAX_VALUE overflows.
+            distanceMetres = ((distanceMetres.coerceIn(0, MaxUInt24) + 5) / 10) * 10,
+        )
+
+    /**
+     * A maneuver packet built from an already-resolved cluster pictogram.
+     *
+     * The cluster's pictogram vocabulary carries status as well as turns: the OEM writes 203 with
+     * a "RECALCULATION" banner while it reroutes, and 202 with "SIGNAL LOST" when it loses GPS.
+     * Neither is a session change.
+     */
+    fun pictogram(
+        current: Int,
+        next: Int = 0,
+        roundaboutExit: Int = 0,
+        distanceMetres: Int = 0,
+    ): ByteArray = ByteArray(9).apply {
+        this[0] = 1
+        this[1] = current.coerceIn(0, 255).toByte()
+        this[2] = roundaboutExit.coerceIn(0, 255).toByte()
+        this[3] = 0xFF.toByte()
+        this[4] = next.coerceIn(0, 255).toByte()
+        writeUInt24LittleEndian(offset = 5, value = distanceMetres)
+        this[8] = End.toByte()
+    }
+
+    /** Cluster pictograms that report state rather than a turn. */
+    const val PictogramSignalLost = 202
+    const val PictogramRecalculating = 203
 
     fun trip(
         arrivalEpochMillis: Long,
@@ -34,9 +67,29 @@ object TftPacketEncoder {
         }
     }
 
+/**
+     * The three text rows are not interchangeable.
+     *
+     * The capture shows the OEM putting the destination in rows 0 and 1, which the cluster draws
+     * on the two bottom lines, and the turn instruction in row 2, which it draws as the banner
+     * across the top. Writing only row 0 — which is what RideBuddy did — fills the bottom line and
+     * leaves the banner empty, which is exactly how it looked on the bike.
+     *
+     * All three rows are always written so shorter replacement text clears what was there before.
+     */
+    fun guidanceTextRows(destination: String, instruction: String): List<ByteArray> {
+        val destinationRows = utf8Chunks(destination, bytesPerRow = 16, maxRows = 2)
+        val instructionRows = utf8Chunks(instruction, bytesPerRow = 16, maxRows = 1)
+        return listOf(
+            textRow(0, destinationRows.getOrElse(0) { ByteArray(0) }),
+            textRow(1, destinationRows.getOrElse(1) { ByteArray(0) }),
+            textRow(2, instructionRows.getOrElse(0) { ByteArray(0) }),
+        )
+    }
+
     /**
-     * Produces all three cluster rows so shorter replacement text also clears
-     * characters left behind by the previous navigation or alert message.
+     * Spreads one message across every row, for alerts and the parked display test, where there
+     * is no destination/instruction split to honour.
      */
     fun displayTextRows(text: String, maxContentRows: Int = 3): List<ByteArray> {
         val chunks = utf8Chunks(text, bytesPerRow = 16, maxRows = maxContentRows.coerceIn(1, 3))
@@ -104,8 +157,10 @@ object TftPacketEncoder {
      * `iArr[5] = q[2]` for the maneuver distance, and the same pattern for both `8230` fields — so
      * the bytes that reach the wire are little-endian. See docs/aprilia-rs457-ble-protocol.md.
      */
+    private const val MaxUInt24 = 0xFF_FFFF
+
     private fun ByteArray.writeUInt24LittleEndian(offset: Int, value: Int) {
-        val safe = value.coerceIn(0, 0xFF_FFFF)
+        val safe = value.coerceIn(0, MaxUInt24)
         this[offset] = safe.toByte()
         this[offset + 1] = (safe ushr 8).toByte()
         this[offset + 2] = (safe ushr 16).toByte()

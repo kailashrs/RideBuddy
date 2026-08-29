@@ -41,8 +41,9 @@ class StationaryTftValidator(
 
     private fun navigationFrames(nowMillis: Long): List<Frame> {
         return buildList {
-            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(GuidanceStarted)))
+            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(RouteReady)))
             add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(NavigationActive)))
+            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(GuidanceActive)))
             add(
                 Frame(
                     BleCharacteristics.NavigationManeuver,
@@ -61,7 +62,7 @@ class StationaryTftValidator(
                     BikeWriteMode.NoResponsePreferred,
                 ),
             )
-            TftPacketEncoder.displayTextRows("STATIONARY TFT TEST")
+            TftPacketEncoder.guidanceTextRows("STATIONARY TEST", "Turn right onto")
                 .forEach { add(Frame(BleCharacteristics.NavigationText, it)) }
             add(
                 Frame(
@@ -70,7 +71,6 @@ class StationaryTftValidator(
                     BikeWriteMode.NoResponsePreferred,
                 ),
             )
-            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(GuidanceEnded)))
             add(Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()))
             add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)))
         }
@@ -121,8 +121,8 @@ class StationaryTftValidator(
     )
 
     private companion object {
-        const val GuidanceStarted = 80
-        const val GuidanceEnded = 87
+        const val RouteReady = 83
+        const val GuidanceActive = 87
         const val NavigationActive = 132
         const val MaxStationarySpeedKph = 0.5
         const val MaxTelemetryAgeMillis = 2_000L

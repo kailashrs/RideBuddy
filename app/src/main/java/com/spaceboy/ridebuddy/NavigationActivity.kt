@@ -336,7 +336,7 @@ class NavigationActivity : ComponentActivity() {
             container.tftNavigationBridge.stop()
         }
         val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
-        container.tftNavigationBridge.start()
+        container.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
         val navUpdatesRegistered = runCatching {
             readyNavigator.registerServiceForNavUpdates(
                 packageName,

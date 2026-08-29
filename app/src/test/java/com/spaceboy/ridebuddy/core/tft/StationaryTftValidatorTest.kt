@@ -96,13 +96,13 @@ class StationaryTftValidatorTest {
             listOf(
                 BleCharacteristics.NavigationSession,
                 BleCharacteristics.NavigationStatus,
+                BleCharacteristics.NavigationSession,
                 BleCharacteristics.NavigationManeuver,
                 BleCharacteristics.NavigationTrip,
                 BleCharacteristics.NavigationText,
                 BleCharacteristics.NavigationText,
                 BleCharacteristics.NavigationText,
                 BleCharacteristics.NavigationSpeedLimit,
-                BleCharacteristics.NavigationSession,
                 BleCharacteristics.NavigationClear,
                 BleCharacteristics.NavigationStatus,
             ),
@@ -127,7 +127,8 @@ class StationaryTftValidatorTest {
     @Test
     fun `stops at the first unacknowledged write`() = runBlocking {
         val now = 10_000L
-        val connection = RecordingConnection(failAtWrite = 4, receivedAtElapsedRealtime = now)
+        // Index 4 is the maneuver now that the start sequence is three frames, not two.
+        val connection = RecordingConnection(failAtWrite = 5, receivedAtElapsedRealtime = now)
         val validator = StationaryTftValidator(
             connection,
             pauseBetweenWrites = {},
@@ -136,8 +137,8 @@ class StationaryTftValidatorTest {
 
         val result = validator.run()
 
-        assertEquals(StationaryTftTestResult.Failed(BleCharacteristics.NavigationTrip, 3), result)
-        assertEquals(4, connection.writes.size)
+        assertEquals(StationaryTftTestResult.Failed(BleCharacteristics.NavigationTrip, 4), result)
+        assertEquals(5, connection.writes.size)
         assertTrue(connection.writes.none { it.characteristic == BleCharacteristics.NavigationClear })
     }
 
