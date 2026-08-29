@@ -107,49 +107,64 @@ object TftPacketEncoder {
     fun session(state: Int): ByteArray = byteArrayOf(5, 0xFF.toByte(), state.coerceIn(0, 255).toByte(), End.toByte())
     fun status(code: Int): ByteArray = byteArrayOf(6, code.coerceIn(0, 255).toByte(), End.toByte())
 
+    /**
+     * Cluster pictogram for a Google maneuver.
+     *
+     * The numbers are the OEM's, and they are not ordered by direction — they cannot be guessed.
+     * What names them is the OEM's own arrow art: it maps a Mappls maneuver id to a pictogram in
+     * one table and to a drawable `ic_step_<id>` in the same breath, so rendering the drawings
+     * labels every pictogram. A capture confirms the one that matters most: the cluster drew a
+     * right arrow for `6` while the guidance banner read "Turn right onto".
+     *
+     * 1 straight · 2/3 U-turn cw/ccw · 4 keep right · 5 slight right · 6 right · 7 sharp right ·
+     * 8 merge · 9 keep left · 10 slight left · 11 left · 12 sharp left · 15/16 exit right/left ·
+     * 151-157 roundabout Nth exit · 158 roundabout · 200 ferry · 201 destination.
+     *
+     * 13 and 14 also exist in the OEM's table, but no art ships for the ids that reach them, so
+     * their meaning is unknown and nothing here uses them.
+     */
     fun clusterManeuver(maneuver: Int, roundaboutExit: Int = 0): Int {
-        if (roundaboutExit in 1..8) return 150 + roundaboutExit
+        if (roundaboutExit in 1..7) return 150 + roundaboutExit
         return when (maneuver) {
-            Maneuver.TURN_RIGHT -> 1
-            Maneuver.TURN_SLIGHT_RIGHT -> 3
-            Maneuver.TURN_KEEP_RIGHT, Maneuver.FORK_RIGHT -> 2
-            Maneuver.TURN_SHARP_RIGHT -> 4
-            Maneuver.TURN_LEFT -> 6
-            Maneuver.TURN_SLIGHT_LEFT -> 7
-            Maneuver.TURN_KEEP_LEFT, Maneuver.FORK_LEFT -> 5
-            Maneuver.TURN_SHARP_LEFT -> 10
-            Maneuver.TURN_U_TURN_CLOCKWISE -> 12
-            Maneuver.TURN_U_TURN_COUNTERCLOCKWISE -> 11
-            Maneuver.MERGE_LEFT, Maneuver.MERGE_RIGHT, Maneuver.ON_RAMP_KEEP_LEFT, Maneuver.ON_RAMP_KEEP_RIGHT -> 8
-            Maneuver.ON_RAMP_LEFT -> 6
-            Maneuver.ON_RAMP_RIGHT -> 1
-            Maneuver.OFF_RAMP_LEFT -> 13
-            Maneuver.OFF_RAMP_RIGHT -> 14
-            Maneuver.ROUNDABOUT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_STRAIGHT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_LEFT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_RIGHT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_LEFT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_LEFT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_RIGHT_CLOCKWISE,
-            Maneuver.ROUNDABOUT_U_TURN_CLOCKWISE,
-            Maneuver.ROUNDABOUT_EXIT_CLOCKWISE,
-            -> 157
-            Maneuver.ROUNDABOUT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_STRAIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_RIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_U_TURN_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_EXIT_COUNTERCLOCKWISE,
+            Maneuver.DEPART, Maneuver.STRAIGHT, Maneuver.NAME_CHANGE -> 1
+            Maneuver.TURN_U_TURN_CLOCKWISE,
+            Maneuver.ON_RAMP_U_TURN_CLOCKWISE,
+            Maneuver.OFF_RAMP_U_TURN_CLOCKWISE,
+            -> 2
+            Maneuver.TURN_U_TURN_COUNTERCLOCKWISE,
+            Maneuver.ON_RAMP_U_TURN_COUNTERCLOCKWISE,
+            Maneuver.OFF_RAMP_U_TURN_COUNTERCLOCKWISE,
+            -> 3
+            Maneuver.TURN_KEEP_RIGHT, Maneuver.FORK_RIGHT -> 4
+            Maneuver.TURN_SLIGHT_RIGHT, Maneuver.ON_RAMP_SLIGHT_RIGHT -> 5
+            Maneuver.TURN_RIGHT, Maneuver.ON_RAMP_RIGHT -> 6
+            Maneuver.TURN_SHARP_RIGHT, Maneuver.ON_RAMP_SHARP_RIGHT, Maneuver.OFF_RAMP_SHARP_RIGHT -> 7
+            // The merge glyph carries "you are joining another road" without claiming a side, which
+            // is all an unspecified ramp knows.
+            Maneuver.MERGE_UNSPECIFIED, Maneuver.MERGE_LEFT, Maneuver.MERGE_RIGHT,
+            Maneuver.ON_RAMP_UNSPECIFIED, Maneuver.ON_RAMP_KEEP_LEFT, Maneuver.ON_RAMP_KEEP_RIGHT,
+            Maneuver.OFF_RAMP_UNSPECIFIED,
+            -> 8
+            Maneuver.TURN_KEEP_LEFT, Maneuver.FORK_LEFT -> 9
+            Maneuver.TURN_SLIGHT_LEFT, Maneuver.ON_RAMP_SLIGHT_LEFT -> 10
+            Maneuver.TURN_LEFT, Maneuver.ON_RAMP_LEFT -> 11
+            Maneuver.TURN_SHARP_LEFT, Maneuver.ON_RAMP_SHARP_LEFT, Maneuver.OFF_RAMP_SHARP_LEFT -> 12
+            Maneuver.OFF_RAMP_RIGHT, Maneuver.OFF_RAMP_KEEP_RIGHT, Maneuver.OFF_RAMP_SLIGHT_RIGHT -> 15
+            Maneuver.OFF_RAMP_LEFT, Maneuver.OFF_RAMP_KEEP_LEFT, Maneuver.OFF_RAMP_SLIGHT_LEFT -> 16
+            // A roundabout the SDK gave no exit number for: the plain roundabout glyph, never an
+            // exit-numbered one, which would name an exit the rider was never told to take.
+            Maneuver.ROUNDABOUT_CLOCKWISE, Maneuver.ROUNDABOUT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_STRAIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_STRAIGHT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_LEFT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_SLIGHT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_SLIGHT_LEFT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_SLIGHT_RIGHT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_SHARP_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_SHARP_LEFT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_SHARP_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_SHARP_RIGHT_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_U_TURN_CLOCKWISE, Maneuver.ROUNDABOUT_U_TURN_COUNTERCLOCKWISE,
+            Maneuver.ROUNDABOUT_EXIT_CLOCKWISE, Maneuver.ROUNDABOUT_EXIT_COUNTERCLOCKWISE,
             -> 158
-            Maneuver.DESTINATION, Maneuver.DESTINATION_LEFT, Maneuver.DESTINATION_RIGHT -> 200
-            Maneuver.FERRY_BOAT, Maneuver.FERRY_TRAIN -> 205
-            Maneuver.STRAIGHT, Maneuver.DEPART, Maneuver.NAME_CHANGE -> 5
+            Maneuver.FERRY_BOAT, Maneuver.FERRY_TRAIN -> 200
             else -> 201
         }
     }

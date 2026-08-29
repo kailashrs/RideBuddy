@@ -19,9 +19,51 @@ class TftPacketEncoderTest {
         )
 
         assertArrayEquals(
-            byteArrayOf(1, 6, 0, 0xFF.toByte(), 1, 3, 2, 1, 0x00),
+            byteArrayOf(1, 11, 0, 0xFF.toByte(), 6, 3, 2, 1, 0x00),
             packet,
         )
+    }
+
+    /**
+     * The regression this guards is the worst one the cluster can show: a right arrow for a left
+     * turn. The pictogram numbers are not ordered by direction, and an earlier table had them
+     * mirrored — `TURN_LEFT` sent 6, which is the OEM's *right* arrow.
+     *
+     * 6 is fixed by a capture: the cluster drew a right arrow for it while the banner read
+     * "Turn right onto". The rest are read off the OEM's own `ic_step_*` art.
+     */
+    @Test
+    fun turnPictogramsDoNotMirrorLeftAndRight() {
+        assertEquals(6, TftPacketEncoder.clusterManeuver(Maneuver.TURN_RIGHT))
+        assertEquals(11, TftPacketEncoder.clusterManeuver(Maneuver.TURN_LEFT))
+        assertEquals(5, TftPacketEncoder.clusterManeuver(Maneuver.TURN_SLIGHT_RIGHT))
+        assertEquals(10, TftPacketEncoder.clusterManeuver(Maneuver.TURN_SLIGHT_LEFT))
+        assertEquals(7, TftPacketEncoder.clusterManeuver(Maneuver.TURN_SHARP_RIGHT))
+        assertEquals(12, TftPacketEncoder.clusterManeuver(Maneuver.TURN_SHARP_LEFT))
+        assertEquals(4, TftPacketEncoder.clusterManeuver(Maneuver.TURN_KEEP_RIGHT))
+        assertEquals(9, TftPacketEncoder.clusterManeuver(Maneuver.TURN_KEEP_LEFT))
+        assertEquals(1, TftPacketEncoder.clusterManeuver(Maneuver.STRAIGHT))
+    }
+
+    /**
+     * 151-157 name the exit the rider takes, and 158 is the plain roundabout. An exit number the
+     * cluster has no glyph for must fall back to the plain one rather than wrapping onto a glyph
+     * that names a different exit.
+     */
+    @Test
+    fun roundaboutUsesTheExitNumberOnlyWhenThereIsAGlyphForIt() {
+        assertEquals(151, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 1))
+        assertEquals(157, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 7))
+        assertEquals(158, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 8))
+        assertEquals(158, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE))
+    }
+
+    /** The OEM's ferry glyph is 200 and its destination marker is 201; these were swapped. */
+    @Test
+    fun ferryAndDestinationUseTheirOwnGlyphs() {
+        assertEquals(200, TftPacketEncoder.clusterManeuver(Maneuver.FERRY_BOAT))
+        assertEquals(201, TftPacketEncoder.clusterManeuver(Maneuver.DESTINATION))
+        assertEquals(201, TftPacketEncoder.clusterManeuver(Maneuver.UNKNOWN))
     }
 
     /**

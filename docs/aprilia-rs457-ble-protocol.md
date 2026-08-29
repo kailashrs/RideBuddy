@@ -70,7 +70,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
 | `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`, built by `looper.b.l(event, helper)`. Event **0** clears the icons; the OEM sends it three times when the cluster reports ready on `8740`. |
-| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x00]` (9 bytes total). The distance is rounded to the nearest 10 m before sending. The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
+| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x00]` (9 bytes total). This distance is sent as-is — the 10 m rounding applies to `8230`'s maneuver distance, not this one (a capture shows `8210` carrying 277 m while `8230` carried 280 m in the same second). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
 | `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x00]`. The OEM writes it every cycle, including 0. |
 | `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x00]`. Both distances are **little-endian**. `minute`/`hour` come from a `Calendar` over an arrival timestamp in the OEM code, but whether the cluster renders them as an arrival clock or a remaining duration still needs TFT validation. |
 | `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4, capped at 20 for the 16-character row limit. Rows 0 and 1 are the two bottom lines and row 2 is the banner across the top. |
@@ -332,7 +332,46 @@ So 500 m goes out as `F4 01 00`. Sending it big-endian (`00 01 F4`) is read by t
 roughly 16 million metres, and any distance under 256 m collapses to zero — RideBuddy shipped that
 inversion until it was corrected against this derivation.
 
-The bundled `assets/ble_characteristic.json` lists 42 fixed maneuver labels with IDs 0–41. Production code maps the Mappls maneuver identifiers to TFT values including 1–16, 101–107, 151–158, and 200–205. The label `YEZDI Logo` in the asset is likely copied or stale and should not be treated as an RS 457-specific behavior.
+### What each pictogram number means
+
+The numbers are **not ordered by direction** and cannot be inferred from the value. Two OEM
+artefacts name them together: one table maps each Mappls maneuver id to a pictogram, and the
+guidance screen feeds that same id to `getResources().getIdentifier("ic_step_" + id, ...)` for its
+own on-screen arrow. Rendering `ic_step_<id>` therefore labels the pictogram it maps to.
+
+| Pictogram | Meaning | Mappls ids |
+| --- | --- | --- |
+| `1` | straight / continue / depart | 7, 21, 50 |
+| `2` | U-turn, clockwise | 41, 54 |
+| `3` | U-turn, counter-clockwise | 6 |
+| `4` | keep / fork right | 16, 20, 42, 44 |
+| `5` | slight right | 5, 51 |
+| `6` | **turn right** | 3, 14, 52 |
+| `7` | sharp right | 4, 18, 53 |
+| `8` | merge | 32, 33 |
+| `9` | keep / fork left | 15, 19, 43 |
+| `10` | slight left | 2, 57 |
+| `11` | **turn left** | 0, 13, 56 |
+| `12` | sharp left | 1, 17, 55 |
+| `13`, `14` | unknown — no `ic_step_*` art ships for ids 26–31 | 26–31 |
+| `15` | exit / ramp right | 75 |
+| `16` | exit / ramp left | 73, 74 |
+| `151`–`157` | roundabout, 1st through 7th exit | 71 … 65 |
+| `158` | roundabout, no exit number | 72 |
+| `200` | ferry | 36 |
+| `201` | destination / unknown | 8, 9, 10 |
+
+Ids 0–7 and 50–57 are the same compass rotation twice over (N straight, NE slight right, E right,
+SE sharp right, S U-turn, SW sharp left, W left, NW slight left), which is what makes the reading
+self-checking: both runs agree on every pictogram.
+
+One number is fixed independently of the art. A capture has the cluster drawing a right arrow for
+`6` while `8240` row 2 read `Turn right onto` — so `6` is a right turn, and any table that sends
+`6` for a left turn is mirrored. RideBuddy shipped exactly that inversion until it was corrected
+here.
+
+The bundled `assets/ble_characteristic.json` lists 42 fixed maneuver labels with IDs 0–41; its
+`YEZDI Logo` entry is likely copied or stale and should not be treated as RS 457-specific.
 
 ## Phone notifications and calls
 
@@ -362,7 +401,7 @@ Google Maps share intent
   -> extract place/coordinates from the shared URL
   -> set a destination in the Google Navigation SDK
   -> consume NavInfo/StepInfo turn-by-turn feed
-  -> map Google maneuvers to the 42-entry TFT pictogram vocabulary
+  -> map Google maneuvers to the TFT pictogram vocabulary above
   -> serialize TFT packets and enqueue rate-limited BLE writes
 ```
 
