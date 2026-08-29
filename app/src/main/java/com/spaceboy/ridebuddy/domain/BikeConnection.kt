@@ -158,6 +158,15 @@ sealed interface BikeControlEvent {
     data class CallAction(val code: Int) : BikeControlEvent
 
     /**
+     * The cluster is asserting that a call is live and answered.
+     *
+     * The OEM marks the call active, answered and incoming and writes nothing back. The point of
+     * it is the first of those: the same flag gates its answer and reject handling, so until this
+     * arrives — or the phone itself sees a call — a handlebar press does nothing.
+     */
+    data object ClusterCallActive : BikeControlEvent
+
+    /**
      * The cluster has come up and wants the phone's state again. The OEM answers by writing the
      * current call state and clearing the notification icons; it can arrive without a BLE
      * reconnect, so it is not the same signal as [BikeConnectionState.Connected].

@@ -120,9 +120,17 @@ class CallNotificationBridge(
             bikeConnection.controls.collect { event ->
                 // A cluster that has just come up has forgotten the call it was showing.
                 if (event is BikeControlEvent.ClusterReady) publishActiveCall()
+                // The cluster believes it is in a call. Republishing is what reconciles the two
+                // views: the phone's notification is the authority on whether one is really up.
+                if (event is BikeControlEvent.ClusterCallActive) publishActiveCall()
                 if (event is BikeControlEvent.CallAction) {
                     if (!appSettings.settings.value.tftCallControls) return@collect
                     val call = synchronized(callLock) { activeCall.value }
+                    // The OEM acts on a handlebar press only while it believes a call is up. A
+                    // press that arrives without one is stale — the call ended just as the rider
+                    // reached for the bar — and reaching for TelecomManager anyway would hang up
+                    // whatever came next.
+                    if (call.notificationKey == null) return@collect
                     when (event.code) {
                         1 -> if (!send(call.answerIntent)) useLegacyTelecom(answer = true)
                         0 -> if (!send(call.declineIntent ?: call.hangUpIntent)) useLegacyTelecom(answer = false)

@@ -66,4 +66,27 @@ class CallControlPolicyTest {
             tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = false, keyWasAlreadyTracked = false),
         )
     }
+
+    /**
+     * `8740` is not call-only, and the OEM switches on the whole value rendered as a decimal
+     * string. 3 was reaching the log as unhandled: it is the cluster asserting a call is live,
+     * which in the OEM is what arms its answer and reject handling.
+     */
+    @Test
+    fun `the cluster control vocabulary covers all four values`() {
+        assertEquals("reject", callControlLabel(0))
+        assertEquals("answer", callControlLabel(1))
+        assertEquals("cluster ready", callControlLabel(2))
+        assertEquals("call active", callControlLabel(3))
+        assertEquals(null, callControlLabel(4))
+    }
+}
+
+/** Mirrors the read in AndroidBikeConnection.onNotification for CallControl. */
+private fun callControlLabel(value: Int): String? = when (value) {
+    0 -> "reject"
+    1 -> "answer"
+    2 -> "cluster ready"
+    3 -> "call active"
+    else -> null
 }

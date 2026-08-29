@@ -199,6 +199,7 @@ class NavigationActivity : ComponentActivity() {
                     // process scope, not by the map.
                     is BikeControlEvent.CallAction,
                     BikeControlEvent.ClusterReady,
+                    BikeControlEvent.ClusterCallActive,
                     BikeControlEvent.StartNavigation,
                     -> Unit
                 }
