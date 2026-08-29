@@ -77,7 +77,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x00]`. See "Session states" below. |
 | `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`. The OEM writes **132 only** — `S(132)` is the single status assignment in the whole app — and never writes any other value, including on teardown. |
-| `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`, dispatching 2 to skip a waypoint and 3 to exit navigation. No capture yet shows the value the GO prompt sends, so unrecognised commands are journaled. |
+| `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`. Only two values are handled — **2** skips a waypoint (`O.performClick()` → `w0()`, which drops the current waypoint and advances the destination) and **3** exits (`getActivity().finish()`). Anything else returns without acting, so there is no start/GO command: see "The GO glyph is a prompt, not a command" below. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
 | `8420` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
@@ -87,7 +87,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8710` | phone → bike | caller name | OEM sends a 20-byte, zero-padded, sanitized ASCII-style buffer beginning with `0x0A`. |
 | `8720` | bike → phone | unknown/call-flow related | Declared and subscribed by the generic notification set, but no clear consumer was found. |
 | `8730` | phone → bike | call state | Used by the OEM call-management path; exact state payload needs live confirmation. |
-| `8740` | bike → phone | handlebar control event | Not call-only. The OEM renders the whole value as a decimal string and switches on it: **1** answers and **0** rejects/ends, both only while a call is up (`e1()`); **2** is the cluster announcing it has come up, which the OEM answers by rewriting the call state and clearing the notification icons three times; **3** reaches a background task. Value 2 is the only one seen in capture. |
+| `8740` | bike → phone | handlebar control event | Not call-only. The OEM renders the whole value as a decimal string and switches on it: **1** answers and **0** rejects/ends, both only while a call is up (`e1()` → `Q`); **2** is the cluster announcing it has come up, which the OEM answers by rewriting the call state and clearing the notification icons three times; **3** records a call as active, answered and incoming (`w1(true)`, `s1(1)`, `M1(0)`, `u1(1)`) and writes nothing back, which is what arms `e1()` so the 0/1 presses are then acted on. Value 2 is the only one seen in capture. |
 | `8750` | phone → bike | SR-family mobile status | The inspected India app schedules its `LIVE` packet only for the `SR_ID` model family. The `RS457_ID` dashboard path does not write it. |
 | `8760` | phone → bike | caller number | OEM sends up to 20 byte values derived from the phone number. |
 | `8810` | bike → phone | cluster software version | OEM treats the value as a byte string. |
@@ -126,6 +126,19 @@ The values below are shown in hexadecimal for readability. They are the unsigned
 | `32 B2 08 EE 86 03` | `CC 6E C3 09 28 88` |
 
 This table is a compatibility observation, not proof that every cluster firmware uses the same table. An unknown challenge is not handled usefully by the OEM app; it does not derive a fallback response.
+
+### The GO glyph is a prompt, not a command
+
+The cluster draws **GO** at session `83` and **EXIT** at `87`, so it is tempting to read both as
+handlebar controls. Only EXIT is.
+
+The OEM has exactly two inbound command paths — `8280` and `8740` — and neither can start
+navigation. `8280` acts on 2 (skip waypoint) and 3 (exit) and returns for everything else; `8740`
+acts on 0, 1, 2 and 3, none of which touch the route. Guidance moves from `83` to `87` only when
+the Mappls SDK reports `onNavigationStarted`, which happens because the *phone* started it.
+
+So GO tells the rider their phone is waiting for them; EXIT is backed by a real command. Nothing in
+the app can receive a handlebar GO, and no capture is needed to establish that.
 
 ## How the OEM decides what to write
 

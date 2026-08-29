@@ -150,7 +150,8 @@ class AppContainer(context: Context) {
             // handling for skip, which needs the map it owns.
             bikeConnection.controls.collect { event ->
                 if (event is BikeControlEvent.ClusterReady) {
-                    connectionEventJournal.record("Cluster reported ready; clearing app events")
+                    connectionEventJournal.record("Cluster reported ready; resending navigation and app events")
+                    tftNavigationBridge.republishLast()
                     val battery = context.getSystemService(BatteryManager::class.java)
                         ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
                     bikeConnection.enqueueWrite(
