@@ -69,14 +69,14 @@ The CCCD used for notification/indication subscription is the standard descripto
 
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
-| `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`. |
+| `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`, built by `looper.b.l(event, helper)`. Event **0** clears the icons; the OEM sends it three times when the cluster reports ready on `8740`. |
 | `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x00]` (9 bytes total). The distance is rounded to the nearest 10 m before sending. The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
 | `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x00]`. The OEM writes it every cycle, including 0. |
 | `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x00]`. Both distances are **little-endian**. `minute`/`hour` come from a `Calendar` over an arrival timestamp in the OEM code, but whether the cluster renders them as an arrival clock or a remaining duration still needs TFT validation. |
 | `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x2E]`. `totalPacketLength` is the ASCII byte count plus 4, capped at 20 for the 16-character row limit. Rows 0 and 1 are the two bottom lines and row 2 is the banner across the top. |
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x00]`. See "Session states" below. |
-| `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`; `132` starts navigation and `0` accompanies the clear. |
+| `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`. The OEM writes **132 only** — `S(132)` is the single status assignment in the whole app — and never writes any other value, including on teardown. |
 | `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`, dispatching 2 to skip a waypoint and 3 to exit navigation. No capture yet shows the value the GO prompt sends, so unrecognised commands are journaled. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
@@ -87,7 +87,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8710` | phone → bike | caller name | OEM sends a 20-byte, zero-padded, sanitized ASCII-style buffer beginning with `0x0A`. |
 | `8720` | bike → phone | unknown/call-flow related | Declared and subscribed by the generic notification set, but no clear consumer was found. |
 | `8730` | phone → bike | call state | Used by the OEM call-management path; exact state payload needs live confirmation. |
-| `8740` | bike → phone | call/TFT control event | OEM handles values 0–3 in connection/call flow; 1 is answer and 0 is reject/end in the observed path. |
+| `8740` | bike → phone | handlebar control event | Not call-only. The OEM renders the whole value as a decimal string and switches on it: **1** answers and **0** rejects/ends, both only while a call is up (`e1()`); **2** is the cluster announcing it has come up, which the OEM answers by rewriting the call state and clearing the notification icons three times; **3** reaches a background task. Value 2 is the only one seen in capture. |
 | `8750` | phone → bike | SR-family mobile status | The inspected India app schedules its `LIVE` packet only for the `SR_ID` model family. The `RS457_ID` dashboard path does not write it. |
 | `8760` | phone → bike | caller number | OEM sends up to 20 byte values derived from the phone number. |
 | `8810` | bike → phone | cluster software version | OEM treats the value as a byte string. |
@@ -126,6 +126,32 @@ The values below are shown in hexadecimal for readability. They are the unsigned
 | `32 B2 08 EE 86 03` | `CC 6E C3 09 28 88` |
 
 This table is a compatibility observation, not proof that every cluster firmware uses the same table. An unknown challenge is not handled usefully by the OEM app; it does not derive a fallback response.
+
+## How the OEM decides what to write
+
+The dashboard runs a **1 Hz** loop (`DashboardActivity`'s `w` Runnable). Each navigation field has
+its own dirty flag, and only flagged fields are written, twice each with a 200 ms gap:
+
+| Field | Dirty flag | Set by |
+| --- | --- | --- |
+| `8210` maneuver | `b0(true)` | new maneuver, or a status pictogram (202/203) |
+| `8230` trip | `c0(true)` | new ETA/distance |
+| `8220` speed limit | `g0(true)` | the posted limit read off the route step |
+| `8240` row 2 | `i0(true)` | the instruction string changing |
+| `8240` rows 0–2 | `O(true)` | the destination being set |
+
+The session, status and clear packets are written by the same loop from their own flags
+(`U(true)`, `R(true)`, `W(true)`).
+
+RideBuddy instead queues every field on each `NavInfo` and drains a coalescing map. That is more
+traffic than the OEM sends but is not a correctness difference — the packets are identical and
+idempotent.
+
+The speed limit is a real difference. The OEM reads the posted limit straight off each route step
+(`h0(aVar.a())`) and writes it whenever it changes. The Google Navigation SDK exposes no equivalent
+— only how far over the limit the rider is — so RideBuddy back-calculates an estimate and can only
+do so while the rider is actually speeding. It zeroes the field on teardown so a stale limit does
+not persist.
 
 ## Live telemetry (`8410`)
 

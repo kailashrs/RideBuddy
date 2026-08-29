@@ -604,9 +604,17 @@ internal class AndroidBikeConnection(
                 }?.let(mutableControls::tryEmit)
             }
 
-            BleCharacteristics.CallControl -> value.firstOrNull()?.let {
-                mutableControls.tryEmit(BikeControlEvent.CallAction(it.toInt() and 0xFF))
-            }
+            // 8740 is not call-only. The OEM switches on the whole value rendered as decimal:
+            // 0 and 1 are reject and answer, and 2 is the cluster announcing it is ready, which
+            // it answers by resending the call state and clearing the notification icons.
+            BleCharacteristics.CallControl -> when (value.firstOrNull()?.toInt()?.and(0xFF)) {
+                0, 1 -> BikeControlEvent.CallAction(value.first().toInt() and 0xFF)
+                2 -> BikeControlEvent.ClusterReady
+                else -> {
+                    log("Unhandled call control ${value.toHex(" ")}")
+                    null
+                }
+            }?.let(mutableControls::tryEmit)
         }
     }
 

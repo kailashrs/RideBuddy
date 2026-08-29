@@ -144,5 +144,14 @@ data class BleDiagnostics(
 sealed interface BikeControlEvent {
     data object SkipManeuver : BikeControlEvent
     data object ExitNavigation : BikeControlEvent
+
+    /** Answer (1) or reject/end (0) from the handlebar, while a call is up. */
     data class CallAction(val code: Int) : BikeControlEvent
+
+    /**
+     * The cluster has come up and wants the phone's state again. The OEM answers by writing the
+     * current call state and clearing the notification icons; it can arrive without a BLE
+     * reconnect, so it is not the same signal as [BikeConnectionState.Connected].
+     */
+    data object ClusterReady : BikeControlEvent
 }

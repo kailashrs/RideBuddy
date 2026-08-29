@@ -118,6 +118,8 @@ class CallNotificationBridge(
     init {
         scope.launch {
             bikeConnection.controls.collect { event ->
+                // A cluster that has just come up has forgotten the call it was showing.
+                if (event is BikeControlEvent.ClusterReady) publishActiveCall()
                 if (event is BikeControlEvent.CallAction) {
                     if (!appSettings.settings.value.tftCallControls) return@collect
                     val call = synchronized(callLock) { activeCall.value }

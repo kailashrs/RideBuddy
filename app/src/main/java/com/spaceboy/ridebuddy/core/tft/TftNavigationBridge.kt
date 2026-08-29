@@ -470,10 +470,15 @@ class TftNavigationBridge(
 
     private fun queueClusterResetLocked(): WriteBatch? {
         if (controlBatches.any(WriteBatch::clearsCluster)) return null
+        // The OEM's teardown is the clear packet and a zeroed speed limit. It writes status 132
+        // once when navigation starts and never writes any other status value, so the status(0)
+        // that used to sit here was an invention. The speed limit does need zeroing: RideBuddy
+        // only ever learns a limit while the rider is over it, so without this the last one stays
+        // on the cluster after the route ends.
         return WriteBatch(
             frames = listOf(
                 Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()),
-                Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(0)),
+                Frame(BleCharacteristics.NavigationSpeedLimit, TftPacketEncoder.speedLimit(0)),
             ),
             priority = true,
             clearsCluster = true,

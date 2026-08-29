@@ -195,7 +195,10 @@ class NavigationActivity : ComponentActivity() {
                             navigationView.showRouteOverview()
                         }
                     }
-                    is BikeControlEvent.CallAction -> Unit
+                    // Calls and cluster readiness are handled at process scope, not by the map.
+                    is BikeControlEvent.CallAction,
+                    BikeControlEvent.ClusterReady,
+                    -> Unit
                 }
             }
         }
@@ -311,6 +314,11 @@ class NavigationActivity : ComponentActivity() {
                 readyNavigator.removeReroutingListener(reroutingListener)
                 runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
             },
+            // The OEM reads the posted limit straight off each route step and writes it whenever
+            // it changes. The Navigation SDK exposes no equivalent, only how far over the limit
+            // the rider is, so this back-calculates an estimate and can only do so while they are
+            // actually speeding. Rounded to 5 because that is the granularity the estimate can
+            // honestly support.
             onSpeeding = speeding@{ percentageAboveLimit ->
                 val speed = container.bikeConnection.telemetry.value
                     ?.speedKilometresPerHour ?: return@speeding

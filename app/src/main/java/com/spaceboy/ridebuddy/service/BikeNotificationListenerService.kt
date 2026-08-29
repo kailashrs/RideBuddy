@@ -98,7 +98,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
             .coerceIn(0, 100)
         appContainer.bikeConnection.enqueueWrite(
             BleCharacteristics.AppEvent,
-            byteArrayOf(11, event.toByte(), battery.toByte(), 0),
+            appEventPacket(event, battery),
         )
     }
 
@@ -108,6 +108,13 @@ class BikeNotificationListenerService : NotificationListenerService() {
         NotificationAlertCategory.Email -> settings.emailAlerts
     }
 }
+
+/** `[0x0B, event, phone battery percent, 0x00]`, as the OEM builds it. */
+internal fun appEventPacket(event: Int, batteryPercent: Int): ByteArray =
+    byteArrayOf(11, event.toByte(), batteryPercent.coerceIn(0, 100).toByte(), 0)
+
+/** Event 0 clears the cluster's notification icons; the OEM sends it when the cluster comes up. */
+internal const val ClearAppEventsEvent = 0
 
 internal data class NotificationEventRemoval(val shouldHide: Boolean)
 

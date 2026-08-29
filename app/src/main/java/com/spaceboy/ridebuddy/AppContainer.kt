@@ -24,6 +24,10 @@ import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
 import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
+import android.os.BatteryManager
+import com.spaceboy.ridebuddy.ble.BleCharacteristics
+import com.spaceboy.ridebuddy.service.ClearAppEventsEvent
+import com.spaceboy.ridebuddy.service.appEventPacket
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -145,6 +149,15 @@ class AppContainer(context: Context) {
             // the task, so this collector is process-scoped. NavigationActivity keeps its own
             // handling for skip, which needs the map it owns.
             bikeConnection.controls.collect { event ->
+                if (event is BikeControlEvent.ClusterReady) {
+                    connectionEventJournal.record("Cluster reported ready; clearing app events")
+                    val battery = context.getSystemService(BatteryManager::class.java)
+                        ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
+                    bikeConnection.enqueueWrite(
+                        BleCharacteristics.AppEvent,
+                        appEventPacket(ClearAppEventsEvent, battery),
+                    )
+                }
                 if (event is BikeControlEvent.ExitNavigation) {
                     connectionEventJournal.record("Handlebar exit; stopping navigation")
                     navigationStopController.stop { result ->
