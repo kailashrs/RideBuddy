@@ -31,8 +31,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.google.android.libraries.navigation.NavigationApi
-import com.google.android.libraries.navigation.Navigator
 import com.spaceboy.ridebuddy.ble.shouldAutoConnectOnLaunch
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
@@ -612,51 +610,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Delegates to the process-scoped controller so the button and the handlebar EXIT take the
+     * same path; only the rider-facing message is added here.
+     */
     private fun stopNavigation() {
-        val stopRequestId = navigationStartStopGuard.beginStop() ?: return
         navigationStartJob?.cancel()
-        runCatching {
-            NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
-                override fun onNavigatorReady(navigator: Navigator) {
-                    if (!navigationStartStopGuard.isCurrentStop(stopRequestId)) return
-                    val stopResult = runCatching(navigator::stopGuidance)
-                    if (stopResult.isFailure) {
-                        navigationStartStopGuard.finishStop(stopRequestId)
-                        viewModel.showMessage(getString(R.string.navigation_end_request_failed))
-                        return
-                    }
-                    appContainer.navigationGuidanceLifecycle
-                        .release(navigator)
-                    val cleanupFailure = listOf(
-                        runCatching(navigator::unregisterServiceForNavUpdates),
-                        runCatching(navigator::cleanup),
-                    ).firstOrNull { it.isFailure }?.exceptionOrNull()
-                    clearNavigationOutput()
-                    navigationStartStopGuard.finishStop(stopRequestId)
-                    if (cleanupFailure != null) {
-                        viewModel.showMessage(getString(R.string.navigation_end_cleanup_failed))
-                    }
-                }
+        appContainer.navigationStopController.stop { result ->
+            when (result) {
+                NavigationStopResult.Stopped,
+                NavigationStopResult.AlreadyStopping,
+                -> Unit
 
-                override fun onError(errorCode: Int) {
-                    if (!navigationStartStopGuard.isCurrentStop(stopRequestId)) return
-                    navigationStartStopGuard.finishStop(stopRequestId)
-                    viewModel.showMessage(getString(R.string.navigation_end_failed, errorCode))
-                }
-            })
-        }.onFailure {
-            if (navigationStartStopGuard.isCurrentStop(stopRequestId)) {
-                navigationStartStopGuard.finishStop(stopRequestId)
-                viewModel.showMessage(getString(R.string.navigation_end_request_failed))
-            }
-        }
-    }
+                NavigationStopResult.CleanupIncomplete ->
+                    viewModel.showMessage(getString(R.string.navigation_end_cleanup_failed))
 
-    private fun clearNavigationOutput() {
-        appContainer.apply {
-            navigationFeed.clear()
-            runCatching(tftNavigationBridge::stop).onFailure {
-                viewModel.showMessage(getString(R.string.navigation_tft_clear_failed))
+                NavigationStopResult.Failed ->
+                    viewModel.showMessage(getString(R.string.navigation_end_request_failed))
             }
         }
     }

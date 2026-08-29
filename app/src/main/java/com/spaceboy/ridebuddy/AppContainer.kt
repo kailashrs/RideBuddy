@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy
 
+import android.app.Application
 import android.content.Context
 import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
@@ -29,6 +30,7 @@ import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.core.alerts.RidingAlertMonitor
 import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
 import com.spaceboy.ridebuddy.domain.BikeConnection
+import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -93,6 +95,15 @@ class AppContainer(context: Context) {
         clearNavigationFeed = navigationFeed::clear,
         finishTftArrival = tftNavigationBridge::arrivedAndStop,
     )
+    val navigationStopController = NavigationStopController(
+        application = context.applicationContext as Application,
+        guard = navigationStartStopGuard,
+        guidanceLifecycle = navigationGuidanceLifecycle,
+        clearOutput = {
+            navigationFeed.clear()
+            runCatching(tftNavigationBridge::stop)
+        },
+    )
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     val callNotificationBridge = CallNotificationBridge(context, bikeConnection, appSettings, applicationScope)
     val tftPriorityCoordinator =
@@ -127,6 +138,19 @@ class AppContainer(context: Context) {
                 NavigationFeedOutputAction.Guidance -> tftNavigationBridge.accept(info)
                 NavigationFeedOutputAction.Rerouting -> tftNavigationBridge.rerouting()
                 NavigationFeedOutputAction.Stop -> tftNavigationBridge.stop()
+            }
+        }
+        applicationScope.launch {
+            // The handlebar EXIT has to work with the phone stowed and no navigation screen in
+            // the task, so this collector is process-scoped. NavigationActivity keeps its own
+            // handling for skip, which needs the map it owns.
+            bikeConnection.controls.collect { event ->
+                if (event is BikeControlEvent.ExitNavigation) {
+                    connectionEventJournal.record("Handlebar exit; stopping navigation")
+                    navigationStopController.stop { result ->
+                        connectionEventJournal.record("Handlebar exit result: $result")
+                    }
+                }
             }
         }
         rideRecorder.start()

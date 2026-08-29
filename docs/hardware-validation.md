@@ -16,7 +16,9 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 2. At 0 km/h, run **Settings → Developer tools → Stationary TFT validation** and confirm that the cluster enters and then clears the navigation state.
 3. Enable **TFT navigation output** and send one stationary navigation destination. Verify maneuver, trip, text, speed-limit, arrival, reroute, and clear states one at a time before using active guidance.
 4. Watch for any field that fails to appear or updates late. RideBuddy writes each navigation field once where the OEM writes it twice, and `8210`, `8220` and `8230` are unacknowledged writes, so a cluster that drops one gives no error — a missing or stale field is the only symptom. If that happens, revert the commit that set `ClusterReplayCount` to 1 and retest.
-5. Disable the setting while a test route is open, end navigation, and confirm no stale navigation data appears after the clear packet.
+5. With guidance running, press **EXIT** on the handlebar and confirm navigation stops. Do it twice: once with the navigation screen open, and once with the app backgrounded or the navigation screen closed. The second case is the one that used to fail — guidance keeps running in the background and the exit is handled at process scope now, not by the screen.
+6. Press the handlebar control while the cluster shows **GO**. No capture yet shows what that sends, so check Diagnostics for an "Unhandled navigation control" entry and record the bytes; that is what names the GO command.
+7. Disable the setting while a test route is open, end navigation, and confirm no stale navigation data appears after the clear packet.
 
 ## Calls and background navigation
 
@@ -25,7 +27,7 @@ Run this checklist only with the motorcycle parked, on a battery maintainer or w
 3. Only after that, enable caller display and call controls and test a real incoming call from a second phone; verify answer, reject, and end actions against the chosen default dialer.
 4. Place an outgoing call and confirm the cluster distinguishes it from an answered incoming one. RideBuddy infers the direction from whether the notification was ever seen ringing, so a call already in progress when the app starts is reported as outgoing.
 5. Watch for caller name or number that fails to appear, or appears late. The OEM writes each call packet two or three times with 200 ms gaps and RideBuddy writes it once. These are acknowledged writes, so the repetition should be unnecessary — but a missing or late field is what would say otherwise.
-6. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
+8. Start a route, turn the screen off or remove the task, and confirm the Navigation SDK service continues to deliver route updates. Explicitly select **End navigation** and confirm guidance and TFT output stop.
 
 ## Evidence to retain
 
