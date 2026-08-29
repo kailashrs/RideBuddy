@@ -11,10 +11,16 @@ import org.junit.Test
  * command is read from, and the guard that keeps a second stop from racing the first.
  */
 class NavigationExitRoutingTest {
+    /**
+     * The same handlebar button means three things, decided by which OEM screen is listening:
+     * the route-preview screen acts on 1 by clicking its own GO button, and the guidance screen
+     * acts on 2 and 3.
+     */
     @Test
     fun `the handlebar command is byte one of a three byte event`() {
-        assertEquals(3, navigationControlCommand(byteArrayOf(0x01, 0x03, 0x00)))
+        assertEquals(1, navigationControlCommand(byteArrayOf(0x01, 0x01, 0x00)))
         assertEquals(2, navigationControlCommand(byteArrayOf(0x01, 0x02, 0x00)))
+        assertEquals(3, navigationControlCommand(byteArrayOf(0x01, 0x03, 0x00)))
     }
 
     @Test

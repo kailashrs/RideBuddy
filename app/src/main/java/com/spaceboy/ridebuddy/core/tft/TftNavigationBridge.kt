@@ -49,6 +49,7 @@ class TftNavigationBridge(
     private var textAlertGeneration = 0L
     private var lastInfo: NavInfo? = null
     private var destinationLabel: String = ""
+    private var previewActive = false
 
     init {
         scope.launch {
@@ -138,6 +139,7 @@ class TftNavigationBridge(
             }
             sessionGeneration++
             acceptingUpdates = true
+            previewActive = false
             wasShowingArrival && transportReady
         }
         if (queuedReset) wakeWorker.trySend(Unit)
@@ -234,6 +236,42 @@ class TftNavigationBridge(
      * "RECALCULATION" on the banner, leaving the session where it is; 82 is its multi-leg
      * guidance state, which is what RideBuddy had been sending here.
      */
+    /**
+     * Puts the cluster in the state where it draws **GO**: a route is staged and the rider can
+     * start it from the handlebar. The OEM reaches this by writing session 83 with the destination
+     * text and nothing else, then moves to 87 once guidance actually begins.
+     *
+     * Passing a blank destination takes the cluster back out of the state.
+     */
+    fun previewDestination(destination: String) {
+        val frames = if (destination.isBlank()) {
+            emptyList()
+        } else {
+            listOf(
+                Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionRouteReady)),
+                Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(StatusNavigationActive)),
+            ) + TftPacketEncoder.guidanceTextRows(destination, "")
+                .map { payload -> Frame(BleCharacteristics.NavigationText, payload) }
+        }
+        val queued = synchronized(queueLock) {
+            if (!outputEnabled) return
+            // A route that is already running owns the display; a staged one must not disturb it.
+            if (acceptingUpdates || sessionActive) return
+            if (destination.isBlank()) {
+                if (!previewActive) return
+                previewActive = false
+                clusterResetNeeded = true
+                if (transportReady) queueClusterResetLocked() != null else false
+            } else {
+                destinationLabel = destination
+                previewActive = true
+                controlBatches += WriteBatch(frames = frames, priority = false)
+                transportReady
+            }
+        }
+        if (queued) wakeWorker.trySend(Unit)
+    }
+
     fun rerouting() {
         val destination = synchronized(queueLock) { destinationLabel }
         val frames = listOf(

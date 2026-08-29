@@ -142,6 +142,15 @@ data class BleDiagnostics(
 }
 
 sealed interface BikeControlEvent {
+    /**
+     * The rider pressed the handlebar control while the cluster showed **GO**.
+     *
+     * The OEM handles this in its route-preview screen, where it clicks its own GO button; the
+     * guidance screen handles [SkipManeuver] and [ExitNavigation] instead. Which one is listening
+     * is what makes the same button mean three things.
+     */
+    data object StartNavigation : BikeControlEvent
+
     data object SkipManeuver : BikeControlEvent
     data object ExitNavigation : BikeControlEvent
 

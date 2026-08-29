@@ -38,6 +38,12 @@ import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -108,6 +114,21 @@ class AppContainer(context: Context) {
             runCatching(tftNavigationBridge::stop)
         },
     )
+    /**
+     * A destination the rider has chosen but not started. While one is set the cluster shows GO,
+     * and the handlebar can start it without them touching the phone.
+     */
+    private val mutableStagedDestination = MutableStateFlow<String?>(null)
+    val stagedDestination: StateFlow<String?> = mutableStagedDestination.asStateFlow()
+    private val mutableStartNavigationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Emits when the rider pressed GO on the handlebar and a destination is staged. */
+    val startNavigationRequests: SharedFlow<Unit> = mutableStartNavigationRequests.asSharedFlow()
+
+    fun stageDestination(destination: String?) {
+        mutableStagedDestination.value = destination?.takeIf(String::isNotBlank)
+    }
+
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     val callNotificationBridge = CallNotificationBridge(context, bikeConnection, appSettings, applicationScope)
     val tftPriorityCoordinator =
@@ -159,12 +180,26 @@ class AppContainer(context: Context) {
                         appEventPacket(ClearAppEventsEvent, battery),
                     )
                 }
+                if (event is BikeControlEvent.StartNavigation) {
+                    val staged = mutableStagedDestination.value
+                    if (staged == null) {
+                        connectionEventJournal.record("Handlebar GO ignored; no destination is staged")
+                    } else {
+                        connectionEventJournal.record("Handlebar GO; starting the staged destination")
+                        mutableStartNavigationRequests.tryEmit(Unit)
+                    }
+                }
                 if (event is BikeControlEvent.ExitNavigation) {
                     connectionEventJournal.record("Handlebar exit; stopping navigation")
                     navigationStopController.stop { result ->
                         connectionEventJournal.record("Handlebar exit result: $result")
                     }
                 }
+            }
+        }
+        applicationScope.launch {
+            stagedDestination.collect { destination ->
+                tftNavigationBridge.previewDestination(destination.orEmpty())
             }
         }
         rideRecorder.start()

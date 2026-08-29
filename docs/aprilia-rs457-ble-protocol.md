@@ -77,7 +77,7 @@ The CCCD used for notification/indication subscription is the standard descripto
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
 | `8260` | phone → bike | navigation/session state | Common builder is `[0x05, 0xFF, state, 0x00]`. See "Session states" below. |
 | `8270` | phone → bike | navigation status/command | Payload builder is `[0x06, value, 0x00]`. The OEM writes **132 only** — `S(132)` is the single status assignment in the whole app — and never writes any other value, including on teardown. |
-| `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`. Only two values are handled — **2** skips a waypoint (`O.performClick()` → `w0()`, which drops the current waypoint and advances the destination) and **3** exits (`getActivity().finish()`). Anything else returns without acting, so there is no start/GO command: see "The GO glyph is a prompt, not a command" below. |
+| `8280` | bike → phone | TFT navigation control | Three-byte event from the handlebar. The command is **byte 1**, not byte 0: the OEM checks `value.length == 3` then reads `value[1]`. **1** starts a staged route, **2** skips a waypoint, **3** exits. See "One button, three meanings" below. |
 | `8310` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
 | `8410` | bike → phone | live vehicle telemetry | The OEM parser consumes bytes 0–8; details are below. |
 | `8420` | unknown | declared UUID only | No meaningful use found in the inspected app code. |
@@ -127,18 +127,24 @@ The values below are shown in hexadecimal for readability. They are the unsigned
 
 This table is a compatibility observation, not proof that every cluster firmware uses the same table. An unknown challenge is not handled usefully by the OEM app; it does not derive a fallback response.
 
-### The GO glyph is a prompt, not a command
+### One button, three meanings
 
-The cluster draws **GO** at session `83` and **EXIT** at `87`, so it is tempting to read both as
-handlebar controls. Only EXIT is.
+The same handlebar control emits on `8280`, and what it means depends on which screen is listening.
+The OEM has **two** consumers, each polling the command flag at 1 Hz from a different fragment, and
+reading only one of them is how this was first got wrong:
 
-The OEM has exactly two inbound command paths — `8280` and `8740` — and neither can start
-navigation. `8280` acts on 2 (skip waypoint) and 3 (exit) and returns for everything else; `8740`
-acts on 0, 1, 2 and 3, none of which touch the route. Guidance moves from `83` to `87` only when
-the Mappls SDK reports `onNavigationStarted`, which happens because the *phone* started it.
+| Command | Consumer | Effect |
+| --- | --- | --- |
+| `1` | route-preview fragment (`n`), alive at session `83` | `h.performClick()` → `Q()` — starts the staged route. This is **GO**. |
+| `2` | guidance fragment (`j`), alive at session `87` | `O.performClick()` → `w0()` — drops the current waypoint and advances the destination. |
+| `3` | guidance fragment (`j`) | `getActivity().finish()` — this is **EXIT**. |
 
-So GO tells the rider their phone is waiting for them; EXIT is backed by a real command. Nothing in
-the app can receive a handlebar GO, and no capture is needed to establish that.
+Each consumer clears the flag with `K(false)` after acting, and each ignores commands meant for the
+other screen. So the GO and EXIT glyphs the cluster draws are both real controls; they are simply
+handled in different places, and only one of the two is ever listening.
+
+RideBuddy mirrors this with a staged-destination state: a destination the rider has chosen but not
+started puts the cluster into session `83`, and command `1` starts it.
 
 ## How the OEM decides what to write
 

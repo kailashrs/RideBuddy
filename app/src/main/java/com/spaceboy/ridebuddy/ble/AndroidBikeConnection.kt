@@ -595,6 +595,7 @@ internal class AndroidBikeConnection(
                 // handlebar could never skip a waypoint or exit navigation.
                 val command = value.takeIf { it.size >= 3 }?.get(1)?.toInt()?.and(0xFF)
                 when (command) {
+                    1 -> BikeControlEvent.StartNavigation
                     2 -> BikeControlEvent.SkipManeuver
                     3 -> BikeControlEvent.ExitNavigation
                     else -> {

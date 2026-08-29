@@ -184,6 +184,16 @@ class MainActivity : ComponentActivity() {
             }
             val mainScreenActions = remember(settingsActions) { createMainScreenActions(settingsActions) }
             LaunchedEffect(Unit) { maybeAutoConnect() }
+            // A destination the rider has chosen but not started puts the cluster into its GO
+            // state, so the handlebar can start it without them touching the phone.
+            val stagedDestination = uiState.sharedDestination
+                ?: uiState.autoStartSharedDestination?.destination
+            LaunchedEffect(stagedDestination) { appContainer.stageDestination(stagedDestination) }
+            LaunchedEffect(Unit) {
+                appContainer.startNavigationRequests.collect {
+                    appContainer.stagedDestination.value?.let(::startNavigation)
+                }
+            }
 
             Rs457Theme(
                 themeMode = settings.themeMode,
@@ -523,6 +533,7 @@ class MainActivity : ComponentActivity() {
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
     private fun startNavigation(rawDestination: String) {
+        appContainer.stageDestination(null)
         viewModel.uiState.value.autoStartSharedDestination
             ?.requestId
             ?.let(viewModel::completeAutoStartSharedDestination)

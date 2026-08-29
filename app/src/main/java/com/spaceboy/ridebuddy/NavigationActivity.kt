@@ -195,9 +195,11 @@ class NavigationActivity : ComponentActivity() {
                             navigationView.showRouteOverview()
                         }
                     }
-                    // Calls and cluster readiness are handled at process scope, not by the map.
+                    // Calls, cluster readiness and starting a staged route are handled at
+                    // process scope, not by the map.
                     is BikeControlEvent.CallAction,
                     BikeControlEvent.ClusterReady,
+                    BikeControlEvent.StartNavigation,
                     -> Unit
                 }
             }
