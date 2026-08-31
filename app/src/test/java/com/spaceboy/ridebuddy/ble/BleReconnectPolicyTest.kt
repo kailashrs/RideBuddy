@@ -23,7 +23,6 @@ class BleReconnectPolicyTest {
     fun launchAutoConnectResumesFromIdleStatesOnly() {
         assertTrue(shouldAutoConnectOnLaunch(BikeConnectionState.Disconnected))
         assertTrue(shouldAutoConnectOnLaunch(BikeConnectionState.Failed("Bluetooth is off")))
-        assertFalse(shouldAutoConnectOnLaunch(BikeConnectionState.Scanning))
         assertFalse(shouldAutoConnectOnLaunch(BikeConnectionState.Connecting("bike")))
         assertFalse(shouldAutoConnectOnLaunch(BikeConnectionState.Authenticating("bike")))
         assertFalse(shouldAutoConnectOnLaunch(BikeConnectionState.Connected("bike", null)))

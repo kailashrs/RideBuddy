@@ -27,6 +27,7 @@ internal class BikeConnectionNotifications(private val context: Context) {
         )
     }
 
+    /** The ongoing notification. Low importance: it is a status line, not an alert. */
     fun build(status: String) = NotificationCompat.Builder(context, ChannelId)
         .setSmallIcon(R.drawable.ic_launcher)
         .setContentTitle("RideBuddy")
@@ -53,6 +54,10 @@ internal class BikeConnectionNotifications(private val context: Context) {
         )
         .build()
 
+    /**
+     * Updates the notification in place. Failures are logged rather than thrown: notification
+     * posting can be refused, and losing a status line must not take the connection down.
+     */
     fun publish(status: String) {
         runCatching { notificationManager.notify(BikeConnectionService.NotificationId, build(status)) }
             .onFailure { error ->
@@ -88,7 +93,6 @@ internal fun connectionNotificationStatus(
 
         is BikeConnectionState.Authenticating -> "Authenticating ${state.deviceName}"
         is BikeConnectionState.Failed -> state.message
-        BikeConnectionState.Scanning -> "Scanning"
         BikeConnectionState.Disconnected -> "Disconnected"
     }
     return if (locationPermissionMissing && state is BikeConnectionState.Connected) {

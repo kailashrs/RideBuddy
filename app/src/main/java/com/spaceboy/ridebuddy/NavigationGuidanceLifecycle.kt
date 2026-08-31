@@ -4,9 +4,18 @@ import com.google.android.libraries.navigation.Navigator
 import com.google.android.libraries.navigation.SpeedingListener
 
 /**
- * Owns arrival handling independently of the map Activity so final arrival is still processed
- * after the user backgrounds the map. UI callbacks are detached while the Navigator listener is
- * retained for the active background session.
+ * Owns arrival handling for the process, independently of the map Activity.
+ *
+ * Guidance keeps running when the rider backgrounds the map — that is the normal case, with
+ * the phone stowed — so arrival has to be handled somewhere that outlives the Activity.
+ * When the map goes away its callbacks are detached while the navigator binding is kept, and
+ * the navigator is only cleaned up once nothing is left that could still use it.
+ *
+ * Two identifiers guard against acting on a superseded session. [Binding.sessionId] is this
+ * app's own counter, and `identity` is the navigator instance itself; both must match before
+ * any callback is honoured, since the SDK's callbacks carry neither. [pendingSessions]
+ * covers the window where a newer session has been requested but its navigator has not
+ * arrived yet — during which an older session's arrival must not be treated as current.
  */
 internal class NavigationGuidanceLifecycle(
     private val clearNavigationFeed: () -> Unit,
@@ -16,6 +25,10 @@ internal class NavigationGuidanceLifecycle(
     private val pendingSessions = mutableSetOf<Long>()
     private var binding: Binding? = null
 
+    /**
+     * Declares that a session has been requested but not yet bound. Older pending ids are
+     * dropped: they have been superseded, and only the newest request can still complete.
+     */
     fun registerPendingSession(sessionId: Long) {
         synchronized(lock) {
             pendingSessions.removeAll { it < sessionId }
@@ -23,6 +36,8 @@ internal class NavigationGuidanceLifecycle(
         }
     }
 
+    /** A requested session never materialised. May release a navigator that was only being
+     *  kept alive on its behalf. */
     fun abandonPendingSession(sessionId: Long) {
         val cleanup = synchronized(lock) {
             pendingSessions.remove(sessionId)
@@ -43,6 +58,15 @@ internal class NavigationGuidanceLifecycle(
         onFinalArrival = onFinalArrival,
     )
 
+    /**
+     * Binds a session's callbacks, returning false when a newer session has already been
+     * requested and this one is stale on arrival.
+     *
+     * Re-attaching the *same* navigator — the Activity returning to the foreground — keeps
+     * the existing session object and only swaps the callbacks, so the arrival state built
+     * up while it was backgrounded survives. A different navigator replaces the binding and
+     * detaches the old one's handlers.
+     */
     internal fun attach(
         sessionId: Long,
         session: NavigationGuidanceSession,
@@ -79,6 +103,10 @@ internal class NavigationGuidanceLifecycle(
         return true
     }
 
+    /**
+     * The map is going away. Clears the UI callback while keeping the navigator bound, so
+     * guidance continues in the background; releases it only if it is already finished.
+     */
     fun detachUi(sessionId: Long) {
         val cleanup = synchronized(lock) {
             val current = binding
@@ -90,6 +118,10 @@ internal class NavigationGuidanceLifecycle(
         cleanup?.detachAndCleanup()
     }
 
+    /**
+     * Guidance is actually running. The route version is bumped so a terminal update from
+     * the previous route cannot be mistaken for this one ending.
+     */
     fun markGuidanceStarted(sessionId: Long) {
         synchronized(lock) {
             val current = binding
@@ -104,9 +136,14 @@ internal class NavigationGuidanceLifecycle(
     }
 
     /**
-     * A terminal NavInfo message has no session token and can be left over from an older service
-     * registration. Accept it only when it agrees with the retained Navigator lifecycle, and mark
-     * that binding ended so a later UI detach releases the process-owned Navigator.
+     * Decides whether a terminal guidance update genuinely ends the current route.
+     *
+     * These messages carry no session token and can be left over from an older service
+     * registration, so they are checked against the retained navigator instead of trusted.
+     * The check spans two locked sections because the decisive part — asking the navigator
+     * whether guidance is still running — is an SDK call that must not be made under the
+     * lock. Everything read in the first section is therefore re-verified in the second,
+     * and any change means another route started underneath and this update is stale.
      */
     fun acceptAndMarkTerminalFeed(): Boolean {
         val candidate = synchronized(lock) {
@@ -137,6 +174,7 @@ internal class NavigationGuidanceLifecycle(
         }
     }
 
+    /** Releases a specific session's binding. No-op if it is not the one bound. */
     internal fun release(sessionId: Long, identity: Any): Boolean {
         val released = synchronized(lock) {
             val current = binding
@@ -150,6 +188,7 @@ internal class NavigationGuidanceLifecycle(
         return true
     }
 
+    /** Releases by navigator alone, for a stop that has no session id to hand. */
     internal fun release(identity: Any): Boolean {
         val released = synchronized(lock) {
             val current = binding
@@ -162,6 +201,10 @@ internal class NavigationGuidanceLifecycle(
         return true
     }
 
+    /**
+     * Handles an arrival. A waypoint simply advances the route; the final destination stops
+     * guidance and tears the session down.
+     */
     private fun handleArrival(sessionId: Long, identity: Any, isFinalDestination: Boolean) {
         if (!isFinalDestination) {
             val session = synchronized(lock) {
@@ -188,6 +231,11 @@ internal class NavigationGuidanceLifecycle(
         cleanup?.detachAndCleanup()
     }
 
+    /**
+     * Claims a finished session's navigator for cleanup, but only when nothing can still use
+     * it: it must have ended, have no UI attached, and not be holding a place for a newer
+     * session still being set up.
+     */
     private fun takeCompletedBackgroundSessionIfUnusedLocked(): NavigationGuidanceSession? {
         val current = binding ?: return null
         if ((!current.finalized && !current.terminalEnded) || current.onFinalArrival != null ||
@@ -203,6 +251,14 @@ internal class NavigationGuidanceLifecycle(
         runCatching(::cleanup)
     }
 
+    /**
+     * The currently bound session.
+     *
+     * [onFinalArrival] is null while no UI is attached — guidance still runs, there is just
+     * nothing to notify. [finalized] means arrival was handled; [terminalEnded] means the
+     * feed reported the route over. Either allows cleanup, but they are distinct states and
+     * only [finalized] suppresses further arrival handling.
+     */
     private data class Binding(
         val sessionId: Long,
         val session: NavigationGuidanceSession,
@@ -220,6 +276,11 @@ internal class NavigationGuidanceLifecycle(
     )
 }
 
+/**
+ * The navigator surface this class uses, behind an interface so the lifecycle rules can be
+ * exercised without the SDK. [identity] is the underlying instance, compared by reference
+ * to recognise a re-attach of the same navigator.
+ */
 internal interface NavigationGuidanceSession {
     val identity: Any
     fun setArrivalHandler(handler: ((Boolean) -> Unit)?)
@@ -231,6 +292,7 @@ internal interface NavigationGuidanceSession {
     fun cleanup()
 }
 
+/** The real implementation. Holds its own arrival listener so it can be removed again. */
 private class NavigatorGuidanceSession(
     private val navigator: Navigator,
 ) : NavigationGuidanceSession {

@@ -11,8 +11,14 @@ import java.util.UUID
 /**
  * Applies [ProtectionSession] actions to the serialized GATT transport.
  *
- * The pure state machine stays independently testable; this coordinator owns only its Android
- * timeouts, required profile setup, and acceptance side effects.
+ * The split is deliberate: the state machine decides, this class acts. What lives here is
+ * everything that needs Android — characteristic lookup, queueing, the two timeouts — plus
+ * the acceptance side effects and the gate that holds readiness until the whole
+ * subscription set is up.
+ *
+ * Collaborators arrive as function references rather than a back-reference to the
+ * connection, which keeps the dependency one-directional and lets the coordinator be
+ * driven directly in tests.
  */
 internal class ProtectionCoordinator(
     private val handler: Handler,
@@ -33,10 +39,12 @@ internal class ProtectionCoordinator(
     private val challengeTimeoutToken = Any()
     private var session: ProtectionSession? = null
     private var postAuthenticationGate: PostAuthenticationGate? = null
+    private var verificationArmed = false
 
     val phase: ProtectionPhase
         get() = session?.phase ?: ProtectionPhase.Idle
 
+    /** Starts a handshake for a freshly discovered profile. */
     fun begin(previouslyAccepted: Boolean) {
         val started = ProtectionSession(previouslyAccepted = previouslyAccepted)
         session = started
@@ -45,11 +53,13 @@ internal class ProtectionCoordinator(
         handle(started.begin())
     }
 
+    /** Drops all handshake state and pending timeouts. Called on every teardown. */
     fun reset() {
         handler.removeCallbacksAndMessages(verificationTimeoutToken)
         handler.removeCallbacksAndMessages(challengeTimeoutToken)
         session = null
         postAuthenticationGate = null
+        verificationArmed = false
     }
 
     fun onChallenge(value: ByteArray) {
@@ -61,6 +71,10 @@ internal class ProtectionCoordinator(
         )
     }
 
+    /**
+     * Routes a completed subscription. The challenge characteristic advances the handshake
+     * itself; everything else feeds the readiness gate.
+     */
     fun onSubscriptionCompleted(uuid: UUID) {
         log("Subscribed ${uuid.shortName()}")
         if (uuid == BleCharacteristics.ProtectionChallenge) {
@@ -75,19 +89,42 @@ internal class ProtectionCoordinator(
         val gateUpdate = postAuthenticationGate?.markSubscriptionEnabled(uuid) ?: return
         if (gateUpdate.becameReady) {
             log("Required motorcycle subscriptions are ready")
+            // Evidence already in hand authenticates the session immediately; otherwise the
+            // deadline below waits for the first indication that proves the link is live.
             gateUpdate.deferredEvidence?.let(::completeEvidence)
-            if (!isAuthenticated()) scheduleVerificationTimeout()
+            armVerificationTimeout()
         }
+    }
+
+    /**
+     * Arms the verification deadline at most once per session, and only while unauthenticated.
+     *
+     * What satisfies it is any indication the cluster sends unprompted — telemetry, which arrives
+     * at roughly 4 Hz, well inside the deadline. The identity characteristics also indicate, but
+     * on the cluster's own schedule rather than on subscription, so nothing waits for them.
+     */
+    private fun armVerificationTimeout() {
+        if (verificationArmed || isAuthenticated()) return
+        verificationArmed = true
+        scheduleVerificationTimeout()
     }
 
     fun onProtectionResponseWritten() {
         log("Protection response write completed")
         val action = session?.onProtectionResponseWritten()
             ?: ProtectionAction.Fail("Authentication session is missing")
+        // Record acceptance as soon as the write is confirmed rather than waiting for the
+        // session to finish coming up. The cluster will not issue a second challenge after
+        // accepting one, so a link that drops between here and readiness must still take
+        // the stored-acceptance path on its next attempt.
         if (action !is ProtectionAction.Fail) markAccepted()
         handle(action)
     }
 
+    /**
+     * Offers proof that the link is live. Held by the gate until every required
+     * subscription has completed, then replayed.
+     */
     fun acceptEvidence(evidence: String) {
         val gate = postAuthenticationGate ?: return
         val acceptedEvidence = gate.acceptEvidence(evidence)
@@ -150,6 +187,15 @@ internal class ProtectionCoordinator(
         syncDiagnostics()
     }
 
+    /**
+     * Queues the subscription set.
+     *
+     * The set is queued as one batch so it drains in the fixed order
+     * [BleCharacteristics.PostAuthenticationSubscriptions] defines. Subscriptions are the whole
+     * of post-authentication setup: nothing is read, because a capture shows both identity
+     * characteristics answering a read with a zero-filled buffer and delivering their real
+     * values as indications instead — see `docs/cluster-link-decisions.md` (D4).
+     */
     private fun beginPostAuthenticationVerification() {
         log("Starting post-authentication verification via ${session?.path?.name ?: "unknown path"}")
         val subscriptions = BleCharacteristics.PostAuthenticationSubscriptions.map { uuid ->
@@ -165,15 +211,6 @@ internal class ProtectionCoordinator(
         }
         postAuthenticationGate = PostAuthenticationGate(BleCharacteristics.PostAuthenticationSubscriptions)
         enqueueAll(subscriptions)
-        val identityReads = BleCharacteristics.PostAuthenticationIdentityReads.mapNotNull { uuid ->
-            characteristic(uuid)?.takeIf { candidate ->
-                candidate.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
-            }?.let(GattOperation::Read)
-        }
-        if (identityReads.isNotEmpty()) {
-            log("Queued ${identityReads.size} motorcycle identity snapshot reads")
-            enqueueAll(identityReads)
-        }
     }
 
     private fun completeAuthentication(evidence: String) {
@@ -207,6 +244,13 @@ internal class ProtectionCoordinator(
         )
     }
 
+    /**
+     * Fails the attempt if the cluster never speaks after its subscriptions are enabled.
+     *
+     * Both timeouts capture the generation and session identity and recheck them when they
+     * fire, so a timeout scheduled for a connection that has since been torn down and
+     * replaced cannot fail its successor.
+     */
     private fun scheduleVerificationTimeout() {
         handler.removeCallbacksAndMessages(verificationTimeoutToken)
         val currentSession = session ?: return
@@ -218,6 +262,7 @@ internal class ProtectionCoordinator(
         }, verificationTimeoutToken, SystemClock.uptimeMillis() + VerificationTimeoutMillis)
     }
 
+    /** Fails the attempt if the challenge never arrives after its subscription is enabled. */
     private fun scheduleChallengeTimeout() {
         handler.removeCallbacksAndMessages(challengeTimeoutToken)
         val currentSession = session ?: return
@@ -230,6 +275,7 @@ internal class ProtectionCoordinator(
     }
 
     private companion object {
+        /** Generous next to the sub-second response the cluster gives when it is healthy. */
         const val VerificationTimeoutMillis = 8_000L
         const val ChallengeTimeoutMillis = 8_000L
     }

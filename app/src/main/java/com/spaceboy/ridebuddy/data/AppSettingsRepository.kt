@@ -22,9 +22,21 @@ enum class DistanceUnits {
     }
 }
 enum class ThemeMode { System, Light, Dark }
+
+/**
+ * How much text the cluster's navigation rows carry. [Compact] drops the destination lines
+ * and keeps only the instruction banner, which is the half a rider glances at.
+ */
 enum class TftTextMode { Full, Compact }
 
-/** Replaced wholesale on every change, never mutated in place, so Compose may skip on it. */
+/**
+ * Every user preference, as one immutable value.
+ *
+ * Replaced wholesale on each change rather than mutated, so Compose can skip on it. The
+ * defaults here are the app's actual defaults — note that everything writing to the
+ * vehicle ([callerDisplay], [tftCallControls], [tftNavigationOutputEnabled]) and everything
+ * touching diagnostics capture is off until the rider turns it on.
+ */
 @Immutable
 data class AppSettings(
     val distanceUnits: DistanceUnits = DistanceUnits.defaultFor(Locale.getDefault()),
@@ -61,11 +73,26 @@ data class AppSettings(
     val enabledNotificationPackages: Set<String> = DefaultNotificationPackages,
 )
 
+/**
+ * Reads and writes [AppSettings].
+ *
+ * Loaded once at construction and held in a flow, so reads are synchronous and free —
+ * settings are consulted on hot paths like telemetry handling. Writes go through [update],
+ * which is synchronized because settings are changed from the UI while being read from
+ * background collectors.
+ */
 class AppSettingsRepository(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(Name, Context.MODE_PRIVATE)
     private val mutableSettings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = mutableSettings.asStateFlow()
 
+    /**
+     * Applies [transform] and persists the result.
+     *
+     * Every key is rewritten rather than just the changed one. It costs nothing at this
+     * size and removes a whole class of bug where a new field is added to [AppSettings] and
+     * silently never persisted.
+     */
     @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val updated = transform(mutableSettings.value)
@@ -106,6 +133,11 @@ class AppSettingsRepository(context: Context) {
         mutableSettings.value = updated
     }
 
+    /**
+     * Loads settings, falling back to defaults for anything absent or unreadable. Enum
+     * values are parsed defensively: a value written by a build that has since renamed a
+     * constant must not crash the app on launch.
+     */
     private fun read(): AppSettings {
         return AppSettings(
             distanceUnits = preferences.getString(KeyUnits, null)
@@ -185,5 +217,6 @@ class AppSettingsRepository(context: Context) {
     }
 }
 
+/** Reads an enum by name, falling back when it is absent or no longer a valid constant. */
 private inline fun <reified T : Enum<T>> SharedPreferences.enum(key: String, fallback: T): T =
     getString(key, null)?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

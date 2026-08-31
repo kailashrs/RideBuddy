@@ -75,6 +75,7 @@ internal class BleDiagnosticsRecorder(initialEvents: List<String> = emptyList())
         }
     }
 
+    /** Called when a connection succeeds, so a stale failure is not shown alongside a live link. */
     fun clearFailure() {
         state.update { it.copy(lastFailure = null, suppressionReason = null) }
     }
@@ -123,6 +124,10 @@ internal class BleDiagnosticsRecorder(initialEvents: List<String> = emptyList())
         state.update { it.copy(protectionPhase = phase, protectionPath = path) }
     }
 
+    /**
+     * The session is fully up. Clears any recorded failure and suppression reason: they
+     * described attempts that have now been superseded by a working link.
+     */
     fun markAuthenticated(path: ProtectionPath?) {
         state.update {
             it.copy(
@@ -137,10 +142,6 @@ internal class BleDiagnosticsRecorder(initialEvents: List<String> = emptyList())
 
     fun countDescriptorWrite() {
         state.update { it.copy(descriptorWritesCompleted = it.descriptorWritesCompleted + 1) }
-    }
-
-    fun countRead() {
-        state.update { it.copy(readsCompleted = it.readsCompleted + 1) }
     }
 
     fun countWrite() {
@@ -171,6 +172,7 @@ internal class BleDiagnosticsRecorder(initialEvents: List<String> = emptyList())
         }
     }
 
+    /** Shared frame bookkeeping: the counter, the freshness stamp, and the newest-first ring. */
     private fun BleDiagnostics.withFrame(frameLine: String, receivedAtMillis: Long) = copy(
         notificationsReceived = notificationsReceived + 1,
         lastFrameAtMillis = receivedAtMillis,
@@ -217,6 +219,7 @@ internal class BleDiagnosticsRecorder(initialEvents: List<String> = emptyList())
     }
 
     private companion object {
+        /** Frames kept for display. Small: at telemetry rate this is a few seconds of history. */
         const val MaxFrameEntries = 30
     }
 }

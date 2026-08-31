@@ -65,14 +65,14 @@ class GattOperationTest {
     }
 
     @Test
-    fun readRetryIncrementsAttempt() {
+    fun subscribeRetryIncrementsAttempt() {
         val characteristic = BluetoothGattCharacteristic(
             UUID.randomUUID(),
-            BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ,
         )
 
-        val retry = GattOperation.Read(characteristic).retry()
+        val retry = GattOperation.Subscribe(characteristic).retry()
 
         assertEquals(1, retry.attempt)
     }

@@ -36,7 +36,7 @@ class BleCaptureRecorderTest {
     fun `clear retains capture preference and removes entries`() {
         val recorder = BleCaptureRecorder()
         recorder.setEnabled(true)
-        recorder.record(BleCaptureDirection.Read, characteristic, byteArrayOf(0x10))
+        recorder.record(BleCaptureDirection.Notification, characteristic, byteArrayOf(0x10))
 
         recorder.clear()
 

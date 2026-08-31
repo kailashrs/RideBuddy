@@ -85,6 +85,14 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 
+/**
+ * One ride in detail: summary, route map, telemetry charts, and export.
+ *
+ * A separate Activity because it is reached from a history row and takes a ride id rather
+ * than any shared state. The full sample series is loaded here on demand — it can run to
+ * tens of thousands of points and is deliberately not part of the history list — and
+ * downsampled before anything is drawn.
+ */
 class RideDetailActivity : ComponentActivity() {
     private var loadState by mutableStateOf<RideDetailLoadState>(RideDetailLoadState.Loading)
     private var units by mutableStateOf(DistanceUnits.Metric)
@@ -97,6 +105,13 @@ class RideDetailActivity : ComponentActivity() {
         uri?.let { exportRideToUri(it, RideExportFormat.Gpx) }
     }
 
+    /**
+     * Writes the ride to a document the rider picked.
+     *
+     * The ride is re-fetched rather than taken from the loaded state: the picker is a
+     * separate Activity, so this process can be killed and recreated between choosing a
+     * file and writing to it, leaving nothing loaded.
+     */
     private fun exportRideToUri(uri: Uri, format: RideExportFormat) {
         lifecycleScope.launch {
             val container = appContainer
@@ -191,6 +206,11 @@ class RideDetailActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Loads the ride and its samples. Falls back to a repository refresh when the id is not
+     * in the cached list, which is the case when this Activity is recreated on its own after
+     * process death.
+     */
     private fun loadRide(rideId: Long) {
         loadState = RideDetailLoadState.Loading
         lifecycleScope.launch {
@@ -250,6 +270,10 @@ class RideDetailActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Opens the ride's end point in a maps app — where the bike was left. Silently does
+     * nothing when the ride has no location, since the button is hidden in that case.
+     */
     private fun openParking(ride: Ride) {
         val latitude = ride.endLatitude ?: return
         val longitude = ride.endLongitude ?: return
@@ -286,6 +310,14 @@ private data class RideDetailUiData(
     val events: List<RideEvent>,
 )
 
+/**
+ * Prepares everything the screen draws, in one pass off the main thread.
+ *
+ * Charts and the route are downsampled to their own limits: a chart is a few hundred pixels
+ * wide, so more points than that are invisible, while a route can use more before its shape
+ * stops improving. Values are converted to display units here rather than during
+ * composition, so scrolling never re-converts them.
+ */
 private fun buildRideDetailUiData(
     ride: Ride,
     samples: List<RideSample>,
@@ -312,6 +344,12 @@ private fun buildRideDetailUiData(
     )
 }
 
+/**
+ * Evenly spaced subset of at most [maxPoints], preserving the first and last elements.
+ *
+ * Index arithmetic is done in `Long` because the intermediate product of the source index
+ * and the target index overflows `Int` for a long ride's sample count.
+ */
 private fun <T> List<T>.downsampled(maxPoints: Int): List<T> {
     require(maxPoints >= 2)
     if (size <= maxPoints) return this
@@ -322,8 +360,13 @@ private fun <T> List<T>.downsampled(maxPoints: Int): List<T> {
     }
 }
 
+/** Roughly one point per pixel of chart width; more cannot be seen. */
 private const val MaxChartPoints = 600
+
+/** A route tolerates more detail than a chart before its shape stops improving. */
 private const val MaxRoutePoints = 1_000
+
+/** Events listed. A long ride can produce hundreds, which is not a readable list. */
 private const val MaxVisibleEvents = 20
 
 /**
@@ -536,7 +579,12 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
                 height = 140.dp,
                 topPadding = 12.dp,
                 color = color,
-                contentDescription = maximum?.let { "$title over the duration of the ride; peak %.1f $unit".format(it) }
+                // The unit is an argument, not part of the format string. Splicing it in meant
+                // the throttle chart's "%" produced a format string ending in a bare percent,
+                // which String.format rejects — crashing on any ride that had throttle data.
+                contentDescription = maximum?.let {
+                    "%s over the duration of the ride; peak %.1f %s".format(title, it, unit)
+                }
                     ?: "$title data unavailable",
                 scalePolicy = LineChartScalePolicy.ZeroBased,
                 clampNegativeValues = true,
@@ -550,8 +598,13 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
     }
 }
 
+/** CSV for spreadsheets and analysis; GPX for mapping and fitness tools. */
 private enum class RideExportFormat { Csv, Gpx }
 
+/**
+ * Full sample series as CSV. Timestamps are ISO-8601 and every value is in SI units,
+ * independent of the rider's display preference, so an export is self-describing.
+ */
 private fun Writer.writeCsv(samples: List<RideSample>) {
     appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,mileage_km_per_litre,acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
     samples.forEach { sample ->
@@ -559,6 +612,11 @@ private fun Writer.writeCsv(samples: List<RideSample>) {
     }
 }
 
+/**
+ * The route as a GPX 1.1 track. Samples without a location are skipped rather than emitted
+ * as zeroes, which would draw a line through the Gulf of Guinea. Coordinates are formatted
+ * with [Locale.US] because GPX requires a dot decimal separator regardless of locale.
+ */
 private fun Writer.writeGpx(ride: Ride, samples: List<RideSample>) {
     append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"RideBuddy\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><name>Ride ")
     append(ride.id.toString())

@@ -32,7 +32,6 @@ class BikeCompanionDeviceServiceTest {
     fun presenceOnlyRequestsAConnectionFromATerminalState() {
         assertTrue(shouldRequestPresenceReconnect(BikeConnectionState.Disconnected))
         assertTrue(shouldRequestPresenceReconnect(BikeConnectionState.Failed("failed")))
-        assertFalse(shouldRequestPresenceReconnect(BikeConnectionState.Scanning))
         assertFalse(shouldRequestPresenceReconnect(BikeConnectionState.Connecting("bike")))
         assertFalse(shouldRequestPresenceReconnect(BikeConnectionState.Authenticating("bike")))
         assertFalse(shouldRequestPresenceReconnect(BikeConnectionState.Connected("bike", null)))

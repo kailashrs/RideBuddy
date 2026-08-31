@@ -137,4 +137,29 @@ class GattSessionTest {
         assertEquals(12, closures.size)
         assertFalse(registry.isRetired(FakeTransport("never opened")))
     }
+
+    @Test
+    fun `a session records whether anything ever transacted on it`() {
+        val session = session(FakeTransport("bike"))
+
+        // The encryption-stall signature: connected, but nothing ever completed.
+        assertFalse(session.completedAnyOperation)
+
+        session.markOperationCompleted()
+
+        assertTrue(session.completedAnyOperation)
+    }
+
+    @Test
+    fun `transacting is remembered independently of the link age`() {
+        val session = session(FakeTransport("bike"))
+        session.markOperationCompleted()
+
+        session.markConnected(1_000L)
+
+        // markConnected must not reset it: the flag is what separates a stalled link from an
+        // ordinary dropout, and a link can transact before this is called.
+        assertTrue(session.completedAnyOperation)
+        assertEquals(500L, session.linkAgeMillis(1_500L))
+    }
 }

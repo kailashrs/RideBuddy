@@ -57,8 +57,11 @@ Status 8 is deliberately *not* an authentication failure: Android reuses it for 
 `GATT_INSUFFICIENT_AUTHORIZATION` and `GATT_CONNECTION_TIMEOUT`, and reporting a dropped link as an
 auth failure is the confusion this table exists to prevent.
 
-One optional identity-read timeout is tolerated (distinct UUIDs, no side effects on the bike); the
-next one retires the link like any other timeout.
+No callback timeout is tolerated. Android clears `mDeviceBusy` only from the callback, so an
+operation that never answers leaves the GATT unable to perform any further characteristic or
+descriptor work — completing it locally would only move the failure onto whatever runs next. The
+identity reads that this exemption once existed for are gone entirely; see
+`cluster-link-decisions.md` (D4).
 
 ## 4. Diagnostics keep the real failure
 

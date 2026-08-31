@@ -10,9 +10,31 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * Stores the Navigation SDK key encrypted under an Android Keystore key.
+ *
+ * The key is the rider's own billable credential, so it is never held in plain text at
+ * rest. AES-GCM under an Android Keystore key means the secret never leaves the keystore
+ * and cannot be recovered from a preferences backup alone; only the ciphertext and its IV
+ * are stored here. Whether the keystore is hardware-backed is the platform's choice, not
+ * something requested or checked here — the threat this addresses is a readable backup or
+ * preferences file, which holds either way. A fresh IV per encryption is required — GCM loses its guarantees if one
+ * is reused — which is what `setRandomizedEncryptionRequired` enforces.
+ *
+ * Every method is synchronized: settings and the bootstrap loader can touch this from
+ * different threads, and an interleaved save would pair one operation's ciphertext with
+ * another's IV.
+ */
 class SecureNavigationApiKeyStore(context: Context) {
     private val preferences = context.getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
 
+    /**
+     * The stored key, or null when there is none or it cannot be decrypted.
+     *
+     * Decryption failure is a real possibility rather than a defensive branch: the keystore
+     * key is invalidated by events like a factory reset. Treating that as "no key stored"
+     * prompts the rider to re-enter it, which is the only recovery available anyway.
+     */
     @Synchronized
     fun load(): String? {
         val encryptedValue = preferences.getString(EncryptedValueKey, null) ?: return null
@@ -29,6 +51,12 @@ class SecureNavigationApiKeyStore(context: Context) {
         }.getOrNull()
     }
 
+    /**
+     * Encrypts and stores [apiKey], throwing if the write does not commit.
+     *
+     * Both values are written in one commit so a failure cannot leave ciphertext paired
+     * with a stale IV — which would decrypt to nothing on the next launch.
+     */
     @Synchronized
     @Suppress("UseKtx") // The KTX edit helper discards commit(), so its failure cannot be checked.
     fun save(apiKey: String) {
@@ -57,6 +85,10 @@ class SecureNavigationApiKeyStore(context: Context) {
         )
     }
 
+    /**
+     * The keystore key, generated on first use. Lazily rather than eagerly, so an install
+     * that never configures navigation never creates one.
+     */
     private fun getOrCreateSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(AndroidKeyStore).apply { load(null) }
         val existingKey = keyStore.getKey(KeyAlias, null) as? SecretKey
@@ -91,6 +123,10 @@ class SecureNavigationApiKeyStore(context: Context) {
     }
 }
 
+/**
+ * Turns a failed commit into an exception. Silently ignoring one would leave the rider
+ * believing a key was saved or removed when it was not.
+ */
 internal fun requirePreferenceCommit(committed: Boolean, operation: String) {
     check(committed) { "Could not $operation" }
 }

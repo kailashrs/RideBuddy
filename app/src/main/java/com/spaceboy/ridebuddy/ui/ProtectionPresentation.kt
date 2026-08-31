@@ -5,6 +5,9 @@ import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
 
+// Maps the handshake's domain states onto display strings. Kept in the UI layer so the
+// protection state machine stays free of Android resources and remains a pure unit.
+
 @StringRes
 internal fun ProtectionPhase.labelResource(): Int = when (this) {
     ProtectionPhase.Idle -> R.string.protection_phase_idle

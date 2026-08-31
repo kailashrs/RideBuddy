@@ -33,7 +33,6 @@ internal fun diagnosticsReport(
     appendLine("Services: ${diagnostics.servicesDiscovered}")
     appendLine("Notifications: ${diagnostics.notificationsReceived}")
     appendLine("Descriptor writes: ${diagnostics.descriptorWritesCompleted}")
-    appendLine("Characteristic reads: ${diagnostics.readsCompleted}")
     appendLine("Characteristic writes: ${diagnostics.writesCompleted}")
     appendLine("Malformed frames: ${diagnostics.malformedTelemetryFrames}")
     appendLine("Dropped ride frames: ${diagnostics.droppedRawTelemetryFrames}")

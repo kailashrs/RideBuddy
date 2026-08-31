@@ -29,6 +29,7 @@ internal enum class GattStartRejection {
     Unknown,
 }
 
+/** Whether the framework accepted an operation for dispatch, and why not if it did not. */
 internal sealed interface GattStartOutcome {
     data object Started : GattStartOutcome
 
@@ -38,6 +39,7 @@ internal sealed interface GattStartOutcome {
     ) : GattStartOutcome
 }
 
+/** Maps a `BluetoothStatusCodes` value onto the retry policy's view of it. */
 internal fun gattStartRejectionFor(statusCode: Int): GattStartRejection = when (statusCode) {
     BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY -> GattStartRejection.Busy
 
@@ -59,23 +61,51 @@ internal fun gattStartRejectionLabel(rejection: GattStartRejection): String = wh
     GattStartRejection.Unknown -> "rejected by the Bluetooth stack"
 }
 
+/** Where in an operation's life the failure surfaced. Each stage is diagnosed differently. */
 internal enum class GattFailureSource {
+    /** The framework refused to dispatch the call at all. */
     SynchronousStart,
+
+    /** The call was dispatched and the peer or stack reported a non-success status. */
     StatusCallback,
+
+    /** The call was dispatched and no callback ever arrived. */
     CallbackTimeout,
 }
 
+/** What to do about a failed operation. */
 internal enum class GattFailureAction {
+    /** Re-queue on the same link after a backoff; the problem looks momentary. */
     RetryCurrentGattAfterDelay,
+
+    /** Give up on this operation only; the link itself is still good. */
     CompleteFailure,
+
+    /** The link is no longer trustworthy: tear the GATT down and reconnect. */
     ResetGattAndReconnect,
 }
 
+/**
+ * Which lane an operation queues in. [Critical] is for steps the protocol sequence
+ * depends on — authentication and subscription — so they are never stuck behind a burst
+ * of routine display writes.
+ */
 internal enum class GattOperationPriority {
     Normal,
     Critical,
 }
 
+/**
+ * The retry policy, in one place.
+ *
+ * The ordering of the branches is the policy. A missing callback is treated as the most
+ * serious outcome — the stack has lost track of the request, so nothing about the link
+ * can be trusted and it is rebuilt. A synchronous refusal is diagnosed from its reason,
+ * because "the controller is busy" and "this attribute is read-only" need opposite
+ * responses. Only after those does the status code decide, and it may still escalate to a
+ * reconnect: a security status here means the bond is no longer accepted, which no amount
+ * of retrying on the same link will fix.
+ */
 internal fun gattFailureAction(
     source: GattFailureSource,
     status: Int?,
@@ -153,6 +183,11 @@ internal fun gattStatusName(status: Int): String = when (status) {
     else -> "GATT_STATUS_$status"
 }
 
+/**
+ * Backoff before retrying an operation on the same link: 200 ms, 400 ms, then 800 ms.
+ * Much shorter than the reconnect backoff, because this is waiting out a busy controller
+ * rather than a bike that may have been switched off.
+ */
 internal fun gattOperationRetryDelayMillis(attempt: Int): Long =
     minOf(1_000L, 200L shl attempt.coerceIn(0, 2))
 
@@ -199,21 +234,21 @@ private val GattUnambiguousSecurityStatuses = setOf(
     BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION,
 )
 
+// Role predicates. The connection controller reacts to *which* protocol step finished,
+// not to the operation type alone, and these keep that decision out of long `when` chains.
+
+/** The subscription that must land before the cluster will issue its challenge. */
 internal fun GattOperation.isChallengeSubscription(): Boolean =
     this is GattOperation.Subscribe && characteristic.uuid == BleCharacteristics.ProtectionChallenge
 
 internal fun GattOperation.isPostAuthenticationSubscription(): Boolean =
     this is GattOperation.Subscribe && characteristic.uuid in BleCharacteristics.PostAuthenticationSubscriptions
 
-internal fun GattOperation.isOptionalIdentityRead(): Boolean =
-    this is GattOperation.Read && characteristic.uuid in BleCharacteristics.PostAuthenticationIdentityReads
-
 internal fun GattOperation.isProtectionResponseWrite(): Boolean =
     this is GattOperation.Write && characteristic.uuid == BleCharacteristics.ProtectionResponse
 
 internal fun GattOperation.characteristicUuid(): UUID = when (this) {
     is GattOperation.Subscribe -> characteristic.uuid
-    is GattOperation.Read -> characteristic.uuid
     is GattOperation.Write -> characteristic.uuid
 }
 
@@ -224,33 +259,44 @@ internal fun GattOperation.progressiveLabel(): String {
     val uuid = characteristicUuid().shortName()
     return when (this) {
         is GattOperation.Subscribe -> "subscribing to $uuid"
-        is GattOperation.Read -> "reading $uuid"
         is GattOperation.Write -> "writing $uuid"
     }
 }
 
+/**
+ * One queued unit of GATT work.
+ *
+ * Everything the connection does to the peer goes through this type, which is what makes
+ * a single serialised queue possible: the Android stack accepts one operation at a time
+ * per connection, and dispatching a second before the first calls back silently drops it.
+ *
+ * [attempt] rides along on the operation rather than living in the scheduler so a retry
+ * is a plain value — [retry] returns a copy with the count bumped — and the failure policy
+ * can see how many times this exact operation has already been tried.
+ */
 internal sealed interface GattOperation {
     val label: String
     val attempt: Int
     val priority: GattOperationPriority
         get() = GattOperationPriority.Normal
+
+    /** This operation again, with its attempt count incremented. */
     fun retry(): GattOperation
 
+    /** Enable notifications or indications by writing the characteristic's CCCD. */
     data class Subscribe(val characteristic: BluetoothGattCharacteristic, override val attempt: Int = 0) :
         GattOperation {
         override val label = "subscription"
         override fun retry() = copy(attempt = attempt + 1)
     }
 
-    data class Read(
-        val characteristic: BluetoothGattCharacteristic,
-        override val attempt: Int = 0,
-    ) :
-        GattOperation {
-        override val label = "read"
-        override fun retry() = copy(attempt = attempt + 1)
-    }
-
+    /**
+     * Write a value to the peer.
+     *
+     * [completion] lets a caller await the outcome, which is how display writes are
+     * correlated with the callback that confirms them instead of being fired blind.
+     * [requestId] carries the same correlation into the diagnostics journal.
+     */
     data class Write(
         val characteristic: BluetoothGattCharacteristic,
         val value: ByteArray,

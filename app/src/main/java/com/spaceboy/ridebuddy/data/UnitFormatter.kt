@@ -5,6 +5,19 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/**
+ * Converts and formats every quantity the UI shows.
+ *
+ * Everything is stored and computed in metric — km, km/h, km/L, litres — and converted
+ * only at the point of display, so the rider's unit preference never affects recorded
+ * data or an export.
+ *
+ * Imperial is not one system here. Distance and speed are the same everywhere, but a
+ * gallon is not: US and imperial gallons differ by about 20%, so fuel and mileage
+ * additionally branch on the locale's country. Every conversion takes an explicit [Locale]
+ * rather than reading the default, both for that reason and so the decimal separator is
+ * the rider's.
+ */
 object UnitFormatter {
     fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String =
         "%.${decimals}f %s".format(locale, distanceValue(kilometres, units), distanceUnit(units))
@@ -16,10 +29,12 @@ object UnitFormatter {
     fun distanceValue(kilometres: Double, units: DistanceUnits): Double =
         if (units == DistanceUnits.Metric) kilometres else kilometres * KmToMiles
 
+    /** Formatted mileage, or a dash with the correct unit when there is no usable figure. */
     fun mileage(kilometresPerLitre: Double?, units: DistanceUnits, locale: Locale): String =
         mileageValue(kilometresPerLitre, units, locale)?.let { "%.1f %s".format(locale, it, mileageUnit(units)) }
             ?: "— ${mileageUnit(units)}"
 
+    /** Numeric mileage in the rider's units — US mpg and imperial mpg are different numbers. */
     fun mileageValue(
         kilometresPerLitre: Double?,
         units: DistanceUnits,
@@ -44,6 +59,10 @@ object UnitFormatter {
             else "%.1f gal".format(locale, value * gallonsPerLitre(locale))
         } ?: if (units == DistanceUnits.Metric) "— L" else "— gal"
 
+    /**
+     * Distance to a turn, in the unit a rider expects at that range: metres below a
+     * kilometre and feet below a tenth of a mile, switching to the larger unit above.
+     */
     fun maneuverDistance(metres: Int, units: DistanceUnits, locale: Locale): String {
         val safeMetres = metres.coerceAtLeast(0)
         return if (units == DistanceUnits.Metric) {
@@ -70,8 +89,12 @@ object UnitFormatter {
     private const val FeetPerMetre = 3.280839895
     private const val MinimumDisplayedMiles = 0.1
 
+    /** US and imperial gallons differ by roughly 20%, so the country decides. */
     private fun gallonsPerLitre(locale: Locale): Double =
         if (locale.country.equals("US", ignoreCase = true)) LitresToUsGallons else LitresToImperialGallons
+
+    // Platform date formatting throughout, so dates follow the phone's locale and
+    // 12/24-hour setting rather than a hardcoded pattern.
 
     fun formatDateTime(millis: Long): String =
         DateFormat.getDateTimeInstance().format(Date(millis))

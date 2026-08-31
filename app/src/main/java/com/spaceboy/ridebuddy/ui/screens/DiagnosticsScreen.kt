@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,8 +28,20 @@ import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
+import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ui.labelResource
+import java.util.UUID
 
+private fun UUID.shortNameForUi(): String = toString().takeLast(4)
+
+/**
+ * Live protocol readout: link state, handshake phase, GATT counters, recent frames and
+ * events, and the shareable support report.
+ *
+ * A developer-facing screen reached from settings, and the intended first stop when a
+ * connection misbehaves — [BikeConnectionState.Failed] carries one message, while the
+ * journal here carries the sequence that led to it.
+ */
 @Composable
 fun DiagnosticsScreen(
     live: LiveTelemetryStreams,
@@ -102,7 +115,6 @@ fun DiagnosticsScreen(
                 "Active operation" to (diagnostics.activeGattOperation ?: "—"),
                 "Notifications" to diagnostics.notificationsReceived.toString(),
                 "Descriptor writes" to diagnostics.descriptorWritesCompleted.toString(),
-                "Characteristic reads" to diagnostics.readsCompleted.toString(),
                 "Characteristic writes" to diagnostics.writesCompleted.toString(),
                 "Telemetry rate" to "%.1f Hz".format(diagnostics.telemetryHz),
                 "Last frame" to (diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
@@ -165,9 +177,12 @@ fun DiagnosticsScreen(
     }
 }
 
+/**
+ * Connection state in protocol terms, unlike the rider-facing labels elsewhere. Reconnects
+ * show their attempt number, which is what distinguishes a link retrying from one stuck.
+ */
 private fun BikeConnectionState.diagnosticLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Disconnected"
-    BikeConnectionState.Scanning -> "Scanning"
     is BikeConnectionState.Connecting -> reconnectAttempt?.let { attempt ->
         "Reconnecting ($attempt/${maxAttempts ?: "?"})"
     } ?: "Connecting"

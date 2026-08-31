@@ -2,15 +2,28 @@ package com.spaceboy.ridebuddy.ble
 
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 
-/** Immutable 48-bit Bluetooth address used internally without string round-trips. */
+/**
+ * An immutable 48-bit Bluetooth address, held packed into a `Long`.
+ *
+ * Addresses cross a lot of boundaries here — companion associations, GATT callbacks,
+ * persisted settings, log lines — and the platform hands them over in three different
+ * shapes (text, bytes, and a packed value). Normalising to one packed representation
+ * means comparisons are a single `Long` equality rather than a case-sensitive string
+ * match, and there is one place where a malformed address is rejected.
+ *
+ * Construction is private and every factory returns null on bad input, so an instance is
+ * always a well-formed address.
+ */
 class BluetoothAddress private constructor(private val packed: Long) {
     fun toLong(): Long = packed
 
+    /** Big-endian bytes, the order the platform's connection APIs expect. */
     fun toByteArray(): ByteArray = ByteArray(AddressSizeBytes) { index ->
         val shift = (AddressSizeBytes - index - 1) * Byte.SIZE_BITS
         ((packed ushr shift) and 0xFF).toByte()
     }
 
+    /** Canonical upper-case colon-separated form, e.g. `AA:BB:CC:DD:EE:FF`. */
     override fun toString(): String = buildString(CanonicalAddressLength) {
         toByteArray().forEachIndexed { index, byte ->
             if (index > 0) append(':')
@@ -30,6 +43,7 @@ class BluetoothAddress private constructor(private val packed: Long) {
         private const val HexDigits = "0123456789ABCDEF"
         private const val MaximumPackedAddress = 0xFFFFFFFFFFFFL
 
+        /** Reads back a persisted address, rejecting anything wider than 48 bits. */
         fun fromLong(value: Long): BluetoothAddress? =
             value.takeIf { it in 0..MaximumPackedAddress }?.let(::BluetoothAddress)
 

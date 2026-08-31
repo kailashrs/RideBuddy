@@ -61,6 +61,14 @@ import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.NavigationKeyUiState
 import com.spaceboy.ridebuddy.data.AppSettings
 
+/**
+ * Navigation setup: the rider's own Google Navigation SDK key, and the route preferences
+ * that apply to every route.
+ *
+ * The key is the rider's billable credential, so it is entered here, stored encrypted, and
+ * only ever shown masked afterwards. Replacing an active key needs an app restart — the SDK
+ * accepts one key per process — which the state carries as a flag and this screen surfaces.
+ */
 @Composable
 fun NavigationSettingsScreen(
     modifier: Modifier = Modifier,
@@ -266,6 +274,7 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+/** Local switch row. The whole row is toggleable, so it reads as one control to a screen reader. */
 @Composable
 private fun PreferenceSwitch(
     title: String,

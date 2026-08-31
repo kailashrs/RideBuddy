@@ -2,6 +2,12 @@ package com.spaceboy.ridebuddy
 
 import androidx.lifecycle.SavedStateHandle
 
+// A shared destination arrives in one of two shapes and they are mutually exclusive.
+// "Manual" is put in the field for the rider to review and start; "auto-start" launches
+// navigation without further input, and is only used when the rider has opted into it.
+// Each transition below clears the other's state, so the two can never both be live.
+
+/** Shows a shared destination for review on the Live screen. */
 internal fun MainUiState.withManualSharedDestination(value: String): MainUiState = copy(
     selectedDestination = TopLevelDestination.Live,
     isNavigationSettingsOpen = false,
@@ -13,6 +19,7 @@ internal fun MainUiState.withManualSharedDestination(value: String): MainUiState
     navigationStartAttemptId = null,
 )
 
+/** Queues a shared destination to start navigation on its own. */
 internal fun MainUiState.withAutoStartSharedDestination(
     request: AutoStartSharedDestinationRequest,
 ): MainUiState = copy(
@@ -26,6 +33,10 @@ internal fun MainUiState.withAutoStartSharedDestination(
     navigationStartAttemptId = null,
 )
 
+/**
+ * Clears a completed auto-start. Id-matched, so a late callback for a request the rider has
+ * already replaced cannot clear the newer one.
+ */
 internal fun MainUiState.withCompletedAutoStartSharedDestination(requestId: Long): MainUiState =
     if (autoStartSharedDestination?.requestId == requestId) {
         copy(
@@ -37,6 +48,10 @@ internal fun MainUiState.withCompletedAutoStartSharedDestination(requestId: Long
         this
     }
 
+/**
+ * Falls back from a failed auto-start to the manual field, so the destination is still there
+ * for the rider to retry rather than silently lost.
+ */
 internal fun MainUiState.withRestoredAutoStartSharedDestination(
     requestId: Long,
     errorMessage: String? = null,
@@ -45,6 +60,10 @@ internal fun MainUiState.withRestoredAutoStartSharedDestination(
     return withManualSharedDestination(request.destination).copy(sharedDestinationError = errorMessage)
 }
 
+/**
+ * Marks a navigation start in flight. The attempt id is what lets a slow start that has
+ * since been superseded be ignored when it finally reports back.
+ */
 internal fun MainUiState.withNavigationStartAttempt(attemptId: Long): MainUiState = copy(
     isNavigationStarting = true,
     navigationStartAttemptId = attemptId,
@@ -57,9 +76,18 @@ internal fun MainUiState.withFinishedNavigationStartAttempt(attemptId: Long): Ma
         this
     }
 
+/**
+ * Persists a pending shared destination across process death.
+ *
+ * A destination shared from another app can arrive while this app is not running, and the
+ * system may then kill the process before the rider acts on it. Without this, the share
+ * would simply be lost. Restored values are re-validated rather than trusted — saved state
+ * survives an upgrade, and an over-long or blank value should not come back.
+ */
 internal class SharedDestinationStateStore(
     private val savedStateHandle: SavedStateHandle,
 ) {
+    /** Rebuilds the pending destination. Auto-start wins; the two are mutually exclusive. */
     fun restore(): MainUiState {
         val autoStartRequestId = savedStateHandle.get<Long>(AutoStartRequestIdKey)
             ?.takeIf { it > 0L }
@@ -99,11 +127,14 @@ internal class SharedDestinationStateStore(
     }
 }
 
+/** Far longer than any address or Maps link, short enough to bound what is stored. */
 internal const val MaxDestinationInputLength = 4_096
 
+/** Trims and length-checks destination input; null when there is nothing usable. */
 internal fun String.normalizedDestinationInput(): String? = trim()
     .takeIf { it.isNotEmpty() && it.length <= MaxDestinationInputLength }
 
+/** Everything the main screen renders from, as one immutable value. */
 data class MainUiState(
     val selectedDestination: TopLevelDestination = TopLevelDestination.Live,
     val isNavigationSettingsOpen: Boolean = false,
@@ -119,11 +150,16 @@ data class MainUiState(
     val tftTestConfirmation: String? = null,
 )
 
+/**
+ * A destination to start navigating without asking. The id makes each request distinct, so
+ * the same destination shared twice is two requests and a stale completion is recognisable.
+ */
 data class AutoStartSharedDestinationRequest(
     val requestId: Long,
     val destination: String,
 )
 
+/** The app's top-level navigation destinations, in bar order. */
 enum class TopLevelDestination {
     Live,
     History,

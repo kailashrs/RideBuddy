@@ -36,6 +36,13 @@ import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideWeekSummary
 import com.spaceboy.ridebuddy.data.UnitFormatter
 
+/**
+ * Ride history: a weekly summary, then every recorded ride newest first.
+ *
+ * Rides are recorded automatically, so this is the primary place a rider sees what the app
+ * has captured. Tapping a row opens [com.spaceboy.ridebuddy.RideDetailActivity], which
+ * loads the full sample series that this list deliberately does not.
+ */
 @Composable
 fun HistoryScreen(
     modifier: Modifier = Modifier,
@@ -76,6 +83,7 @@ fun HistoryScreen(
     }
 }
 
+/** One ride: its route sketch, where it went, and the headline figures. */
 @Composable
 private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) -> Unit) {
     val locale = LocalConfiguration.current.locales[0]
@@ -124,6 +132,19 @@ private fun WeeklySummary(week: RideWeekSummary, units: DistanceUnits) {
     }
 }
 
+/**
+ * A route sketch drawn from the stored preview points, with no map involved.
+ *
+ * A map tile per history row would be slow, need a network, and cost quota; the shape of
+ * the ride is all a list row needs. Points are normalised into the card's own bounds — so
+ * every route fills the space regardless of its real extent — and the latitude axis is
+ * flipped, since latitude increases upward while screen coordinates increase downward.
+ *
+ * Normalisation is remembered against the points and the drawing is built in
+ * `drawWithCache`, so scrolling neither recomputes the projection nor rebuilds the path.
+ * The start dot is filled and the end dot hollow, which distinguishes direction without a
+ * legend.
+ */
 @Composable
 private fun RoutePreview(ride: Ride) {
     val points = ride.routePreview
@@ -190,6 +211,7 @@ private fun RideValue(label: String, value: String) {
     }
 }
 
+/** Compact duration: minutes alone under an hour, hours and minutes above it. */
 internal fun formatDuration(millis: Long): String {
     val minutes = millis / 60_000
     return if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"

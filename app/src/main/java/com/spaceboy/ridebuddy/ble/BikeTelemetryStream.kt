@@ -8,6 +8,13 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Outcome of one telemetry notification.
+ *
+ * [valid] is false when the payload did not parse as a telemetry frame. The two counters
+ * are diagnostics: [telemetryHz] is the rate measured over a rolling window, and
+ * [droppedRawTelemetryFrames] is cumulative for the session.
+ */
 internal data class TelemetryAcceptance(
     val valid: Boolean,
     val telemetryHz: Double,
@@ -42,11 +49,20 @@ internal class BikeTelemetryStream(
     val telemetry: StateFlow<TelemetryFrame?> = mutableTelemetry.asStateFlow()
     val latestReading: StateFlow<TelemetryReading?> = mutableLatestReading.asStateFlow()
 
+    /**
+     * Parses one telemetry payload and publishes it to both streams.
+     *
+     * [elapsedRealtime] is passed as a lambda rather than a value so it is only sampled
+     * on the success path, and so tests can drive the monotonic clock.
+     */
     fun accept(
         payload: ByteArray,
         receivedAtMillis: Long,
         elapsedRealtime: () -> Long,
     ): TelemetryAcceptance {
+        // Rolling window of arrival times, trimmed to the last few seconds; its size is
+        // the measured rate. Recorded before parsing so malformed frames still count as
+        // link activity — the rate answers "is the bike talking", not "is it talking sense".
         timestamps.addLast(receivedAtMillis)
         while (timestamps.firstOrNull()?.let { receivedAtMillis - it > TelemetryWindowMillis } == true) {
             timestamps.removeFirst()
@@ -75,6 +91,7 @@ internal class BikeTelemetryStream(
         )
     }
 
+    /** Full teardown between sessions: rate window, filter state, counters and both streams. */
     fun reset() {
         timestamps.clear()
         mileageSmoother.reset()
@@ -83,12 +100,20 @@ internal class BikeTelemetryStream(
         mutableLatestReading.value = null
     }
 
+    /**
+     * Blanks the displayed values while leaving the session's counters and filter state
+     * intact — used when the link is momentarily quiet, so the UI stops showing a stale
+     * speed without the rate history being thrown away.
+     */
     fun clearUiTelemetry() {
         mutableTelemetry.value = null
     }
 
     private companion object {
+        /** Averaging window for the reported rate. */
         const val TelemetryWindowMillis = 5_000L
+
+        /** About four seconds of slack at the cluster's ~4 Hz notification rate. */
         const val RawTelemetryBufferCapacity = 16
     }
 }

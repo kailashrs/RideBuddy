@@ -27,6 +27,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * The paired motorcycle. [associationId] is the system's handle for the association and is
+ * what presence observation and removal are keyed on; it is nullable only for entries
+ * restored from storage before the id could be read back.
+ */
 data class AssociatedBike(
     val bluetoothAddress: BluetoothAddress,
     val name: String,
@@ -36,6 +41,10 @@ data class AssociatedBike(
         get() = bluetoothAddress.toString()
 }
 
+/**
+ * Pairing state for the UI. [supported] is false on devices without companion-device
+ * setup, where none of this is available at all.
+ */
 data class BikeAssociationState(
     val supported: Boolean,
     val bike: AssociatedBike? = null,
@@ -44,7 +53,17 @@ data class BikeAssociationState(
     val errorMessage: String? = null,
 )
 
-/** Owns the system association only. BLE GATT remains the responsibility of BikeConnectionService. */
+/**
+ * Owns the system companion-device association: pairing, presence observation, and removal.
+ *
+ * Deliberately not a connection manager. Associating tells Android to watch for the
+ * motorcycle and wake the app when it appears; the GATT link itself belongs to
+ * [com.spaceboy.ridebuddy.ble.AndroidBikeConnection], driven through the connection service.
+ *
+ * Association also anchors per-bike state. Storing a different motorcycle clears the
+ * previous one's protection acceptance and identity, so nothing recorded against one bike
+ * can be read as belonging to another.
+ */
 class BikeCompanionManager internal constructor(
     context: Context,
     private val protectionAcceptanceStore: ProtectionAcceptanceStore,
@@ -76,6 +95,14 @@ class BikeCompanionManager internal constructor(
         }
     }
 
+    /**
+     * Starts the system pairing picker.
+     *
+     * The picker is a system UI the rider chooses from; [launchApproval] hands its intent
+     * back to an Activity to show. Success arrives either through [onAssociated] or, on
+     * some platform versions, through [acceptActivityResult] — both paths converge on
+     * [accept].
+     */
     fun associate(
         launchApproval: (IntentSender) -> Unit,
         onAssociated: (AssociatedBike) -> Unit,
@@ -130,6 +157,7 @@ class BikeCompanionManager internal constructor(
         }.onFailure { fail(it.message ?: "Could not start bike association", onFailure) }
     }
 
+    /** The Activity-result path out of the picker, for platforms that answer that way. */
     fun acceptActivityResult(resultCode: Int, data: Intent?): AssociatedBike? {
         if (resultCode != Activity.RESULT_OK || data == null) {
             mutableState.update { it.copy(associationInProgress = false) }
@@ -147,6 +175,16 @@ class BikeCompanionManager internal constructor(
             }
     }
 
+    /**
+     * Reconciles the local record with the system's associations.
+     *
+     * The rider can remove an association from system settings without the app being told,
+     * so the system is authoritative: an association that has gone away clears the local
+     * record along with that bike's protection acceptance and identity.
+     *
+     * A refresh that could not reach the service is a different matter — it says nothing
+     * about the pairing, so the existing record is kept and only an error is surfaced.
+     */
     fun refresh() {
         val companionManager = manager ?: return
         val stored = deviceStore.read()
@@ -204,6 +242,10 @@ class BikeCompanionManager internal constructor(
         }
     }
 
+    /**
+     * Asks the system to watch for the motorcycle and wake the app when it appears. This is
+     * what makes reconnection work without the app running. Idempotent.
+     */
     fun ensurePresenceObservation() {
         val companionManager = manager ?: return
         val bike = state.value.bike ?: return
@@ -223,6 +265,14 @@ class BikeCompanionManager internal constructor(
         }
     }
 
+    /**
+     * Removes the association, returning whether it was actually removed.
+     *
+     * The local record is only cleared once the system has confirmed the removal — see
+     * [canClearLocalAssociation]. Clearing it optimistically would strand a live system
+     * association the app no longer knows about, which the rider could then only remove
+     * from system settings.
+     */
     fun forget(): Boolean {
         val companionManager = manager
         val bike = state.value.bike ?: deviceStore.read()
@@ -291,6 +341,14 @@ class BikeCompanionManager internal constructor(
         // blocking on a CDM Binder IPC.
         state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
 
+    /**
+     * Validates and records a device returned by the picker.
+     *
+     * The name is re-checked here even though the picker filtered on it, because this is
+     * the last point before the address is trusted for connections: a peripheral that is
+     * not this motorcycle family would fail authentication or, worse, be decoded with the
+     * wrong telemetry layout.
+     */
     private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
         val scanResult = associationInfo.associatedDevice?.bleDevice
         val address = associationInfo.bluetoothAddress() ?: return null
@@ -322,6 +380,10 @@ class BikeCompanionManager internal constructor(
         return bike
     }
 
+    /**
+     * The address, from whichever field carries it. The MAC bytes are preferred; the scan
+     * result's text address is a fallback for platform versions that leave the bytes unset.
+     */
     private fun AssociationInfo.bluetoothAddress(): BluetoothAddress? {
         BluetoothAddress.fromBytes(deviceMacAddress?.toByteArray())?.let { return it }
         return associatedDevice?.bleDevice?.device?.address?.let(BluetoothAddress::parse)
@@ -339,6 +401,10 @@ class BikeCompanionManager internal constructor(
         }
     }
 
+    /**
+     * Persists the association, clearing the previous bike's per-bike state first when the
+     * address has changed.
+     */
     private fun storeAssociation(bike: AssociatedBike) {
         protectionAcceptanceToClear(deviceStore.read(), bike)
             ?.let { previousAddress ->
@@ -350,11 +416,22 @@ class BikeCompanionManager internal constructor(
     }
 }
 
+/**
+ * The address whose per-bike state must be discarded, or null when nothing changed.
+ * Re-storing the same motorcycle must not clear its acceptance and force a fresh handshake.
+ */
 internal fun protectionAcceptanceToClear(
     previous: AssociatedBike?,
     replacement: AssociatedBike?,
 ): BluetoothAddress? = previous?.bluetoothAddress?.takeIf { it != replacement?.bluetoothAddress }
 
+/**
+ * Whether the local record may be dropped.
+ *
+ * True when there is nothing stored, when the platform has no companion support at all so
+ * no system association can exist, or when the system confirmed the removal. Anything else
+ * would leave a system association the app has forgotten about.
+ */
 internal fun canClearLocalAssociation(
     hasStoredAssociation: Boolean,
     companionSupported: Boolean,
@@ -364,6 +441,10 @@ internal fun canClearLocalAssociation(
         (!companionSupported && !managerAvailable) ||
         (managerAvailable && disassociationSucceeded)
 
+/**
+ * Local cache of the association, so the app knows which motorcycle it is paired with
+ * without a system call on every launch. The system remains authoritative; see [refresh].
+ */
 class AssociatedBikeStore(context: Context, preferencesName: String = Name) {
     private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 

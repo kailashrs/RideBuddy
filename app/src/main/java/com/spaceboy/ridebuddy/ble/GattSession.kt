@@ -26,6 +26,19 @@ internal class GattSession<T : Any>(
     var connectedAtElapsedRealtime: Long? = null
         private set
 
+    /**
+     * Whether any ATT operation completed on this transport.
+     *
+     * A connected link that never transacts is the signature of an encryption stall: the peer
+     * accepts the connection and answers every link-layer procedure, then does not complete the
+     * security procedure, so no ATT PDU is ever transmitted and the link dies on the supervision
+     * timeout. Nothing else about the connection distinguishes that from an ordinary dropout.
+     */
+    var completedAnyOperation = false
+        private set
+
+    fun markOperationCompleted() { completedAnyOperation = true }
+
     fun owns(candidate: T?): Boolean = candidate === transport
 
     /**

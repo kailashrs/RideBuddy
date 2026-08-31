@@ -39,6 +39,14 @@ data class LiveTelemetryStreams(
     val rideMetrics: StateFlow<LiveRideMetrics>,
 )
 
+/**
+ * Everything the main screen draws, as one immutable value.
+ *
+ * Bundled rather than passed as loose parameters so the screen has a single, stable
+ * signature, and `@Immutable` so Compose can skip recomposition when it has not changed.
+ * Note that the frame-rate streams are deliberately *not* flattened into it — see
+ * [LiveTelemetryStreams].
+ */
 @Immutable
 data class MainScreenState(
     val uiState: MainUiState,
@@ -58,6 +66,12 @@ data class MainScreenState(
     val backgroundLocationGranted: Boolean,
 )
 
+/**
+ * Every callback the main screen can raise.
+ *
+ * Grouping them keeps the screen decoupled from the Activity that implements them, which is
+ * what lets the whole tree be previewed and tested without one.
+ */
 @Immutable
 data class MainScreenActions(
     val onDestinationSelected: (TopLevelDestination) -> Unit,
@@ -68,7 +82,6 @@ data class MainScreenActions(
     val onSaveNavigationApiKey: (String) -> Unit,
     val onRemoveNavigationApiKey: () -> Unit,
     val onTestNavigationApiKey: () -> Unit,
-    val onReconnect: () -> Unit,
     val onDisconnectBike: () -> Unit,
     val onStartNavigation: (String) -> Unit,
     val onOpenActiveNavigation: () -> Unit,

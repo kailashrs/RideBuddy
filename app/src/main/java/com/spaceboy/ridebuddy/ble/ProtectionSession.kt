@@ -17,12 +17,23 @@ internal enum class ProtectionFailurePolicy {
     Reconnect,
 }
 
+/**
+ * The single side effect a protocol event calls for. Returning one of these instead of
+ * performing it is what keeps [ProtectionSession] free of Android and exhaustively testable.
+ */
 internal sealed interface ProtectionAction {
+    /** Nothing to do — typically a duplicate or already-overtaken callback. */
     data object None : ProtectionAction
+
     data object SubscribeChallenge : ProtectionAction
     data class WriteResponse(val value: ByteArray) : ProtectionAction
+
+    /** Authentication is done; enable the session's normal subscription set. */
     data object BeginPostAuthentication : ProtectionAction
+
+    /** The subscription set is live and proven; the session may be presented as connected. */
     data class CompleteAuthentication(val evidence: String) : ProtectionAction
+
     data class Fail(
         val message: String,
         val policy: ProtectionFailurePolicy = ProtectionFailurePolicy.Stop,
@@ -30,16 +41,26 @@ internal sealed interface ProtectionAction {
 }
 
 /**
- * Pure state machine for the cluster's protection handshake. Android GATT operations remain owned
- * by [AndroidBikeConnection]; this class accepts protocol events and returns the next serialized
- * side effect. Stale duplicate callbacks are ignored, while events that would create an impossible
- * state fail explicitly.
+ * Pure state machine for the cluster's protection handshake.
  *
- * A challenge arriving after verification has begun is treated as a reason to restart the link,
- * not as a state to resume from. Nothing observed on hardware or in the OEM app shows the cluster
- * issuing a second challenge, and it cannot happen at all on the stored-acceptance path, which
- * never subscribes to `8610`. Restarting costs one reconnect and preserves stored acceptance, so
- * the speculative resume machinery that used to sit here was not worth its own state.
+ * There are two ways through it. A first connection subscribes to the challenge
+ * characteristic, waits for the cluster to issue a challenge, and writes back the matching
+ * response. A later connection to a bike that has already accepted one skips straight to
+ * verification, because the cluster will not issue a second challenge and waiting for one
+ * would stall.
+ *
+ * Either path ends the same way: the normal subscription set is enabled, and the session is
+ * only presented as authenticated once that set is proven live.
+ *
+ * The class accepts protocol events and returns the next side effect; the GATT operations
+ * themselves stay with [AndroidBikeConnection]. Stale duplicate callbacks are ignored,
+ * while events that would create an impossible state fail explicitly.
+ *
+ * A challenge arriving after verification has begun is treated as a reason to restart the
+ * link rather than a state to resume from. It has not been observed on hardware, and it
+ * cannot happen at all on the stored-acceptance path, which never subscribes to the
+ * challenge characteristic. Restarting costs one reconnect and preserves stored
+ * acceptance, so speculative resume machinery would not earn its own state.
  */
 internal class ProtectionSession(
     private val previouslyAccepted: Boolean,
@@ -48,9 +69,17 @@ internal class ProtectionSession(
         data object Idle : State
         data object SubscribingChallenge : State
         data object AwaitingChallenge : State
+
+        /**
+         * One or more challenges answered and awaiting their write callbacks. A list
+         * rather than a single value because the cluster has been seen to repeat a
+         * challenge before the first response lands, and each repeat is answered in turn.
+         */
         data class Responding(val pendingChallenges: List<ByteArray>) : State
 
+        /** Response accepted (or skipped); waiting for the subscription set to prove itself. */
         data class Verifying(val path: ProtectionPath) : State
+
         data class Ready(val path: ProtectionPath) : State
     }
 
@@ -75,6 +104,7 @@ internal class ProtectionSession(
             else -> null
         }
 
+    /** Starts the handshake on whichever path [previouslyAccepted] selects. Idempotent. */
     fun begin(): ProtectionAction = when (state) {
         State.Idle -> if (previouslyAccepted) {
             state = State.Verifying(ProtectionPath.StoredAcceptance)
@@ -96,6 +126,11 @@ internal class ProtectionSession(
         return ProtectionAction.None
     }
 
+    /**
+     * Handles a challenge indication. An exact repeat of one already being answered is
+     * dropped, since answering the same challenge twice would leave a spurious pending
+     * write; a *different* challenge arriving mid-flight is answered in turn.
+     */
     fun onChallenge(value: ByteArray): ProtectionAction {
         val response = ProtectionHandshake.responseFor(value)
             ?: return unsupportedChallengeFailure()
@@ -141,6 +176,11 @@ internal class ProtectionSession(
         return ProtectionAction.BeginPostAuthentication
     }
 
+    /**
+     * Proof that the subscription set is genuinely live — a notification the cluster only
+     * sends over an established session. This, not the CCCD writes completing, is what
+     * promotes the session to ready.
+     */
     fun onPostAuthenticationEvidence(evidence: String): ProtectionAction = when (val current = state) {
         is State.Verifying -> {
             state = State.Ready(current.path)
@@ -150,6 +190,7 @@ internal class ProtectionSession(
         else -> ProtectionAction.None
     }
 
+    /** A required characteristic could not be subscribed: deterministic, so do not retry. */
     fun onRequiredProfileFailure(message: String): ProtectionAction = ProtectionAction.Fail(
         message,
         ProtectionFailurePolicy.Stop,

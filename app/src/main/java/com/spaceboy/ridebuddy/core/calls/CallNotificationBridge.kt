@@ -30,6 +30,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
+/**
+ * What the UI shows about call integration.
+ *
+ * [actionsAvailable] is false when the dialler in use publishes no usable answer or
+ * decline control, which is worth surfacing: the handlebar buttons will do nothing, and
+ * that looks like a bug rather than a limitation of the phone app.
+ */
 data class CallIntegrationState(
     val active: Boolean = false,
     val actionsAvailable: Boolean = false,
@@ -37,19 +44,29 @@ data class CallIntegrationState(
     val providerPackage: String? = null,
 )
 
+/**
+ * Either opt-in feature needs the call state on the cluster: showing the caller needs it
+ * to draw the screen, and handlebar controls need it because the cluster only acts on a
+ * button press while it believes a call is up.
+ */
 internal fun shouldPublishCallState(callerDisplay: Boolean, tftCallControls: Boolean): Boolean =
     callerDisplay || tftCallControls
 
+/**
+ * True when both features have just been turned off while a call is on the display. It has
+ * to be explicitly ended, or the cluster keeps showing it indefinitely.
+ */
 internal fun shouldClearPublishedCall(
     published: Boolean,
     callerDisplay: Boolean,
     tftCallControls: Boolean,
 ): Boolean = published && !shouldPublishCallState(callerDisplay, tftCallControls)
 
+/** The deprecated Telecom path is opt-in *and* permission-gated; neither alone is enough. */
 internal fun canUseLegacyCallFallback(enabled: Boolean, permissionGranted: Boolean): Boolean =
     enabled && permissionGranted
 
-/** What the cluster is told on `8730`. Mirrors the OEM's answered/direction encoding. */
+/** The three call states the cluster can be told about. */
 internal enum class TftCallState { Ringing, Answered, Outgoing }
 
 /**
@@ -78,6 +95,21 @@ internal fun Notification.isRideBuddyCallNotification(): Boolean =
             extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
             extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
 
+/**
+ * Bridges phone calls to the cluster: shows who is calling, and acts on the handlebar
+ * answer and decline buttons.
+ *
+ * Calls are observed through notifications rather than through Telecom, because reading
+ * call state directly would make this app the default dialler. The consequence is that
+ * every fact about a call has to be recovered from a notification: the caller's name and
+ * number from its extras, and the answer/decline actions from its `CallStyle` intents,
+ * falling back to matching action labels for diallers that publish none.
+ *
+ * Outbound writes are gated twice over. Both features are opt-in, and separately, nothing
+ * is written until the cluster has shown its side is up — see [armCallWrites]. Writes go
+ * through a conflated channel with a generation counter, so a call that changes state
+ * faster than the link can carry it sends only the newest state, never a stale one.
+ */
 class CallNotificationBridge(
     context: Context,
     private val bikeConnection: BikeConnection,
@@ -127,10 +159,10 @@ class CallNotificationBridge(
                 if (event is BikeControlEvent.CallAction) {
                     if (!appSettings.settings.value.tftCallControls) return@collect
                     val call = synchronized(callLock) { activeCall.value }
-                    // The OEM acts on a handlebar press only while it believes a call is up. A
-                    // press that arrives without one is stale — the call ended just as the rider
-                    // reached for the bar — and reaching for TelecomManager anyway would hang up
-                    // whatever came next.
+                    // Act on a handlebar press only while a call is actually tracked here. A
+                    // press without one is stale — the call ended just as the rider reached
+                    // for the bar — and falling through to Telecom anyway would hang up
+                    // whatever call came next.
                     if (call.notificationKey == null) return@collect
                     when (event.code) {
                         1 -> if (!send(call.answerIntent)) useLegacyTelecom(answer = true)
@@ -151,8 +183,8 @@ class CallNotificationBridge(
             }
         }
         scope.launch {
-            // The other half of the OEM's readiness flag: whichever lands first, the cluster
-            // announcing itself on 8740 or the first telemetry frame, arms the call writes.
+            // The second of the two readiness signals: whichever lands first, the cluster
+            // announcing itself or the first telemetry frame, arms the call writes.
             bikeConnection.telemetry.collect { frame ->
                 if (frame != null) armCallWrites(republish = false)
             }
@@ -163,6 +195,9 @@ class CallNotificationBridge(
                 .distinctUntilChanged()
                 .collect { settings -> synchronized(callLock) { applyFeatureSettingsLocked(settings) } }
         }
+        // Drains call writes one request at a time. The generation is rechecked between
+        // writes so a superseded request stops partway rather than finishing and leaving
+        // the cluster on a state the phone has already moved past.
         scope.launch {
             for (request in pendingCallWrites) {
                 for (write in request.writes) {
@@ -219,6 +254,10 @@ class CallNotificationBridge(
         return true
     }
 
+    /**
+     * Handles a notification going away. Returns true when it was a call notification, so
+     * the caller does not also treat it as an ordinary app alert being dismissed.
+     */
     fun onNotificationRemoved(sbn: StatusBarNotification): Boolean {
         synchronized(callLock) {
             val call = activeCall.value
@@ -246,10 +285,15 @@ class CallNotificationBridge(
     }
 
     /**
-     * The OEM writes nothing about a call until the cluster has shown its own side is up — either
-     * by announcing itself on `8740` or by sending telemetry, which set the same flag — and that
-     * flag gates every call write it makes. Writing earlier reaches a cluster that is not yet
-     * drawing the call screen, so the call is simply missed rather than deferred.
+     * Marks the cluster as ready to receive call writes.
+     *
+     * Nothing about a call is written until the cluster has shown its own side is up, by
+     * either announcing itself or sending telemetry. A write that arrives earlier reaches a
+     * cluster that is not yet drawing the call screen, and it is dropped outright rather
+     * than deferred — so the rider simply never sees that call.
+     *
+     * [republish] forces a redraw even when already armed, for the case where the cluster
+     * has restarted and forgotten what it was showing.
      */
     private fun armCallWrites(republish: Boolean) {
         val publish = synchronized(callLock) {
@@ -276,6 +320,13 @@ class CallNotificationBridge(
         mutableState.value = call.integrationState()
     }
 
+    /**
+     * Builds the full write sequence for a call's current state.
+     *
+     * Caller name and number are only written when the display feature is on; the state
+     * itself is written whenever either feature is, because handlebar controls depend on
+     * the cluster believing a call is up.
+     */
     private fun activeCallWrites(call: ActiveCallState, settings: CallFeatureSettings): List<BikeWrite> {
         val name = call.callerName ?: return emptyList()
         return buildList {
@@ -301,6 +352,10 @@ class CallNotificationBridge(
         }
     }
 
+    /**
+     * Reacts to the opt-in settings changing mid-call: republishes under the new settings,
+     * or explicitly ends the displayed call when both features have been turned off.
+     */
     private fun applyFeatureSettingsLocked(settings: CallFeatureSettings) {
         if (settings == featureSettings) return
         featureSettings = settings
@@ -350,6 +405,13 @@ class CallNotificationBridge(
         providerPackage = providerPackage,
     )
 
+    /**
+     * Opt-in fallback for diallers that publish no usable notification actions.
+     *
+     * Uses deprecated Telecom controls and needs a runtime permission, which is why it is
+     * off by default and tried only after the notification intents have failed. It does not
+     * make this app the default dialler.
+     */
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
     private fun useLegacyTelecom(answer: Boolean): Boolean {
@@ -373,6 +435,14 @@ class CallNotificationBridge(
     private fun AppSettings.callFeatureSettings(): CallFeatureSettings =
         CallFeatureSettings(callerDisplay, tftCallControls)
 
+    /**
+     * Recovers answer, decline and hang-up actions from a call notification.
+     *
+     * `CallStyle` publishes them as named extras, which is exact and is tried first. A
+     * dialler that does not use `CallStyle` leaves only its action buttons, which have to
+     * be matched by label — inexact, English-only, and logged when it finds nothing so the
+     * gap is visible rather than silent.
+     */
     private fun Notification.extractCallIntents(packageName: String): CallIntents {
         val extrasIntents = CallIntents(
             answer = extras.pendingIntent(Notification.EXTRA_ANSWER_INTENT),
@@ -414,6 +484,10 @@ class CallNotificationBridge(
         val hangUp: PendingIntent? = null,
     )
 
+    /**
+     * One conflated unit of outbound call writes. The generation is what lets the drain
+     * loop recognise that a newer request has replaced this one mid-sequence.
+     */
     private data class CallWriteRequest(val generation: Long, val writes: List<BikeWrite>)
 
     private companion object {

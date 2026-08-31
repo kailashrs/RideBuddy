@@ -17,15 +17,17 @@ class BleCharacteristicsTest {
         )
     }
 
+    /**
+     * Indications are the only way the identity values ever arrive. A capture shows both
+     * characteristics answering a read promptly with a zero-filled buffer and delivering the real
+     * value later as an indication, so dropping either subscription would mean the cluster
+     * software version and VIN are never learned at all.
+     */
     @Test
-    fun `identity snapshots preserve the OEM subscription profile`() {
-        assertEquals(
-            listOf("8810", "8910"),
-            BleCharacteristics.PostAuthenticationIdentityReads.map { it.toString().takeLast(4) },
-        )
+    fun `both identity values stay subscribed, since nothing else delivers them`() {
         assertTrue(
             BleCharacteristics.PostAuthenticationSubscriptions.containsAll(
-                BleCharacteristics.PostAuthenticationIdentityReads,
+                listOf(BleCharacteristics.ClusterSoftwareVersion, BleCharacteristics.Vin),
             ),
         )
     }

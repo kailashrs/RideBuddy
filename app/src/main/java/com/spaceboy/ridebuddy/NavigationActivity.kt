@@ -54,6 +54,21 @@ import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.launch
 
+/**
+ * The turn-by-turn map screen.
+ *
+ * Its unusual property is that closing it does not stop navigation. Guidance keeps running
+ * — the SDK holds its own foreground service, and the cluster keeps drawing turns — so
+ * leaving this Activity detaches the UI rather than tearing the route down. That is the
+ * normal riding case, with the phone stowed. See [shouldKeepGuidanceInBackground], and
+ * [NavigationStopController] for the path that actually stops guidance.
+ *
+ * Every instance takes a session id and everything it does is guarded by
+ * [NavigationSessionOwnership]. The navigator arrives asynchronously and there is exactly
+ * one per process, so a recreated Activity can easily be handed a navigator that a newer
+ * instance already owns; without the ownership check, its cleanup would tear down the live
+ * route.
+ */
 class NavigationActivity : ComponentActivity() {
     private lateinit var navigationView: NavigationView
     private var statusTextState = mutableStateOf("")
@@ -61,17 +76,18 @@ class NavigationActivity : ComponentActivity() {
     private var navigator: Navigator? = null
     private var guidanceStarted = false
     private var navigationEndedByUser = false
+    private var tftRouteRequestNeedsRestart = false
+    private var tftUpdatesRegistered = false
     private val navigationSessionId = NextNavigationSessionId.incrementAndGet()
 
+    /**
+     * Updates this screen only. The cluster output and the hazard alert are driven from the
+     * process-scoped guidance handler in [com.spaceboy.ridebuddy.AppContainer], so they keep
+     * working while the map is closed — and so the alert is raised before the reroute frames are
+     * queued, which a second caller here could not guarantee.
+     */
     private val reroutingListener = Navigator.ReroutingListener {
         if (!NavigationSessionOwners.isOwner(navigationSessionId)) return@ReroutingListener
-        appContainer.apply {
-            tftNavigationBridge.rerouting()
-            val message = "The route is being recalculated; check for changed road conditions"
-            if (ridingAlertMonitor.navigationHazard(message)) {
-                tftPriorityCoordinator.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")
-            }
-        }
         runOnUiThread { statusTextState.value = getString(R.string.navigation_rerouting) }
     }
 
@@ -140,7 +156,17 @@ class NavigationActivity : ComponentActivity() {
                                                     navigator = null
                                                     initializeNavigation()
                                                 } else {
-                                                    navigator?.let(::calculateRoute) ?: initializeNavigation()
+                                                    navigator?.let { currentNavigator ->
+                                                        if (tftRouteRequestNeedsRestart) {
+                                                            if (tftUpdatesRegistered) {
+                                                                appContainer.tftNavigationBridge.start(
+                                                                    intent.getStringExtra(ExtraTitle).orEmpty(),
+                                                                )
+                                                            }
+                                                            tftRouteRequestNeedsRestart = false
+                                                        }
+                                                        calculateRoute(currentNavigator)
+                                                    } ?: initializeNavigation()
                                                 }
                                             } else {
                                                 requestLocationOrInitialize()
@@ -186,7 +212,17 @@ class NavigationActivity : ComponentActivity() {
             appContainer.bikeConnection.controls.collect { event ->
                 if (!NavigationSessionOwners.isOwner(navigationSessionId)) return@collect
                 when (event) {
-                    BikeControlEvent.ExitNavigation -> endNavigationAndFinish()
+                    // Closes this screen and nothing else. Stopping guidance belongs to the
+                    // process-scoped handler in AppContainer, which owns the single stop path
+                    // through NavigationStopController. Ending it here as well ran stopGuidance,
+                    // cleanup and the display clear twice over the same navigator, from two
+                    // threads, with only one of them behind the stop guard.
+                    //
+                    // finish() deliberately does not set navigationEndedByUser: that flag is what
+                    // makes onDestroy tear the session down, and the whole point here is that it
+                    // must not. onDestroy takes the detach-and-leave-running branch instead, and
+                    // the stop controller retires the session a moment later.
+                    BikeControlEvent.ExitNavigation -> finish()
                     BikeControlEvent.SkipManeuver -> {
                         val currentNavigator = navigator
                         if ((currentNavigator?.timeAndDistanceList?.size ?: 0) > 1) {
@@ -207,6 +243,10 @@ class NavigationActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Waits for the process-wide key load before touching the SDK. Reports whichever error
+     * explains the failure — the load's exception, its recorded message, or a fallback.
+     */
     private fun awaitNavigationKeyAndInitialize() {
         lifecycleScope.launch {
             val result = appContainer.navigationKeyBootstrap.await()
@@ -234,6 +274,13 @@ class NavigationActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     }
 
+    /**
+     * Fetches the navigator and starts or attaches to a route.
+     *
+     * The callback can arrive after this Activity is gone. When it does, the navigator is
+     * cleaned up rather than leaked — but only if no newer instance has claimed it, and only
+     * when guidance is not running or the rider explicitly ended it.
+     */
     private fun initializeNavigation() {
         runCatching {
             NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
@@ -317,11 +364,12 @@ class NavigationActivity : ComponentActivity() {
                 readyNavigator.removeReroutingListener(reroutingListener)
                 runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
             },
-            // The OEM reads the posted limit straight off each route step and writes it whenever
-            // it changes. The Navigation SDK exposes no equivalent, only how far over the limit
-            // the rider is, so this back-calculates an estimate and can only do so while they are
-            // actually speeding. Rounded to 5 because that is the granularity the estimate can
-            // honestly support.
+            // The cluster wants a posted speed limit, but the Navigation SDK never exposes
+            // one — only how far over it the rider currently is. The limit is therefore
+            // back-calculated from current speed and that percentage, which means it can
+            // only be produced while the rider is actually speeding. Rounded to 5 km/h,
+            // which is as much precision as an estimate of this kind honestly supports.
+            // The field is zeroed on teardown so a stale limit does not persist.
             onSpeeding = speeding@{ percentageAboveLimit ->
                 val speed = container.bikeConnection.telemetry.value
                     ?.speedKilometresPerHour ?: return@speeding
@@ -339,23 +387,25 @@ class NavigationActivity : ComponentActivity() {
 
     private fun prepareNewRoute(readyNavigator: Navigator) {
         val container = appContainer
+        tftRouteRequestNeedsRestart = false
         if (readyNavigator.isGuidanceRunning) {
             runCatching(readyNavigator::stopGuidance)
             runCatching(readyNavigator::unregisterServiceForNavUpdates)
+            tftUpdatesRegistered = false
             guidanceStarted = false
             container.navigationFeed.clear()
             container.tftNavigationBridge.stop()
         }
         val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
         container.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
-        val navUpdatesRegistered = runCatching {
+        tftUpdatesRegistered = runCatching {
             readyNavigator.registerServiceForNavUpdates(
                 packageName,
                 NavInfoReceivingService::class.java.name,
                 options,
             )
         }.getOrDefault(false)
-        if (!navUpdatesRegistered) {
+        if (!tftUpdatesRegistered) {
             container.tftNavigationBridge.stop()
             Toast.makeText(this, R.string.navigation_tft_updates_unavailable, Toast.LENGTH_LONG).show()
         }
@@ -385,6 +435,7 @@ class NavigationActivity : ComponentActivity() {
                     !NavigationSessionOwners.isOwner(navigationSessionId) || this.navigator !== navigator
                 ) return@runOnUiThread
                 if (status == Navigator.RouteStatus.OK) {
+                    tftRouteRequestNeedsRestart = false
                     retryVisibleState.value = false
                     statusTextState.value = intent.getStringExtra(ExtraTitle) ?: "Navigation active"
                     val startResult = runCatching(navigator::startGuidance)
@@ -395,10 +446,18 @@ class NavigationActivity : ComponentActivity() {
                     } else {
                         guidanceStarted = false
                         runCatching(navigator::unregisterServiceForNavUpdates)
+                        tftUpdatesRegistered = false
                         clearNavigationOutput()
                         showError(getString(R.string.navigation_start_failed_unknown))
                     }
-                } else showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
+                } else {
+                    // Session 80/status 132 may already be visible even though no NavInfo has
+                    // arrived. Clear that pending route now; Retry explicitly starts a fresh TFT
+                    // request while retaining the Navigation SDK's update registration.
+                    clearNavigationOutput()
+                    tftRouteRequestNeedsRestart = tftUpdatesRegistered
+                    showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
+                }
             }
         }
     }
@@ -408,11 +467,10 @@ class NavigationActivity : ComponentActivity() {
         retryVisibleState.value = true
     }
 
-    private fun endNavigationAndFinish() {
-        navigationEndedByUser = true
-        finish()
-    }
-
+    /**
+     * The rider ended navigation from the UI. The flag is what distinguishes this from the
+     * Activity merely being backgrounded, which leaves guidance running.
+     */
     override fun onStart() {
         super.onStart()
         navigationView.onStart()
@@ -444,6 +502,13 @@ class NavigationActivity : ComponentActivity() {
         navigationView.onConfigurationChanged(newConfig)
     }
 
+    /**
+     * Decides between tearing the route down and leaving it running in the background.
+     *
+     * Backgrounding detaches the UI and releases ownership so a future instance can claim
+     * the navigator; only an explicit end, or a session that never got started, tears it
+     * down.
+     */
     override fun onDestroy() {
         val currentNavigator = navigator
         currentNavigator?.removeReroutingListener(reroutingListener)
@@ -470,6 +535,10 @@ class NavigationActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * Tears down this session's navigator, but only if this instance still owns it —
+     * otherwise a newer instance has taken over and cleaning up would kill its live route.
+     */
     private fun releaseNavigationSession(target: Navigator, stopGuidance: Boolean) {
         if (!NavigationSessionOwners.release(navigationSessionId)) {
             if (navigator === target) navigator = null
@@ -480,6 +549,7 @@ class NavigationActivity : ComponentActivity() {
             .release(navigationSessionId, target)
         if (stopGuidance) runCatching(target::stopGuidance)
         runCatching(target::unregisterServiceForNavUpdates)
+        tftUpdatesRegistered = false
         runCatching(target::cleanup)
         if (navigator === target) navigator = null
         guidanceStarted = false
@@ -523,12 +593,24 @@ class NavigationActivity : ComponentActivity() {
     }
 }
 
+/** What a launch of this Activity should do about guidance. */
 internal enum class NavigationLaunchPolicy {
+    /** Guidance is already running; show it rather than restarting it. */
     AttachExisting,
+
     PrepareNewRoute,
+
+    /** Asked to attach, but nothing is running — the route ended while the app was away. */
     NoActiveRoute,
 }
 
+/**
+ * Chooses the launch behaviour.
+ *
+ * `guidanceWasStarted` comes from saved state and covers a recreated Activity whose route
+ * is still running; `attachRequested` covers the rider reopening the map deliberately.
+ * Either one attaches, but only when guidance is genuinely still running.
+ */
 internal fun navigationLaunchPolicy(
     attachRequested: Boolean,
     guidanceWasStarted: Boolean,
@@ -539,16 +621,30 @@ internal fun navigationLaunchPolicy(
     else -> NavigationLaunchPolicy.PrepareNewRoute
 }
 
+/**
+ * Whether guidance should survive this Activity being destroyed. Yes unless the rider ended
+ * it — a rotation, a back press, or the app being backgrounded all keep the route.
+ */
 internal fun shouldKeepGuidanceInBackground(
     navigationEndedByUser: Boolean,
     guidanceStarted: Boolean,
     guidanceIsRunning: Boolean,
 ): Boolean = !navigationEndedByUser && (guidanceStarted || guidanceIsRunning)
 
+/**
+ * Decides which Activity instance owns the process's single navigator.
+ *
+ * Two ideas, deliberately separate. *Newest* is the most recently created instance and is
+ * the only one allowed to claim ownership — an older instance's late callback must not.
+ * *Owner* is whoever currently holds the navigator, and only the owner may release it,
+ * which is what stops a departing instance from cleaning up a navigator that a newer one is
+ * driving.
+ */
 internal class NavigationSessionOwnership {
     private var newestSessionId: Long? = null
     private var ownerId: Long? = null
 
+    /** Announces a new instance. Ids increase, so a stale registration cannot displace it. */
     @Synchronized
     fun register(sessionId: Long) {
         if (sessionId > (newestSessionId ?: Long.MIN_VALUE)) {
@@ -557,6 +653,7 @@ internal class NavigationSessionOwnership {
         }
     }
 
+    /** Takes ownership. Fails for a superseded session, or when someone already holds it. */
     @Synchronized
     fun claim(sessionId: Long): Boolean {
         if (newestSessionId != sessionId || ownerId != null) return false
@@ -570,6 +667,7 @@ internal class NavigationSessionOwnership {
     @Synchronized
     fun isOwner(sessionId: Long): Boolean = newestSessionId == sessionId && ownerId == sessionId
 
+    /** Gives up ownership. False when this session was not the owner — nothing to release. */
     @Synchronized
     fun release(sessionId: Long): Boolean {
         if (ownerId != sessionId) return false

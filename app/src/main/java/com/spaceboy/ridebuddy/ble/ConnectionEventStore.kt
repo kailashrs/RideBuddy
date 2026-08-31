@@ -2,7 +2,13 @@ package com.spaceboy.ridebuddy.ble
 
 import android.annotation.SuppressLint
 import android.content.Context
+import java.net.URLDecoder
+import java.net.URLEncoder
 
+/**
+ * Storage behind [ConnectionEventJournal]. [write] returns success rather than throwing so
+ * the journal can keep the events pending and retry, instead of losing them.
+ */
 internal interface ConnectionEventStore {
     fun read(): List<String>
     fun write(events: List<String>): Boolean
@@ -40,130 +46,25 @@ internal class SharedPreferencesConnectionEventStore(
     }
 }
 
-internal fun encodeConnectionEvents(events: List<String>): String = buildString {
-    append('[')
-    events.forEachIndexed { index, event ->
-        if (index > 0) append(',')
-        appendJsonString(event)
-    }
-    append(']')
-}
+// The events are free-form log lines that may contain any character, so they cannot be stored with
+// a plain delimiter — one appearing inside a message would split it. Each event is percent-encoded
+// instead and the results joined with newlines: the encoding emits only ASCII, so no control
+// character, newline or lone surrogate can reach the preferences XML and be mangled by it.
+//
+// This replaced a hand-written JSON encoder and parser. The parser existed only to read what the
+// encoder in the same file had written, and its error paths were unreachable for that reason —
+// while `decode` already treats anything it cannot read as an empty journal.
 
+/** Percent-encoded events, newline separated. */
+internal fun encodeConnectionEvents(events: List<String>): String =
+    events.joinToString("\n") { event -> URLEncoder.encode(event, Charsets.UTF_8.name()) }
+
+/** Malformed stored data yields an empty journal; diagnostics history is never worth a crash. */
 internal fun decodeConnectionEvents(encoded: String): List<String> {
     if (encoded.isBlank()) return emptyList()
-    return runCatching { JsonStringArrayParser(encoded).parse() }.getOrDefault(emptyList())
-}
-
-private fun StringBuilder.appendJsonString(value: String) {
-    append('"')
-    value.forEach { character ->
-        when (character) {
-            '"' -> append("\\\"")
-            '\\' -> append("\\\\")
-            '\b' -> append("\\b")
-            '\u000C' -> append("\\f")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else -> if (character.code < 0x20 || character.isSurrogate()) {
-                append("\\u")
-                append(character.code.toString(16).padStart(4, '0'))
-            } else {
-                append(character)
-            }
-        }
-    }
-    append('"')
-}
-
-private class JsonStringArrayParser(private val input: String) {
-    private var index = 0
-
-    fun parse(): List<String> {
-        skipWhitespace()
-        expect('[')
-        skipWhitespace()
-        if (consume(']')) {
-            requireEnd()
-            return emptyList()
-        }
-
-        val values = mutableListOf<String>()
-        while (true) {
-            skipWhitespace()
-            values += parseString()
-            skipWhitespace()
-            when {
-                consume(',') -> Unit
-                consume(']') -> {
-                    requireEnd()
-                    return values
-                }
-
-                else -> error("Expected ',' or ']' at position $index")
-            }
-        }
-    }
-
-    private fun parseString(): String {
-        expect('"')
-        return buildString {
-            while (index < input.length) {
-                when (val character = input[index++]) {
-                    '"' -> return@buildString
-                    '\\' -> appendEscapedCharacter()
-                    else -> {
-                        require(character.code >= 0x20) { "Unescaped control character at position ${index - 1}" }
-                        append(character)
-                    }
-                }
-            }
-            error("Unterminated JSON string")
-        }
-    }
-
-    private fun StringBuilder.appendEscapedCharacter() {
-        require(index < input.length) { "Incomplete JSON escape" }
-        when (val escaped = input[index++]) {
-            '"', '\\', '/' -> append(escaped)
-            'b' -> append('\b')
-            'f' -> append('\u000C')
-            'n' -> append('\n')
-            'r' -> append('\r')
-            't' -> append('\t')
-            'u' -> append(parseUnicodeEscape())
-            else -> error("Unsupported JSON escape \\$escaped")
-        }
-    }
-
-    private fun parseUnicodeEscape(): Char {
-        require(index + UnicodeEscapeLength <= input.length) { "Incomplete Unicode escape" }
-        val value = input.substring(index, index + UnicodeEscapeLength).toIntOrNull(16)
-            ?: error("Invalid Unicode escape at position $index")
-        index += UnicodeEscapeLength
-        return value.toChar()
-    }
-
-    private fun consume(expected: Char): Boolean {
-        if (input.getOrNull(index) != expected) return false
-        index++
-        return true
-    }
-
-    private fun expect(expected: Char) {
-        require(consume(expected)) { "Expected '$expected' at position $index" }
-    }
-
-    private fun requireEnd() {
-        skipWhitespace()
-        require(index == input.length) { "Unexpected trailing JSON data at position $index" }
-    }
-
-    private fun skipWhitespace() {
-        while (input.getOrNull(index)?.isWhitespace() == true) index++
-    }
-
-    private companion object {
-        const val UnicodeEscapeLength = 4
-    }
+    return runCatching {
+        encoded.split('\n')
+            .filter(String::isNotEmpty)
+            .map { event -> URLDecoder.decode(event, Charsets.UTF_8.name()) }
+    }.getOrDefault(emptyList())
 }

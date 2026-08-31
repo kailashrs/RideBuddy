@@ -3,6 +3,13 @@ package com.spaceboy.ridebuddy.ui.screens
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 
+/**
+ * Callbacks for the settings screen, bundled so the long tail of individual toggles is not
+ * threaded through every intermediate composable as separate parameters.
+ *
+ * Split out from [com.spaceboy.ridebuddy.ui.MainScreenActions] because only the settings
+ * screen uses them; nothing above it needs to see this many handlers.
+ */
 data class MoreSettingsActions(
     val onNotificationPackageChanged: (String, Boolean) -> Unit,
     val onCallerDisplayChanged: (Boolean) -> Unit,

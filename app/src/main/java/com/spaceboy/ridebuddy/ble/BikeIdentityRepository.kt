@@ -14,6 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/**
+ * Persistence for the identity values read off a motorcycle. Address-scoped: reading with
+ * an address other than the stored one yields an empty identity rather than another
+ * bike's VIN.
+ */
 internal interface BikeIdentityStore {
     fun read(address: BluetoothAddress): BikeIdentity
     fun write(address: BluetoothAddress, identity: BikeIdentity)
@@ -45,6 +50,9 @@ internal class SharedPreferencesBikeIdentityStore(
 
     @SuppressLint("ApplySharedPref")
     override fun write(address: BluetoothAddress, identity: BikeIdentity) {
+        // Identity values arrive from separate reads that can land in either order and
+        // either of which may fail, so a write carries only what is known so far. Merging
+        // against what is stored stops a partial update from erasing a field read earlier.
         val merged = mergeBikeIdentity(identity, read(address))
         preferences.edit(commit = true) {
             putLong(KeyAddress, address.toLong())
@@ -83,8 +91,15 @@ internal class SharedPreferencesBikeIdentityStore(
 }
 
 /**
- * Owns the address-scoped identity shown by the UI and serializes its persistence.
- * Live values win over stored snapshots, while the latest successful connection time is retained.
+ * Owns the identity shown by the UI for the currently selected motorcycle.
+ *
+ * Two concerns meet here. Persistence is serialised onto one IO consumer so callbacks
+ * never block on storage and writes cannot reorder. Selection is generation-counted so a
+ * slow read for a bike the rider has already switched away from is discarded on arrival
+ * rather than overwriting the new bike's identity.
+ *
+ * The lock covers the selection state and the published value together, which is what
+ * makes "read the selection, then publish" atomic with respect to a concurrent [clear].
  */
 internal class BikeIdentityRepository(
     private val store: BikeIdentityStore,
@@ -115,6 +130,11 @@ internal class BikeIdentityRepository(
         }
     }
 
+    /**
+     * Points the repository at a motorcycle and loads its stored identity in the
+     * background. Re-selecting the bike already in play is a no-op, so a reconnect does
+     * not blank the displayed values.
+     */
     fun select(address: BluetoothAddress) {
         val generation = synchronized(lock) {
             if (selectedAddress == address) {
@@ -137,6 +157,10 @@ internal class BikeIdentityRepository(
         }
     }
 
+    /**
+     * Applies a live value read from [address]. Silently ignored when that is not the
+     * selected bike — a late callback from a superseded connection.
+     */
     fun update(address: BluetoothAddress, transform: (BikeIdentity) -> BikeIdentity) {
         synchronized(lock) {
             if (selectedAddress != address) return
@@ -160,6 +184,11 @@ internal class BikeIdentityRepository(
     }
 }
 
+/**
+ * Combines a live identity with a stored one. Live values win field by field, so a
+ * freshly read VIN replaces a remembered one while fields not read this session survive.
+ * The connection timestamp is the exception: the most recent of the two is always right.
+ */
 internal fun mergeBikeIdentity(current: BikeIdentity, stored: BikeIdentity): BikeIdentity = BikeIdentity(
     vin = current.vin ?: stored.vin,
     clusterSoftwareVersion = current.clusterSoftwareVersion ?: stored.clusterSoftwareVersion,

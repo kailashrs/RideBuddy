@@ -127,7 +127,7 @@ class TftPacketEncoderTest {
 
     /**
      * The OEM rounds the trip packet's maneuver distance and leaves the 8210 one raw. The capture
-     * shows 277 m on 8210 against 70 m on 8230 in the same second.
+     * shows 277 m on 8210 against 280 m on 8230 in the same second.
      */
     @Test
     fun onlyTheTripManeuverDistanceIsRoundedToTenMetres() {

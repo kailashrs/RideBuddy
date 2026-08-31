@@ -62,6 +62,19 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * The app's single Activity: onboarding, the main Compose screens, and every platform
+ * interaction that requires an Activity.
+ *
+ * It holds no app state of its own — that belongs to [MainViewModel] and [AppContainer].
+ * What lives here is the work only an Activity can do: runtime permission requests, the
+ * system pairing picker, share intents, launching other Activities, and the file-sharing
+ * exports.
+ *
+ * Permission state is mirrored into Compose-observable fields and re-read in [onResume],
+ * because the rider can grant or revoke any of it in system settings while the app is in
+ * the background, and none of that produces a callback.
+ */
 class MainActivity : ComponentActivity() {
     private var notificationAccessEnabled by mutableStateOf(false)
     private var appNotificationPermissionGranted by mutableStateOf(false)
@@ -77,10 +90,15 @@ class MainActivity : ComponentActivity() {
         MainViewModel.factory(appContainer)
     }
 
+    // Result launchers must be registered before the Activity is started, so they are all
+    // declared as fields rather than created where they are used.
+
     private val bluetoothPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         refreshRuntimePermissionState()
+        // The notification permission is requested alongside these but is not required to
+        // pair: a refused notification permission must not block the association.
         val essentialGranted = result
             .filterKeys { it != NotificationPermission }
             .values.all { it }
@@ -142,7 +160,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) handleShareIntent(intent)
+        if (savedInstanceState == null) handleIncomingIntent(intent)
 
         setContent {
             val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
@@ -189,11 +207,6 @@ class MainActivity : ComponentActivity() {
             val stagedDestination = uiState.sharedDestination
                 ?: uiState.autoStartSharedDestination?.destination
             LaunchedEffect(stagedDestination) { appContainer.stageDestination(stagedDestination) }
-            LaunchedEffect(Unit) {
-                appContainer.startNavigationRequests.collect {
-                    appContainer.stagedDestination.value?.let(::startNavigation)
-                }
-            }
 
             Rs457Theme(
                 themeMode = settings.themeMode,
@@ -316,7 +329,6 @@ class MainActivity : ComponentActivity() {
         onSaveNavigationApiKey = viewModel::saveNavigationApiKey,
         onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
         onTestNavigationApiKey = viewModel::testNavigationApiKey,
-        onReconnect = ::reconnectToSavedBike,
         onDisconnectBike = { BikeConnectionService.disconnect(this) },
         onStartNavigation = ::startNavigation,
         onOpenActiveNavigation = ::openActiveNavigation,
@@ -358,9 +370,14 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleShareIntent(intent)
+        handleIncomingIntent(intent)
     }
 
+    /**
+     * Re-reads everything the rider can change outside the app: notification access, runtime
+     * permissions, and the companion association. None of these notify on change, so a
+     * resume is the only reliable point to reconcile them.
+     */
     override fun onResume() {
         super.onResume()
         notificationAccessEnabled = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
@@ -383,6 +400,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Mirrors the current runtime-permission grants into the Compose-observable fields. */
     private fun refreshRuntimePermissionState() {
         nearbyDeviceAccessGranted = requiredNearbyDevicePermissions().all { permission ->
             ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
@@ -422,17 +440,6 @@ class MainActivity : ComponentActivity() {
      * foreground promotion happens before GATT begins. When no bike is associated yet,
      * delegates to the CDM picker so the user can pick one.
      */
-    private fun reconnectToSavedBike() {
-        val bike = appContainer.bikeCompanionManager.state.value.bike
-        if (bike == null) {
-            requestBluetoothPermissionsAndAssociate()
-            return
-        }
-        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
-            viewModel.showMessage("Unable to start connection service")
-        }
-    }
-
     private fun startAssociation() {
         val manager = appContainer.bikeCompanionManager
         val existing = manager.state.value.bike
@@ -508,6 +515,34 @@ class MainActivity : ComponentActivity() {
             .onFailure { viewModel.showMessage(getString(failureMessageRes)) }
     }
 
+    /** Handles one-shot launch commands before dispatching ordinary share intents. */
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.action == ActionStartStagedNavigation) {
+            val requestId = intent.getLongExtra(ExtraStagedDestinationId, 0L)
+            val destination = intent.getStringExtra(ExtraStagedDestination).orEmpty()
+            // Consumed before validation so Activity recreation cannot start it twice.
+            setIntent(Intent(this, MainActivity::class.java))
+            val staged = appContainer.stagedDestination.value
+            if (staged?.requestId == requestId && staged.destination == destination) {
+                startStagedNavigation(staged)
+            } else {
+                appContainer.connectionEventJournal.record(
+                    "Handlebar GO ignored; its staged destination is no longer current",
+                )
+            }
+            return
+        }
+        handleShareIntent(intent)
+    }
+
+    /**
+     * Handles a destination shared from another app.
+     *
+     * The intent is consumed *before* validation, by replacing it with a blank one. A share
+     * intent stays attached to the Activity across recreation, so leaving it in place would
+     * mean re-processing the same share — and, for input that fails validation, re-showing
+     * the same error on every rotation.
+     */
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return
         val destination = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
@@ -531,8 +566,26 @@ class MainActivity : ComponentActivity() {
     private fun requiredNearbyDevicePermissions(): Array<String> =
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
+    /** Starts navigation for a destination the rider chose here, clearing any staged one. */
+    /** Starts a destination the rider entered in the app, dropping any staged GO prompt with it. */
     private fun startNavigation(rawDestination: String) {
         appContainer.stageDestination(null)
+        beginNavigation(rawDestination)
+    }
+
+    /**
+     * Starts a destination the rider staged and then pressed GO for on the handlebar.
+     *
+     * Only that staging is cleared. Clearing unconditionally would drop a destination staged
+     * between the press and this running, leaving the cluster's GO prompt gone for a route the
+     * rider never started.
+     */
+    private fun startStagedNavigation(request: StagedDestination) {
+        appContainer.clearStagedDestination(request.requestId)
+        beginNavigation(request.destination)
+    }
+
+    private fun beginNavigation(rawDestination: String) {
         viewModel.uiState.value.autoStartSharedDestination
             ?.requestId
             ?.let(viewModel::completeAutoStartSharedDestination)
@@ -612,6 +665,7 @@ class MainActivity : ComponentActivity() {
             ?.let { requestId -> viewModel.restoreAutoStartSharedDestination(requestId) }
     }
 
+    /** Brings the map back for guidance that is already running in the background. */
     private fun openActiveNavigation() {
         runCatching {
             startActivity(NavigationActivity.activeGuidanceIntent(this))
@@ -704,6 +758,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Runs the parked display validation: both phases in one pass, asking the rider to
+     * confirm each as it happens.
+     *
+     * Gated on a verified link, since every phase is a sequence of acknowledged writes that
+     * would simply fail without one.
+     */
     private fun runStationaryTest() {
         val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
@@ -778,6 +839,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The one automatic connection attempt an app launch is allowed.
+     *
+     * Every precondition is checked before the one-shot gate is consumed, and
+     * [shouldAutoConnectOnLaunch] additionally refuses once the connection's own retry
+     * budget is spent — so relaunching the app cannot be used to hand the stack a fresh one.
+     */
     private fun maybeAutoConnect() {
         val settings = appContainer.appSettings.settings.value
         if (!settings.onboardingComplete) return

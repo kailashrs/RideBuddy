@@ -54,6 +54,7 @@ import com.spaceboy.ridebuddy.ui.screens.SettingsScreen
 import com.spaceboy.ridebuddy.ui.screens.NavigationSettingsScreen
 import com.spaceboy.ridebuddy.ui.screens.DiagnosticsScreen
 
+/** One entry in the bottom navigation bar. Icons are paired filled/outlined per Material. */
 private data class DestinationItem(
     val destination: TopLevelDestination,
     val label: String,
@@ -69,6 +70,12 @@ private val destinations = listOf(
     DestinationItem(TopLevelDestination.More, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
+/**
+ * The app's chrome: top bar, navigation bar, snackbar host, and back handling.
+ *
+ * Content is a slot rather than a parameter so this composable never touches screen state,
+ * and so the shell can be previewed and tested on its own.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -202,12 +209,25 @@ fun MainScreen(
     }
 }
 
+/**
+ * Identifies which screen is showing, for the saveable state holder.
+ *
+ * The two overlays get their own keys rather than sharing the underlying destination's, so
+ * opening and closing settings or diagnostics does not discard the scroll position of the
+ * screen behind it.
+ */
 private fun MainUiState.saveableContentKey(): String = when {
     isNavigationSettingsOpen -> "navigation_settings"
     isDiagnosticsOpen -> "diagnostics"
     else -> selectedDestination.name
 }
 
+/**
+ * Chooses and renders the current screen.
+ *
+ * The two overlays take precedence over the selected destination, which is what makes
+ * closing them a state change rather than a navigation step.
+ */
 @Composable
 internal fun MainScreenContent(
     modifier: Modifier,
@@ -280,7 +300,6 @@ internal fun MainScreenContent(
                 connectionState = connectionState,
                 identity = identity,
                 notificationAccessEnabled = notificationAccessEnabled,
-                onReconnect = onReconnect,
             )
 
             TopLevelDestination.More -> SettingsScreen(

@@ -48,6 +48,11 @@ import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Aggregate riding statistics over a selectable period: totals, averages, records, and a
+ * distance trend. All computed by [com.spaceboy.ridebuddy.data.InsightsCalculator] from
+ * stored history; this screen only presents them.
+ */
 @Composable
 fun InsightsScreen(
     modifier: Modifier = Modifier,
@@ -145,6 +150,11 @@ fun InsightsScreen(
     }
 }
 
+/**
+ * Distance per ride across the period, zero-based so ride lengths are compared against zero
+ * rather than against each other — an auto-ranged axis would make a set of similar rides
+ * look wildly variable.
+ */
 @Composable
 private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnits) {
     val values = remember(distancesKilometres, units) {
@@ -185,6 +195,7 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
 @Immutable
 private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
 
+/** Two-column grid. Plain rows rather than a lazy grid: the list is short and fixed. */
 @Composable
 private fun MetricGrid(metrics: List<InsightMetric>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -204,6 +215,7 @@ private fun MetricGrid(metrics: List<InsightMetric>) {
     }
 }
 
+/** Period selector, with the short labels the segmented buttons show. */
 private val Periods = listOf(
     InsightPeriod.Today to "1D",
     InsightPeriod.SevenDays to "7D",

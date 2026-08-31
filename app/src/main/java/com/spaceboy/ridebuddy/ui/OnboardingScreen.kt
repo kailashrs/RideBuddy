@@ -42,6 +42,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 
+/**
+ * First-run setup: what the app needs, why, and a way to grant each thing.
+ *
+ * Every page is skippable, and the app is usable without any of it — permissions are asked
+ * for in context later on. What this exists for is to explain the pieces up front, since a
+ * companion app that has been given nothing looks broken rather than unconfigured.
+ *
+ * Stateless: it renders the readiness flags it is handed and raises callbacks. The
+ * permission requests themselves belong to the Activity.
+ */
 @Composable
 fun OnboardingScreen(
     connectionState: BikeConnectionState,
@@ -169,6 +179,10 @@ fun OnboardingScreen(
     }
 }
 
+/**
+ * One onboarding page. [readiness] renders the checklist of what is and is not set up, and
+ * [actions] the buttons that resolve each item.
+ */
 @Composable
 private fun OnboardingPage(
     icon: ImageVector,
@@ -220,9 +234,9 @@ private fun OnboardingPage(
     }
 }
 
+/** Connection state in onboarding's plainer language, avoiding protocol terms. */
 private fun BikeConnectionState.onboardingLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Not connected"
-    BikeConnectionState.Scanning -> "Looking for your bike"
     is BikeConnectionState.Connecting -> "Connecting"
     is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
     is BikeConnectionState.Connected -> "Connected to $deviceName"

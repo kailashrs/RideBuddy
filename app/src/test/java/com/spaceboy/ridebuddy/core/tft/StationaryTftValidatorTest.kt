@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.core.tft
 
+import com.google.android.libraries.mapsplatform.turnbyturn.model.Maneuver
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
@@ -104,12 +105,13 @@ class StationaryTftValidatorTest {
                 BleCharacteristics.NavigationText,
                 BleCharacteristics.NavigationSpeedLimit,
                 BleCharacteristics.NavigationClear,
-                BleCharacteristics.NavigationStatus,
+                BleCharacteristics.NavigationSpeedLimit,
             ),
             connection.writes.map { it.characteristic },
         )
         assertEquals(
             listOf(
+                BikeWriteMode.NoResponsePreferred,
                 BikeWriteMode.NoResponsePreferred,
                 BikeWriteMode.NoResponsePreferred,
                 BikeWriteMode.NoResponsePreferred,
@@ -125,9 +127,79 @@ class StationaryTftValidatorTest {
     }
 
     @Test
+    fun `the session sequence is the one a route started without a preview transmits`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = {},
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftPhase.Navigation)
+
+        // The route-request value first, then guidance — the transition production makes when
+        // the worker drains between the request and the first guidance update. No preview 83,
+        // because a direct start never passes through it; and no status 0, which is a sentinel
+        // the bridge suppresses rather than sends.
+        assertEquals(
+            listOf(TftPacketEncoder.session(80).toList(), TftPacketEncoder.session(87).toList()),
+            connection.writes
+                .filter { it.characteristic == BleCharacteristics.NavigationSession }
+                .map { it.payload.toList() },
+        )
+        assertEquals(
+            listOf(TftPacketEncoder.status(132).toList()),
+            connection.writes
+                .filter { it.characteristic == BleCharacteristics.NavigationStatus }
+                .map { it.payload.toList() },
+        )
+    }
+
+    @Test
+    fun `the maneuver phase draws real turn arrows rather than the fallback pictogram`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = {},
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftPhase.Navigation)
+
+        val maneuver = connection.writes.first { it.characteristic == BleCharacteristics.NavigationManeuver }
+        // Right now, left next: opposite directions, so a swapped or dropped arrow is visible
+        // on the cluster rather than being indistinguishable from the correct output.
+        assertEquals(TftPacketEncoder.clusterManeuver(Maneuver.TURN_RIGHT), maneuver.payload[1].toInt() and 0xFF)
+        assertEquals(TftPacketEncoder.clusterManeuver(Maneuver.TURN_LEFT), maneuver.payload[4].toInt() and 0xFF)
+    }
+
+    @Test
+    fun `teardown clears the display and zeroes the speed limit it set`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = {},
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftPhase.Navigation)
+
+        // The clear packet does not touch the speed limit, so the phase would otherwise leave
+        // its own 60 showing on a cluster that is no longer in a navigation session.
+        val tail = connection.writes.takeLast(2)
+        assertEquals(BleCharacteristics.NavigationClear, tail[0].characteristic)
+        assertEquals(TftPacketEncoder.clear().toList(), tail[0].payload.toList())
+        assertEquals(BleCharacteristics.NavigationSpeedLimit, tail[1].characteristic)
+        assertEquals(TftPacketEncoder.speedLimit(0).toList(), tail[1].payload.toList())
+    }
+
+    @Test
     fun `stops at the first unacknowledged write`() = runBlocking {
         val now = 10_000L
-        // Index 4 is the maneuver now that the start sequence is three frames, not two.
+        // Index 4 is the trip packet: session, status, session, maneuver, then trip.
         val connection = RecordingConnection(failAtWrite = 5, receivedAtElapsedRealtime = now)
         val validator = StationaryTftValidator(
             connection,

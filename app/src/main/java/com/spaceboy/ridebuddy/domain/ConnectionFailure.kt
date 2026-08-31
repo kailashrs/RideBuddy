@@ -38,6 +38,13 @@ enum class ConnectionFailureCategory {
     /** The peer or the bond rejected authentication. Only security statuses reach this. */
     AuthenticationRejected,
 
+    /**
+     * The motorcycle accepts the connection but never completes encryption with the stored
+     * bonding key, so the link dies on the supervision timeout without a single ATT operation.
+     * Retrying cannot resolve it: the phone has no way to present a different key.
+     */
+    PairingRejected,
+
     /** The phone blocked the attempt: permissions, adapter state, or a missing profile. */
     LocalPrecondition,
 

@@ -4,6 +4,13 @@ import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKeyPolicy
 import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrapResult
 
+/**
+ * UI state after the rider saves a key.
+ *
+ * Only an outright rejection keeps the previous state and shows an error. "Restart
+ * required" still counts as configured — the key is stored and valid, it simply will not
+ * take effect until the next process — and the flag is what prompts the rider about that.
+ */
 internal fun navigationKeyStateFor(
     result: ConfigureResult,
     apiKey: String,
@@ -20,6 +27,7 @@ internal fun navigationKeyStateFor(
     )
 }
 
+/** UI state from the process-wide key load; a load failure surfaces as an error message. */
 internal fun navigationKeyStateForBootstrap(
     result: Result<NavigationKeyBootstrapResult>,
 ): NavigationKeyUiState = result.fold(
@@ -34,6 +42,10 @@ internal fun navigationKeyStateForBootstrap(
     },
 )
 
+/**
+ * Navigation-key state for the settings screen. Only the masked key is held; the key itself
+ * never leaves the secure store.
+ */
 data class NavigationKeyUiState(
     val isConfigured: Boolean = false,
     val maskedKey: String? = null,

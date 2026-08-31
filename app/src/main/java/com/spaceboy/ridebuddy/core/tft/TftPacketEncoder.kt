@@ -4,33 +4,53 @@ import com.google.android.libraries.mapsplatform.turnbyturn.model.Maneuver
 import java.time.Instant
 import java.time.ZoneId
 
+/**
+ * Builds the fixed-layout packets the instrument cluster's navigation display accepts.
+ *
+ * The display is not a framebuffer. It draws from a small set of fields — a pictogram, a
+ * distance, an arrival time, three short text rows — and each field is written as its own
+ * packet on its own characteristic. Every packet here is a complete field value, and all of
+ * them are idempotent, so rewriting an unchanged field is harmless.
+ *
+ * Byte layouts are confirmed against wire captures of a working session rather than
+ * inferred, because none of them are self-describing.
+ */
 object TftPacketEncoder {
     /**
      * Every packet ends with a zero byte.
      *
-     * Static analysis of the OEM app suggested 0x2E, because the field it terminates with is
-     * declared next to a `= 46` assignment. An HCI capture of the OEM driving this cluster settles
-     * it: its session packet is `05 ff 57 00`, its clear is `ff 00`, and its maneuver, trip and
-     * text packets all end the same way. The 0x2E field is written but never read.
+     * Worth stating explicitly because a plausible-looking alternative exists: the field
+     * the terminator sits next to in the protocol is associated with the value 0x2E, which
+     * makes 0x2E look like the terminator. It is not. On the wire the session packet is
+     * `05 ff 57 00` and the clear packet is `ff 00`, and the maneuver, trip and text
+     * packets all end the same way.
      */
     private const val End = 0x00
 
+    /**
+     * Maneuver packet from Google maneuver ids, resolving them to cluster pictograms first.
+     */
     fun maneuver(current: Int, next: Int, roundaboutExit: Int, distanceMetres: Int): ByteArray =
         pictogram(
             current = clusterManeuver(current, roundaboutExit),
             next = clusterManeuver(next),
             roundaboutExit = roundaboutExit,
-            // Sent raw. The capture shows the OEM's 8210 distance at 277 m, so this is the one
-            // field it does not round.
+            // Sent raw. This is the one distance field the cluster does not want rounded —
+            // a capture shows it carrying 277 m while the trip packet's copy of the same
+            // distance, in the same second, carried 280 m. See [trip].
             distanceMetres = distanceMetres,
         )
 
     /**
      * A maneuver packet built from an already-resolved cluster pictogram.
      *
-     * The cluster's pictogram vocabulary carries status as well as turns: the OEM writes 203 with
-     * a "RECALCULATION" banner while it reroutes, and 202 with "SIGNAL LOST" when it loses GPS.
-     * Neither is a session change.
+     * Exposed separately because the pictogram vocabulary carries status as well as turns:
+     * [PictogramRecalculating] paired with a "RECALCULATION" banner is how a reroute is
+     * shown, and [PictogramSignalLost] with "SIGNAL LOST" is how a GPS dropout is. Neither
+     * is a session change — the display stays in guidance and only this field moves.
+     *
+     * Byte 3 is a fixed `0xFF` delimiter separating the roundabout exit from the next
+     * pictogram, not a "no next icon" sentinel.
      */
     fun pictogram(
         current: Int,
@@ -51,6 +71,12 @@ object TftPacketEncoder {
     const val PictogramSignalLost = 202
     const val PictogramRecalculating = 203
 
+    /**
+     * Trip packet: arrival time, distance to destination, distance to the next maneuver.
+     *
+     * The time field is an arrival **wall-clock time** in the phone's zone, not a remaining
+     * duration — the display renders it directly as an ETA.
+     */
     fun trip(
         arrivalEpochMillis: Long,
         destinationDistanceMetres: Int,
@@ -62,9 +88,10 @@ object TftPacketEncoder {
             this[1] = arrival.minute.toByte()
             this[2] = arrival.hour.toByte()
             writeUInt24LittleEndian(offset = 3, value = destinationDistanceMetres)
-            // The OEM rounds this second distance to the nearest 10 m and leaves the 8210 one
-            // raw; the capture shows 70 m here against 277 m there. Clamped first because
-            // rounding Int.MAX_VALUE overflows.
+            // This copy of the maneuver distance is rounded to the nearest 10 m, while the
+            // one in the maneuver packet is sent raw — a capture shows 280 m here against
+            // 277 m there in the same second. Clamped before rounding because adding 5 to
+            // Int.MAX_VALUE overflows.
             writeUInt24LittleEndian(
                 offset = 6,
                 value = ((maneuverDistanceMetres.coerceIn(0, MaxUInt24) + 5) / 10) * 10,
@@ -73,15 +100,15 @@ object TftPacketEncoder {
         }
     }
 
-/**
+    /**
      * The three text rows are not interchangeable.
      *
-     * The capture shows the OEM putting the destination in rows 0 and 1, which the cluster draws
-     * on the two bottom lines, and the turn instruction in row 2, which it draws as the banner
-     * across the top. Writing only row 0 — which is what RideBuddy did — fills the bottom line and
-     * leaves the banner empty, which is exactly how it looked on the bike.
+     * Rows 0 and 1 are the two bottom lines and carry the destination; row 2 is the banner
+     * across the top and carries the turn instruction. Writing only row 0 fills the bottom
+     * line and leaves the banner blank, which is what a rider sees if this split is ignored.
      *
-     * All three rows are always written so shorter replacement text clears what was there before.
+     * All three rows are always emitted, so replacing long text with shorter text clears
+     * whatever was on the rows the new text does not reach.
      */
     fun guidanceTextRows(destination: String, instruction: String): List<ByteArray> {
         val destinationRows = utf8Chunks(destination, bytesPerRow = 16, maxRows = 2)
@@ -102,26 +129,37 @@ object TftPacketEncoder {
         return (0 until 3).map { row -> textRow(row, chunks.getOrElse(row) { byteArrayOf() }) }
     }
 
+    /** Posted speed limit in km/h. Zero is a valid value and blanks the field. */
     fun speedLimit(kph: Int): ByteArray = byteArrayOf(2, kph.coerceIn(0, 255).toByte(), End.toByte())
+
+    /** Wipes the navigation area. The only packet that does not start with a field tag. */
     fun clear(): ByteArray = byteArrayOf(0xFF.toByte(), End.toByte())
+
+    /** Moves the display between navigation screens; see [TftNavigationBridge] for the values. */
     fun session(state: Int): ByteArray = byteArrayOf(5, 0xFF.toByte(), state.coerceIn(0, 255).toByte(), End.toByte())
+
+    /** Status word accompanying an active session. */
     fun status(code: Int): ByteArray = byteArrayOf(6, code.coerceIn(0, 255).toByte(), End.toByte())
 
     /**
      * Cluster pictogram for a Google maneuver.
      *
-     * The numbers are the OEM's, and they are not ordered by direction — they cannot be guessed.
-     * What names them is the OEM's own arrow art: it maps a Mappls maneuver id to a pictogram in
-     * one table and to a drawable `ic_step_<id>` in the same breath, so rendering the drawings
-     * labels every pictogram. A capture confirms the one that matters most: the cluster drew a
-     * right arrow for `6` while the guidance banner read "Turn right onto".
+     * The pictogram numbers are the cluster's own and are not ordered by direction, so they
+     * cannot be derived — the mapping below is the vocabulary, established by pairing each
+     * id with the arrow the cluster draws for it and confirmed on the wire (the cluster
+     * drew a right arrow for `6` while the banner read "Turn right onto"):
      *
-     * 1 straight · 2/3 U-turn cw/ccw · 4 keep right · 5 slight right · 6 right · 7 sharp right ·
-     * 8 merge · 9 keep left · 10 slight left · 11 left · 12 sharp left · 15/16 exit right/left ·
-     * 151-157 roundabout Nth exit · 158 roundabout · 200 ferry · 201 destination.
+     * 1 straight · 2/3 U-turn cw/ccw · 4 keep right · 5 slight right · 6 right · 7 sharp
+     * right · 8 merge · 9 keep left · 10 slight left · 11 left · 12 sharp left · 15/16 exit
+     * right/left · 151-157 roundabout Nth exit · 158 roundabout · 200 ferry · 201
+     * destination.
      *
-     * 13 and 14 also exist in the OEM's table, but no art ships for the ids that reach them, so
-     * their meaning is unknown and nothing here uses them.
+     * Ids 13 and 14 exist in the vocabulary but no artwork was ever identified for them, so
+     * their meaning is unknown and nothing here emits them.
+     *
+     * A numbered roundabout exit takes priority over the maneuver itself, because the
+     * cluster has a dedicated glyph per exit number and that is more informative than the
+     * generic turn it would otherwise draw.
      */
     fun clusterManeuver(maneuver: Int, roundaboutExit: Int = 0): Int {
         if (roundaboutExit in 1..7) return 150 + roundaboutExit
@@ -170,13 +208,8 @@ object TftPacketEncoder {
     }
 
     /**
-     * The cluster reads these 24-bit fields least-significant byte first.
-     *
-     * The OEM builder makes this hard to see: `q(int)` renders the value as hex, chunks it into
-     * bytes, reverses, and fills a three-slot array from index 2 downward, producing a
-     * right-aligned *big-endian* array. Every packet builder then emits that array in reverse —
-     * `iArr[5] = q[2]` for the maneuver distance, and the same pattern for both `8230` fields — so
-     * the bytes that reach the wire are little-endian. See docs/aprilia-rs457-ble-protocol.md.
+     * Largest value a 24-bit distance field can carry (about 16 777 km), used to clamp
+     * before encoding. Distances are read by the cluster least-significant byte first.
      */
     private const val MaxUInt24 = 0xFF_FFFF
 
@@ -187,6 +220,15 @@ object TftPacketEncoder {
         this[offset + 2] = (safe ushr 16).toByte()
     }
 
+    /**
+     * Splits [text] into at most [maxRows] rows of at most [bytesPerRow] UTF-8 bytes.
+     *
+     * The row limit is a *byte* limit, so it is walked by code point rather than by
+     * character: splitting a multi-byte character across rows would put an invalid UTF-8
+     * fragment on the wire, and a surrogate pair split by index would corrupt the character
+     * outright. A single character too large to fit a row at all is skipped, since there is
+     * no row it could ever be placed on.
+     */
     private fun utf8Chunks(text: String, bytesPerRow: Int, maxRows: Int): List<ByteArray> {
         val chunks = mutableListOf<ByteArray>()
         val current = mutableListOf<Byte>()
@@ -206,6 +248,11 @@ object TftPacketEncoder {
         return chunks
     }
 
+    /**
+     * One text-row packet: tag, row index, total packet length, the bytes, terminator.
+     * The length byte counts the whole packet, not just its text — the four framing bytes
+     * are included.
+     */
     private fun textRow(index: Int, chunk: ByteArray): ByteArray {
         val packet = ByteArray(chunk.size + 4)
         packet[0] = 4

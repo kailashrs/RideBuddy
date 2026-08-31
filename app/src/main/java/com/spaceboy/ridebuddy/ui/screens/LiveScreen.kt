@@ -78,12 +78,26 @@ import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
 import kotlin.math.roundToInt
 
+/**
+ * How much the live screen shows.
+ *
+ * [Glance] is the riding default — speed and gear-level information, readable at arm's
+ * length on a stem mount. [Ride] adds trip figures, and [Charts] the telemetry history,
+ * both of which are for looking at while stopped.
+ */
 private enum class LiveDetailLevel(val label: String) {
     Glance("Glance"),
     Ride("Ride"),
     Charts("Charts"),
 }
 
+/**
+ * The riding screen: connection status, live telemetry, and navigation entry.
+ *
+ * Telemetry arrives as flows rather than values (see
+ * [com.spaceboy.ridebuddy.ui.LiveTelemetryStreams]) and is collected as late as possible,
+ * so a frame at 4 Hz recomposes the gauges and nothing else.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveScreen(
@@ -691,6 +705,11 @@ private fun LiveDetailsSheet(
     }
 }
 
+/**
+ * Link health in rider terms: signal strength, telemetry rate, and estimated packet loss.
+ * Worth surfacing here rather than only in diagnostics, because a poor link is the usual
+ * reason a figure on this screen looks frozen.
+ */
 @Composable
 private fun ConnectionQuality(diagnostics: BleDiagnostics, estimatedPacketGapPercent: Int?) {
     OutlinedCard(Modifier.fillMaxWidth()) {

@@ -45,6 +45,20 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * State holder for the main screen and its settings.
+ *
+ * Mostly a routing layer: connection state, telemetry, rides and settings are exposed
+ * straight from the repositories that own them, and the derived flows below are the only
+ * work done here. Everything mutable lives in one [MainUiState], updated atomically.
+ *
+ * Two things do belong to this class. The shared-destination flow, which has to survive
+ * process death and so is mirrored into saved state; and the parked display test's
+ * confirmation prompt, which needs a suspending question the rider answers mid-sequence.
+ *
+ * Dependencies are constructor-injected rather than reached through the container, so the
+ * view model can be exercised directly; [factory] does the wiring for the real app.
+ */
 class MainViewModel internal constructor(
     savedStateHandle: SavedStateHandle,
     private val apiKeyStore: SecureNavigationApiKeyStore,
@@ -78,6 +92,8 @@ class MainViewModel internal constructor(
     val bleCapture = bleCaptureRecorder.state
     val activeRide = rideRecorder.activeRide
     val liveRideSamples = rideRecorder.liveSamples
+    // Derived flows are computed off the main thread and shared with a stop timeout, so a
+    // configuration change does not discard and immediately recompute them.
     val liveRideMetrics: StateFlow<LiveRideMetrics> = liveRideSamples
         .map(::calculateLiveRideMetrics)
         .flowOn(Dispatchers.Default)
@@ -95,6 +111,9 @@ class MainViewModel internal constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideWeekSummary())
 
     init {
+        // Fill in the navigation-key state once the process-wide load finishes — unless the
+        // rider has already saved or removed a key in the meantime, whose result is newer
+        // than the load's.
         viewModelScope.launch {
             val bootstrapResult = navigationKeyBootstrap.await()
             mutableUiState.update { state ->
@@ -131,6 +150,10 @@ class MainViewModel internal constructor(
         mutableUiState.update { it.copy(isDiagnosticsOpen = false) }
     }
 
+    /**
+     * Marks a navigation start in flight and returns its id, which the caller passes back to
+     * [finishNavigationStart]. The id is what makes a superseded start's completion a no-op.
+     */
     fun beginNavigationStart(): Long {
         val attemptId = navigationStartAttemptIds.incrementAndGet()
         mutableUiState.update { it.withNavigationStartAttempt(attemptId) }
@@ -249,6 +272,7 @@ class MainViewModel internal constructor(
         insightPeriod.value = period
     }
 
+    /** Deletes all stored rides. Irreversible; the UI confirms before calling this. */
     fun clearRideHistory() {
         viewModelScope.launch {
             try {
@@ -310,16 +334,26 @@ class MainViewModel internal constructor(
         appSettings.update(transform)
     }
 
+    /**
+     * Applies a shared-destination change and mirrors it into saved state, so a share that
+     * arrives while the app is backgrounded survives the process being killed.
+     */
     private fun updateSharedDestinationState(transform: (MainUiState) -> MainUiState) {
         mutableUiState.update(transform)
         sharedDestinationStateStore.persist(mutableUiState.value)
     }
 
+    /** A destination for the rider to review and start themselves. */
     fun acceptSharedDestination(value: String) {
         val destination = value.normalizedDestinationInput() ?: return
         updateSharedDestinationState { it.withManualSharedDestination(destination) }
     }
 
+    /**
+     * A destination to start navigating without further input. Only reached when the rider
+     * has opted into automatic starts. Each request gets a fresh id so a late result cannot
+     * be mistaken for a newer request's.
+     */
     fun queueAutoStartSharedDestination(value: String) {
         val destination = value.normalizedDestinationInput() ?: return
         val request = AutoStartSharedDestinationRequest(
@@ -333,6 +367,10 @@ class MainViewModel internal constructor(
         updateSharedDestinationState { it.withCompletedAutoStartSharedDestination(requestId) }
     }
 
+    /**
+     * An automatic start failed. Puts the destination back in the manual field with the
+     * reason, so the rider can retry rather than losing the share.
+     */
     fun restoreAutoStartSharedDestination(requestId: Long, errorMessage: String? = null) {
         updateSharedDestinationState { it.withRestoredAutoStartSharedDestination(requestId, errorMessage) }
     }
@@ -371,6 +409,7 @@ class MainViewModel internal constructor(
         }
     }
 
+    /** The rider answered the display prompt; resumes the suspended test sequence. */
     fun resolveTftTestConfirmation(displayLooksCorrect: Boolean) {
         val pending = pendingTftConfirmation
         pendingTftConfirmation = null
@@ -379,6 +418,7 @@ class MainViewModel internal constructor(
     }
 
     companion object {
+        /** Wires the view model to the process-wide container. */
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 MainViewModel(

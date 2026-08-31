@@ -15,6 +15,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * One GPS fix.
+ *
+ * [fixElapsedRealtimeMillis] is when the *fix* was taken, on the monotonic clock, not when
+ * it was delivered. That distinction is what freshness checks depend on: the platform can
+ * hand over a fix that is minutes old, and wall-clock time can jump.
+ */
 data class RideLocation(
     val latitude: Double,
     val longitude: Double,
@@ -23,6 +30,12 @@ data class RideLocation(
     val fixElapsedRealtimeMillis: Long,
 )
 
+/**
+ * Supplies GPS fixes for route recording, weather lookups, and ride labelling.
+ *
+ * Uses the platform location manager directly rather than a fused provider, so the app has
+ * no dependency on Play services for a feature that is only meaningful outdoors and moving.
+ */
 class RideLocationTracker(context: Context) : LocationListener {
     private val manager = context.getSystemService(LocationManager::class.java)
     private val appContext = context.applicationContext
@@ -63,17 +76,24 @@ class RideLocationTracker(context: Context) : LocationListener {
         }.getOrDefault(false)
     }
 
+    /** Unregisters and clears the published fix, so nothing reads a stale position. */
     fun stop() {
         manager.removeUpdates(this)
         registered = false
         mutableLocation.value = null
     }
 
+    /**
+     * The current fix if it is recent enough to act on, or null. Callers wanting whatever
+     * is last known regardless of age should read [location] instead.
+     */
     fun freshLocation(nowElapsedRealtimeMillis: Long = SystemClock.elapsedRealtime()): RideLocation? =
         mutableLocation.value?.takeIf { it.isFreshAt(nowElapsedRealtimeMillis) }
 
     override fun onLocationChanged(location: Location) {
         mutableLocation.value = RideLocation(
+            // Prefer the fix's own timestamp; fall back to now only when the platform did
+            // not supply one, which is the only case where treating it as current is safe.
             latitude = location.latitude,
             longitude = location.longitude,
             accuracyMetres = location.accuracy,
@@ -92,12 +112,21 @@ class RideLocationTracker(context: Context) : LocationListener {
 
     private companion object {
         const val LogTag = "RideLocationTracker"
+
+        /** Fast enough for a usable route trace without pinning the GPS at maximum rate. */
         const val LocationUpdateIntervalMillis = 2_000L
+
+        /** Suppresses updates while parked, where GPS jitter would otherwise fill the trace. */
         const val MinimumLocationDistanceMetres = 3f
+
         const val NanosecondsPerMillisecond = 1_000_000L
     }
 }
 
+/**
+ * Whether a fix is recent enough to act on. A negative age means the fix is stamped in the
+ * future, so the clocks disagree and the age cannot be trusted in either direction.
+ */
 internal fun RideLocation.isFreshAt(
     nowElapsedRealtimeMillis: Long,
     maximumAgeMillis: Long = MaximumRideLocationAgeMillis,
@@ -106,4 +135,5 @@ internal fun RideLocation.isFreshAt(
     return fixElapsedRealtimeMillis > 0L && ageMillis in 0..maximumAgeMillis
 }
 
+/** Generous, because the consumers are weather and labelling rather than live positioning. */
 internal const val MaximumRideLocationAgeMillis = 30_000L

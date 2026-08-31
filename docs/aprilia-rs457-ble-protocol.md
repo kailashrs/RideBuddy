@@ -8,7 +8,7 @@ The OEM app is a conventional Android BLE central. It scans for devices whose na
 
 RideBuddy intentionally accepts only the RS 457/Tuono 457 name family for now. The OEM app uses a separate SR telemetry parser, so accepting SR family advertisements without a model-specific decoder could record plausible-looking but incorrect ride data.
 
-The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. The dashboard first requires an Android Bluetooth bond. For a first-time protected connection it enables indications on `8610`, handles the challenge in its characteristic-change callback, writes the corresponding six-byte response to `8620`, and persists a protection-accepted flag. Later connections with that flag bypass `8610` and enable the normal subscription set directly. Generic read callback code exists elsewhere in the APK, but the India dashboard connection path does not proactively read `8610`, the VIN, or the software version.
+The application contains a protection handshake, but the inspected build does not contain a general-purpose key derivation algorithm. It stores ten fixed six-byte challenge/response pairs. The dashboard first requires an Android Bluetooth bond. For a first-time protected connection it enables indications on `8610`, handles the challenge in its characteristic-change callback, writes the corresponding six-byte response to `8620`, and persists a protection-accepted flag. Later connections with that flag bypass `8610` and enable the normal subscription set directly. Generic read callback code exists elsewhere in the APK, but the India dashboard connection path does not proactively read `8610`, the VIN, or the software version. A stationary capture confirms this on the wire: the OEM writes both CCCDs and never issues a read request. It also shows why — `8810` and `8910` answer a read with a zero-filled buffer and deliver their real values only as indications.
 
 The protocol exposes useful read-only telemetry and a fixed-function TFT interface. It does not expose a general framebuffer or any confirmed ECU control surface.
 
@@ -275,27 +275,12 @@ The two obfuscated stdlib calls inside `q()` resolve as `kotlin.collections.x.L`
 | 4 | `clusterConnect.d()` | `8240` text row three |
 | 5 | `clusterConnect.c()/e()/d()` | `8240` text rows one to three |
 
-The session (`8260`), status (`8270`) and clear (`8250`) packets are *not* looped. RideBuddy makes
-the same split: data frames carry `replayForCluster`, control batches do not.
+The session (`8260`), status (`8270`) and clear (`8250`) packets are *not* looped.
 
 This is deliberate OEM behavior rather than a decompiler artifact.
 
-**RideBuddy currently does not replay.** `ClusterReplayCount` is set to 1, writing each field once
-and relying on its serialized operation queue instead of blind repetition. This is an untested
-departure from the only implementation known to drive this cluster, taken because two passes made a
-full guidance update take about two seconds to drain against a roughly 1 Hz feed, which left
-distance-to-turn visibly stale near a maneuver.
-
-The reasoning is weakest for `8210`, `8220` and `8230`. Those are written as ATT Write Commands
-(the OEM uses write type `1`, and RideBuddy matches it), so nothing at any layer the phone controls
-can observe whether the cluster consumed them — a serialized queue cannot substitute for an
-acknowledgement that the protocol never provides. `8240` is an acknowledged write (type `2`) in both
-implementations, so the argument is stronger there.
-
-Settle it with a parked test: if maneuver, distance, speed limit or text fail to appear or update
-late, restore the OEM behavior by reverting the commit that set the count to 1.
-`MinimumWriteIntervalMillis = 200L` is unaffected and should stay — it is the OEM's inter-write
-pacing, which is a separate thing from the replay.
+RideBuddy does not reproduce the second pass. That divergence, its rationale and the evidence that
+would reverse it are recorded in [cluster-link-decisions.md](cluster-link-decisions.md#d1).
 
 The OEM repeats parts of the call path too, and RideBuddy does not: caller state (`8730`) plus name
 (`8710`) and number (`8760`) go out three times on an incoming call, the number (`8760`) twice more,

@@ -15,7 +15,6 @@ class ConnectionRequestPolicyTest {
     fun `same target does not restart an active connection`() {
         val renamedTarget = BikeConnectionTarget(firstAddress, "Renamed bike")
 
-        assertFalse(shouldStartConnection(currentTarget, renamedTarget, BikeConnectionState.Scanning))
         assertFalse(shouldStartConnection(currentTarget, renamedTarget, BikeConnectionState.Connecting("bike")))
         assertFalse(shouldStartConnection(currentTarget, renamedTarget, BikeConnectionState.Authenticating("bike")))
         assertFalse(shouldStartConnection(currentTarget, renamedTarget, BikeConnectionState.Connected("bike", -60)))

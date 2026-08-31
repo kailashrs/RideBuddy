@@ -15,8 +15,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * An opt-in, in-memory record of GATT traffic. Capture data can include identifiers and
- * notification text, so it is never written to disk and is cleared when the app process exits.
+ * An opt-in, in-memory record of GATT traffic, for protocol debugging.
+ *
+ * Captured payloads can contain identifiers, a VIN, and caller details, so the buffer is
+ * never written to disk and dies with the process. Exporting it is an explicit rider
+ * action and the export carries a warning header.
+ *
+ * Recording happens on the Bluetooth callback thread while the state flow is read by
+ * Compose, so the buffer is guarded by a lock and snapshots are published on a timer
+ * rather than per entry — at full telemetry rate, a snapshot per frame would recompose
+ * the diagnostics screen several times a second for no benefit.
  */
 class BleCaptureRecorder internal constructor(
     private val scope: CoroutineScope? = null,
@@ -47,6 +55,10 @@ class BleCaptureRecorder internal constructor(
         mutableState.value = snapshot
     }
 
+    /**
+     * Appends one entry when capture is enabled, dropping the oldest once the buffer is
+     * full. [payload] is copied because the framework reuses its buffers.
+     */
     fun record(direction: BleCaptureDirection, characteristic: UUID, payload: ByteArray, outcome: String? = null) {
         val immediateSnapshot = synchronized(lock) {
             if (!enabled) return
@@ -67,6 +79,7 @@ class BleCaptureRecorder internal constructor(
         immediateSnapshot?.let { mutableState.value = it }
     }
 
+    /** Plain-text rendering for sharing. Carries an explicit note about its contents. */
     fun exportText(): String = buildString {
         val current = synchronized(lock) { snapshotLocked() }
         appendLine("RideBuddy BLE capture")
@@ -76,6 +89,11 @@ class BleCaptureRecorder internal constructor(
         current.entries.forEach { appendLine(it.format()) }
     }
 
+    /**
+     * Returns a snapshot to publish immediately, or null once a publish is already
+     * pending. Coalescing this way bounds recomposition to one per interval no matter how
+     * fast entries arrive. With no scope — as in tests — every entry publishes directly.
+     */
     private fun scheduleSnapshotLocked(): BleCaptureState? {
         val publisher = scope
         if (publisher == null || publishIntervalMillis <= 0L) return snapshotLocked()
@@ -103,7 +121,10 @@ class BleCaptureRecorder internal constructor(
     )
 
     private companion object {
+        /** Ring capacity. Enough to hold a full connect-and-authenticate sequence. */
         const val MaxEntries = 500
+
+        /** Upper bound on UI refresh rate while capture is running. */
         const val DefaultPublishIntervalMillis = 250L
     }
 }
@@ -130,10 +151,10 @@ data class BleCaptureEntry(
     }
 }
 
+/** Labels chosen to match the conventions of a Bluetooth HCI log, for side-by-side reading. */
 enum class BleCaptureDirection(val label: String) {
     Outbound("TX"),
     Notification("NTF"),
-    Read("READ"),
 }
 
 private val TimestampFormatter: DateTimeFormatter =

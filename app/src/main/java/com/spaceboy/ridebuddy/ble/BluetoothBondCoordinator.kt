@@ -10,13 +10,25 @@ import android.os.Handler
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 
+/** What to do about a device's bond state before GATT can be opened. */
 internal enum class BondPreparationAction {
+    /** Already bonded; go straight to GATT. */
     ConnectGatt,
+
+    /** Android is mid-pairing; wait for it rather than starting a second attempt. */
     ObserveBond,
+
+    /** Not bonded; ask Android to pair. */
     StartBonding,
+
+    /** The bond state could not be read, so nothing can be assumed about the device. */
     Reject,
 }
 
+/**
+ * The cluster refuses GATT to an unbonded central, so pairing has to complete before a
+ * connection is worth attempting.
+ */
 internal fun bondPreparationAction(bondState: Int?): BondPreparationAction = when (bondState) {
     BluetoothDevice.BOND_BONDED -> BondPreparationAction.ConnectGatt
     BluetoothDevice.BOND_BONDING -> BondPreparationAction.ObserveBond
@@ -24,12 +36,18 @@ internal fun bondPreparationAction(bondState: Int?): BondPreparationAction = whe
     else -> BondPreparationAction.Reject
 }
 
+/** What a `createBond()` call's return value means, once the live state is consulted. */
 internal enum class BondStartFollowUp {
     ConnectGatt,
     ContinueObserving,
     Fail,
 }
 
+/**
+ * `createBond()` returns false both for "pairing could not be started" and for "there was
+ * nothing to start", so its result alone is not a failure. Reading the live bond state
+ * separates the two: already bonded means proceed, already bonding means keep waiting.
+ */
 internal fun bondStartFollowUp(started: Boolean, currentBondState: Int?): BondStartFollowUp = when {
     started -> BondStartFollowUp.ContinueObserving
     currentBondState == BluetoothDevice.BOND_BONDED -> BondStartFollowUp.ConnectGatt
@@ -65,7 +83,16 @@ internal fun bondEventOutcome(
     else -> BondEventOutcome.Ignore
 }
 
-/** Owns Android pairing observation so the GATT facade only receives a ready bonded device. */
+/**
+ * Owns pairing so the GATT layer only ever receives a device that is already bonded.
+ *
+ * Every path out of here is one of two callbacks — [onBondReady] or [onFailure] — and each
+ * fires at most once per [prepare], because [cancel] runs first and drops the observation.
+ *
+ * Observations are generation-stamped and rechecked on every event. A broadcast is global,
+ * so it can arrive for a device this coordinator is no longer waiting on, or for a
+ * connection attempt that has since been superseded.
+ */
 @SuppressLint("MissingPermission")
 internal class BluetoothBondCoordinator(
     context: Context,
@@ -108,6 +135,10 @@ internal class BluetoothBondCoordinator(
         }
     }
 
+    /**
+     * Brings [device] to a bonded state, calling back when it is ready or when it cannot be.
+     * Cancels any observation already in progress.
+     */
     fun prepare(
         device: BluetoothDevice,
         initialBondState: Int?,
@@ -152,6 +183,7 @@ internal class BluetoothBondCoordinator(
         }
     }
 
+    /** Stops observing and unregisters. Safe to call when nothing is being observed. */
     fun cancel() {
         handler.removeCallbacksAndMessages(timeoutToken)
         if (receiverRegistered) {
@@ -185,6 +217,8 @@ internal class BluetoothBondCoordinator(
             return false
         }
 
+        // Re-read after registering: the state can change in the window between the caller
+        // reading it and the receiver going live, and that broadcast is simply gone.
         when (readBondState(device)) {
             BluetoothDevice.BOND_BONDED -> {
                 completeBond(device, "Motorcycle pairing completed before its broadcast was observed")
@@ -230,6 +264,7 @@ internal class BluetoothBondCoordinator(
         runCatching { device.bondState }.getOrNull()
 
     private companion object {
+        /** Long, because first-time pairing may be waiting on the rider to confirm a prompt. */
         const val BondTimeoutMillis = 60_000L
     }
 }

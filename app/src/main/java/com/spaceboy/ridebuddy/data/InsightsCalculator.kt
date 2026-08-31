@@ -6,6 +6,12 @@ import java.time.ZoneId
 import java.time.temporal.WeekFields
 import java.util.Locale
 
+/**
+ * Aggregates ride history for the insights screen.
+ *
+ * Pure and clock-injectable: every overload funnels into the one taking an explicit
+ * timestamp and zone, so period boundaries can be exercised directly.
+ */
 object InsightsCalculator {
     fun calculate(
         rides: List<Ride>,
@@ -19,6 +25,13 @@ object InsightsCalculator {
         nowMillis: Long,
     ): RideInsights = calculate(rides, period, nowMillis, ZoneId.systemDefault())
 
+    /**
+     * Aggregates the rides falling in [period], relative to [nowMillis] in [zone].
+     *
+     * "Today" means since local midnight, which needs the zone; the other fixed periods are
+     * rolling windows back from now. Each also defines an equally long preceding window,
+     * which is what [RideInsights.distanceChangePercent] compares against.
+     */
     fun calculate(
         rides: List<Ride>,
         period: InsightPeriod,
@@ -51,7 +64,11 @@ object InsightsCalculator {
         val fuelEstimates = current.mapNotNull { ride ->
             ride.estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 }
         }
+        // Duration-weighted, not a plain mean of the per-ride averages: a five-minute
+        // commute would otherwise pull the average speed as hard as a three-hour tour.
         val weightedSeconds = current.sumOf { it.durationMillis / 1_000.0 }.takeIf { it > 0.0 }
+        // Null rather than 100% when the previous window holds no distance: there is no
+        // meaningful percentage change from zero, and reporting one would be nonsense.
         val distanceChange = previousStart?.let { prevStart ->
             val previousDistance = rides
                 .filter { it.startedAtMillis in prevStart..<currentStart }
@@ -115,5 +132,7 @@ object InsightsCalculator {
     }
 
     private const val MillisPerDay = 86_400_000L
+
+    /** Rides in the trend sparkline. Enough to show a shape, few enough to stay legible. */
     private const val DistanceTrendRides = 14
 }

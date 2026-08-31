@@ -1,6 +1,20 @@
 package com.spaceboy.ridebuddy.data
 
+/**
+ * Reduces a ride's samples to discrete hard-acceleration and hard-braking events.
+ *
+ * A single hard stop spans several consecutive samples over threshold. Reporting each as
+ * its own event would make one stop look like five, so consecutive qualifying samples of
+ * the same kind are collapsed into one episode, reported at its peak magnitude.
+ */
 object RideEventDetector {
+    /**
+     * Detects events in [samples], which must be in time order.
+     *
+     * An episode ends when a sample falls back under threshold, when the sign flips —
+     * braking after accelerating is a new event, not a continuation — or when the gap to
+     * the next qualifying sample is too long to be the same manoeuvre.
+     */
     fun detect(samples: List<RideSample>, thresholdMetresPerSecondSquared: Double = 3.0): List<RideEvent> {
         val events = mutableListOf<RideEvent>()
         var activeEvent: RideEvent? = null
@@ -49,5 +63,9 @@ object RideEventDetector {
         accelerationMetresPerSecondSquared,
     )
 
+    /**
+     * Beyond this gap, two qualifying samples are separate manoeuvres rather than one.
+     * Generous enough to survive a few dropped telemetry frames mid-episode.
+     */
     private const val MaximumEventSampleGapMillis = 2_500L
 }

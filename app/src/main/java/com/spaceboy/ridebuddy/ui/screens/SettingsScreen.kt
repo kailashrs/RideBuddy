@@ -104,6 +104,18 @@ import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/**
+ * Every setting, grouped into sections.
+ *
+ * Each section below is its own composable rather than one long list, so the file stays
+ * navigable and each group's parameters make plain what it actually touches.
+ *
+ * Three groups need care. Anything that writes to the motorcycle — caller display, call
+ * controls, navigation output — is off by default and carries a warning to validate it
+ * parked first. Anything that captures data is off by default because captures can contain
+ * identifiers and notification text. And the destructive actions (forget bike, clear
+ * history) confirm before acting.
+ */
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
@@ -301,6 +313,13 @@ fun SettingsScreen(
  * Converts between the km/h the app stores and the value a slider shows in the rider's units.
  * Shared by the trip-tracking and alert sections, which both drive sliders in display units and
  * write back canonical ones.
+ */
+/**
+ * Converts between stored speeds and the rider's display units for the slider rows.
+ *
+ * Speeds are stored in km/h but the sliders operate in whatever unit the rider has chosen,
+ * so the conversion has to run both ways: [display] to place the handle, [stored] to
+ * convert the position back before saving.
  */
 @Immutable
 private class SpeedFormat(private val units: DistanceUnits, private val locale: Locale) {
@@ -692,6 +711,13 @@ private fun AppThemeSection(
     }
 }
 
+/**
+ * Diagnostics and validation tools.
+ *
+ * Includes the parked display test, which is the intended way to verify vehicle output
+ * before enabling it for real, and the packet capture, whose privacy note is part of the
+ * dialog rather than buried in this section.
+ */
 @Composable
 private fun DeveloperToolsSection(
     settings: AppSettings,
@@ -1014,6 +1040,12 @@ private fun SupportedAppsDialog(
     }
 }
 
+/**
+ * Shows the captured packets, newest first, with share and clear.
+ *
+ * The privacy note is shown here rather than only at the toggle, because this is the point
+ * at which the rider is about to share the contents somewhere.
+ */
 @Composable
 private fun BleCaptureDialog(
     bleCapture: BleCaptureState,

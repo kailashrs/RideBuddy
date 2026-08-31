@@ -19,16 +19,35 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+/** How a chart's vertical axis is scaled. */
 internal enum class LineChartScalePolicy {
+    /**
+     * Baseline at zero. Right for magnitudes like speed or RPM, where the distance from
+     * zero is the point and an auto-ranged axis would exaggerate small variation.
+     */
     ZeroBased,
+
+    /** Fits the data's own range. Right for values that vary within a narrow band. */
     AutoRange,
 }
 
+/** A point in normalised chart space: both axes in 0..1, independent of pixel size. */
 internal data class LineChartPoint(
     val x: Float,
     val y: Float,
 )
 
+/**
+ * Converts values into drawable segments, splitting at gaps.
+ *
+ * A null or non-finite value ends the current segment and starts a new one, so a gap in the
+ * data is drawn as a gap rather than a straight line bridging it — which would invent a
+ * reading that was never recorded.
+ *
+ * The geometry is pure and separated from drawing so it can be unit-tested, and so it is
+ * recomputed only when the data changes rather than on every layout pass. Degenerate inputs
+ * are handled explicitly: a single point is centred, since it has no range to scale within.
+ */
 internal fun lineChartSegments(
     values: List<Double?>,
     width: Float,
@@ -146,12 +165,20 @@ internal fun LineChart(
     )
 }
 
+/** A segment scaled to pixels. Either a single [point], or the line and its fill. */
 private data class RenderedLineChartSegment(
     val point: Offset? = null,
     val linePath: Path? = null,
     val fillPath: Path? = null,
 )
 
+/**
+ * Scales a normalised segment to pixels and builds its paths.
+ *
+ * Smoothing uses cubic curves with control points at the horizontal midpoint between
+ * samples, which rounds the line without letting it overshoot past the values it connects —
+ * important for telemetry, where an overshoot would imply a speed that was never reached.
+ */
 private fun List<LineChartPoint>.toRenderedSegment(
     width: Float,
     height: Float,

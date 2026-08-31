@@ -7,11 +7,21 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothStatusCodes
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
 
+/**
+ * The write type to use for [characteristic], or null when it accepts no write at all.
+ *
+ * [mode] expresses a preference, not a requirement: whichever type the characteristic
+ * actually declares wins, and the preference only decides when it declares both. An
+ * acknowledged write costs a round trip but reports its outcome; an unacknowledged one is
+ * cheaper and is preferred for high-rate display updates where a dropped frame is
+ * immediately superseded by the next.
+ */
 internal fun requestedWriteType(
     characteristic: BluetoothGattCharacteristic,
     mode: BikeWriteMode,
 ): Int? = requestedWriteType(characteristic.properties, mode)
 
+/** Property-bitmask overload, so the choice can be exercised without a framework object. */
 internal fun requestedWriteType(properties: Int, mode: BikeWriteMode): Int? {
     val supportsDefault = properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
     val supportsNoResponse =
@@ -31,7 +41,14 @@ internal fun requestedWriteType(properties: Int, mode: BikeWriteMode): Int? {
     }
 }
 
-/** Performs one already-serialized Android GATT operation. */
+/**
+ * Performs one already-serialized GATT operation against the framework.
+ *
+ * This class does no queueing and no retrying — [GattOperationScheduler] guarantees a
+ * single operation is in flight, and [gattFailureAction] decides what a failure means.
+ * All this does is translate an operation into the right framework call and translate the
+ * refusal back into a reason the policy can act on.
+ */
 @SuppressLint("MissingPermission")
 internal class AndroidGattOperationExecutor(
     private val captureRecorder: BleCaptureRecorder,
@@ -42,7 +59,6 @@ internal class AndroidGattOperationExecutor(
      */
     fun start(gatt: BluetoothGatt, operation: GattOperation): GattStartOutcome = when (operation) {
         is GattOperation.Subscribe -> subscribe(gatt, operation.characteristic)
-        is GattOperation.Read -> read(gatt, operation.characteristic)
         is GattOperation.Write -> writeCharacteristic(
             gatt,
             operation.characteristic,
@@ -61,6 +77,9 @@ internal class AndroidGattOperationExecutor(
         }
         val descriptor = characteristic.getDescriptor(BleCharacteristics.ClientCharacteristicConfiguration)
             ?: return GattStartOutcome.Rejected(GattStartRejection.NotPermitted)
+        // Indications are acknowledged and notifications are not, and writing the wrong
+        // enable value leaves a characteristic silently unsubscribed. The characteristic's
+        // own properties decide which it is, rather than a per-UUID table that would drift.
         val indication = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
         val value = if (indication) {
             BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
@@ -68,22 +87,6 @@ internal class AndroidGattOperationExecutor(
             BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         }
         return outcomeFor(gatt.writeDescriptor(descriptor, value))
-    }
-
-    private fun read(
-        gatt: BluetoothGatt,
-        characteristic: BluetoothGattCharacteristic,
-    ): GattStartOutcome {
-        // readCharacteristic() returns a bare boolean, so the deterministic cause is checked here
-        // and anything else is treated as the transient "another operation is in flight" case.
-        if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) {
-            return GattStartOutcome.Rejected(GattStartRejection.NotPermitted)
-        }
-        return if (gatt.readCharacteristic(characteristic)) {
-            GattStartOutcome.Started
-        } else {
-            GattStartOutcome.Rejected(GattStartRejection.Busy)
-        }
     }
 
     private fun writeCharacteristic(

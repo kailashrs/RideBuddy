@@ -3,11 +3,19 @@ package com.spaceboy.ridebuddy.core.companion
 import android.content.Context
 import androidx.core.content.edit
 
+/** Whether the app may connect on its own, without the rider asking. */
 internal enum class AutomaticConnectionDemand {
     Allowed,
+
+    /**
+     * The rider disconnected deliberately. Automatic connection stays off until the
+     * motorcycle actually goes away — otherwise the presence callback that is still firing
+     * for a bike parked in range would immediately undo their choice.
+     */
     SuppressedUntilBleDisappears,
 }
 
+/** Last observed presence. [Unknown] until the first callback of the process arrives. */
 internal enum class ObservedBlePresence {
     Unknown,
     Present,
@@ -26,9 +34,21 @@ internal enum class BikeConnectionDemandEvent {
     BleDisappeared,
 }
 
+/** What to do about an appearance callback. */
 internal enum class BleAppearanceDecision {
     RequestConnection,
+
+    /**
+     * Already recorded as present, so there is nothing new to act on.
+     *
+     * Not because the platform polls — `onDevicePresenceEvent` is edge-triggered and fires on
+     * change, not while the bike sits in range. This covers an appearance arriving with no
+     * disappearance between, which is what a re-registered listener or a replayed state
+     * produces.
+     */
     IgnoreDuplicate,
+
+    /** The rider disconnected on purpose and the bike has not left since. */
     IgnoreWhileSuppressed,
 }
 
@@ -37,7 +57,13 @@ internal data class BikeConnectionDemandTransition(
     val appearanceDecision: BleAppearanceDecision? = null,
 )
 
-/** Pure transition function shared by the runtime controller and its regression tests. */
+/**
+ * The whole policy as one pure function, so it can be exercised directly rather than
+ * through storage and platform callbacks.
+ *
+ * A disappearance clears suppression as well as recording absence: the bike genuinely left,
+ * so the rider's earlier disconnect no longer describes a situation that still exists.
+ */
 internal fun bikeConnectionDemandTransition(
     state: BikeConnectionDemandState,
     event: BikeConnectionDemandEvent,
@@ -97,14 +123,17 @@ internal class BikeConnectionDemandController(context: Context) {
         },
     )
 
+    /** The rider asked to connect. Always clears suppression. */
     fun allowExplicitConnection() {
         transition(BikeConnectionDemandEvent.ExplicitConnect)
     }
 
+    /** The rider disconnected deliberately, from the UI or the notification. */
     fun suppressAutomaticConnections() {
         transition(BikeConnectionDemandEvent.ManualDisconnect)
     }
 
+    /** Whether a launch-time or service-driven automatic attempt is permitted. */
     fun canStartAutomaticConnection(): Boolean = synchronized(lock) {
         state.automaticConnectionDemand == AutomaticConnectionDemand.Allowed
     }
@@ -116,6 +145,12 @@ internal class BikeConnectionDemandController(context: Context) {
         transition(BikeConnectionDemandEvent.BleDisappeared)
     }
 
+    /**
+     * Applies an event and persists the demand flag when it changed. Only that flag is
+     * stored: presence is re-established by the platform's callbacks on the next launch,
+     * whereas a forgotten suppression would silently reconnect a bike the rider had
+     * disconnected.
+     */
     private fun transition(event: BikeConnectionDemandEvent): BikeConnectionDemandTransition = synchronized(lock) {
         val previousDemand = state.automaticConnectionDemand
         bikeConnectionDemandTransition(state, event).also { transition ->

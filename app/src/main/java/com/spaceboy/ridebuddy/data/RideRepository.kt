@@ -18,6 +18,16 @@ import kotlinx.coroutines.withContext
 
 internal const val DefaultRideDatabaseName = "rides.db"
 
+/**
+ * Stores ride history in a local SQLite database and publishes it as a flow.
+ *
+ * Nothing leaves the device: history, samples and route traces are local, and the export
+ * actions are the only way any of it moves.
+ *
+ * All access is serialised by a mutex and dispatched to IO. The mutex is not about SQLite —
+ * which handles its own locking — but about the flow: without it, two concurrent writers
+ * could interleave their re-reads and publish a list that lags the database.
+ */
 class RideRepository(
     context: Context,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -28,12 +38,17 @@ class RideRepository(
     private val mutableRides = MutableStateFlow<List<Ride>>(emptyList())
     val rides: StateFlow<List<Ride>> = mutableRides.asStateFlow()
 
+    /** Reloads history from the database into [rides]. */
     suspend fun refresh() = withContext(ioDispatcher) {
         databaseMutex.withLock {
             mutableRides.value = database.readRides()
         }
     }
 
+    /**
+     * Stores a ride with its samples in one transaction and returns its new id. The
+     * published list is refreshed as part of the same locked section.
+     */
     suspend fun insert(ride: Ride, samples: List<RideSample> = emptyList()): Long = withContext(ioDispatcher) {
         databaseMutex.withLock {
             val rideId = database.insertRide(ride, samples)
@@ -42,6 +57,7 @@ class RideRepository(
         }
     }
 
+    /** Fills in place labels once reverse geocoding has resolved them, after the insert. */
     suspend fun updateAreas(rideId: Long, startArea: String?, endArea: String?) = withContext(ioDispatcher) {
         databaseMutex.withLock {
             database.updateAreas(rideId, startArea, endArea)
@@ -49,10 +65,15 @@ class RideRepository(
         }
     }
 
+    /**
+     * Full sample series for one ride, loaded on demand. Deliberately not part of [Ride]:
+     * a ride can hold tens of thousands of samples, and the history list needs none of them.
+     */
     suspend fun samples(rideId: Long): List<RideSample> = withContext(ioDispatcher) {
         databaseMutex.withLock { database.readSamples(rideId) }
     }
 
+    /** Deletes all history. Samples go with it via the foreign key's cascade. */
     suspend fun clear() = withContext(ioDispatcher) {
         databaseMutex.withLock {
             database.writableDatabase.delete(RideDatabase.Table, null, null)
@@ -61,7 +82,12 @@ class RideRepository(
     }
 }
 
+/**
+ * Schema and queries. Plain SQLite rather than an ORM: two tables, a handful of statements,
+ * and no need for a code-generation dependency.
+ */
 private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(context, name, null, Version) {
+    /** Off by default on Android, and the samples table's cascade delete depends on it. */
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
@@ -94,12 +120,27 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
         createSamplesTable(db)
     }
 
+    /**
+     * Recreates the schema on any version change, in either direction, discarding history.
+     *
+     * The app is unreleased and its history is derived data a rider can regenerate by
+     * riding, so carrying migrations for every schema iteration would cost more than the
+     * data is worth. This needs revisiting before any release that expects to retain data
+     * across an update.
+     */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         recreate(db)
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = recreate(db)
 
+    /**
+     * Inserts a ride and its samples atomically, so a failure partway cannot leave a ride
+     * with a truncated trace.
+     *
+     * Samples go through one compiled, rebound statement rather than per-row inserts: a
+     * ride can carry tens of thousands, and re-parsing the SQL for each one dominates.
+     */
     fun insertRide(ride: Ride, samples: List<RideSample>): Long {
         val db = writableDatabase
         return db.transaction {
@@ -156,6 +197,9 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
         )
     }
 
+    // Column indices are resolved once before each read loop rather than per row, since
+    // getColumnIndexOrThrow is a name lookup and these loops run over every stored sample.
+
     fun readSamples(rideId: Long): List<RideSample> = readableDatabase.query(
         SamplesTable, null, "ride_id = ?", arrayOf(rideId.toString()), null, null, "timestamp ASC",
     ).use { cursor ->
@@ -204,9 +248,11 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 altitude REAL
             )""".trimIndent(),
         )
+        // Every sample query filters by ride and orders by time; this index covers both.
         db.execSQL("CREATE INDEX IF NOT EXISTS samples_ride_time ON $SamplesTable(ride_id, timestamp)")
     }
 
+    /** All rides, newest first — the order the history screen displays them in. */
     fun readRides(): List<Ride> = readableDatabase.query(
         Table,
         null,
@@ -297,8 +343,13 @@ private fun Cursor.nullableString(index: Int): String? {
     return if (isNull(index)) null else getString(index)
 }
 
+// The route preview is a short, fixed-size list of coordinates stored as one text column
+// rather than its own table. Coordinates contain no delimiter characters, so a
+// semicolon-and-comma encoding is unambiguous, and it keeps the history query to one read.
+
 private fun List<RoutePoint>.encode(): String = joinToString(";") { "${it.latitude},${it.longitude}" }
 
+/** Skips any malformed point rather than failing: a bad preview must not hide the ride. */
 private fun String?.decodeRoute(): List<RoutePoint> = this?.split(';').orEmpty().mapNotNull { encoded ->
     val values = encoded.split(',', limit = 2)
     val latitude = values.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null

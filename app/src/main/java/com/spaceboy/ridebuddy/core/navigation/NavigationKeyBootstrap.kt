@@ -6,6 +6,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 
+/**
+ * Outcome of loading and applying the stored key. Carries only the masked key, so the
+ * secret itself does not spread through the UI layer.
+ */
 internal data class NavigationKeyBootstrapResult(
     val maskedKey: String?,
     val isConfigured: Boolean,
@@ -14,8 +18,16 @@ internal data class NavigationKeyBootstrapResult(
 )
 
 /**
- * Loads and applies the stored Navigation SDK key once per process. The deferred result is shared
- * by every Activity and ViewModel, while retaining only the masked form of the key.
+ * Loads and applies the stored Navigation SDK key exactly once per process.
+ *
+ * The SDK only accepts a key once, and several Activities and ViewModels need to know
+ * whether one is configured. An `async` started at construction gives every caller the
+ * same result without any of them racing to apply it — the first `await` does the work and
+ * the rest join it.
+ *
+ * Later saves and removals overwrite the cached result through the `record…` methods rather
+ * than re-running the load, so the UI reflects a change immediately even though the SDK
+ * itself will not pick a replacement key up until the next process.
  */
 internal class NavigationKeyBootstrap(
     scope: CoroutineScope,
@@ -36,6 +48,13 @@ internal class NavigationKeyBootstrap(
         }
     }
 
+    /**
+     * The current key state, waiting for the initial load if it has not finished.
+     *
+     * A `record…` call that lands while the load is still in flight wins: the load's own
+     * result is only cached if nothing has been recorded, so a save is not overwritten by
+     * the stale value the load started before it.
+     */
     suspend fun await(): Result<NavigationKeyBootstrapResult> {
         val initialized = result.await()
         return synchronized(lock) {
@@ -43,12 +62,17 @@ internal class NavigationKeyBootstrap(
         }
     }
 
+    /** Notes a key the rider has just saved, without re-reading storage. */
     fun recordSavedKey(apiKey: String, configureResult: ConfigureResult) {
         synchronized(lock) {
             latestResult = Result.success(apiKey.toBootstrapResult(configureResult))
         }
     }
 
+    /**
+     * Notes a key the rider has just removed. [restartRequired] is true when the removed key
+     * had already been applied to this process, which cannot be undone without a restart.
+     */
     fun recordRemovedKey(restartRequired: Boolean) {
         synchronized(lock) {
             latestResult = Result.success(

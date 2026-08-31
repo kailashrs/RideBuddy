@@ -66,4 +66,20 @@ class RideDistanceIntegrationTest {
         instantaneousMileageKilometresPerLitre = mileage,
         engineRpm = 3_000,
     )
+
+    @Test
+    fun `a rebased baseline contributes no distance, which is how a reconnect is absorbed`() {
+        // The first frame after a reconnect rebases lastSampleAtElapsedRealtime onto now, so the
+        // interval is zero and the unmeasured gap adds nothing rather than being interpolated.
+        assertEquals(0.0, distanceDeltaKilometres(90.0, 90.0, 0L), 0.0)
+    }
+
+    @Test
+    fun `a gap longer than the integration window also contributes nothing`() {
+        assertEquals(
+            0.0,
+            distanceDeltaKilometres(90.0, 90.0, MaxDistanceIntegrationGapMillis + 1),
+            0.0,
+        )
+    }
 }

@@ -33,7 +33,7 @@ import org.junit.Test
  * which never acknowledges a write cannot hold the write worker in a retry loop.
  *
  * The bridge paces its own writes, so these tests wait in real time. Every wait is well clear of
- * the interval it is covering: [SettleMillis] exceeds a full replayed batch, and [GiveUpMillis]
+ * the interval it is covering: [SettleMillis] exceeds a fully paced batch, and [GiveUpMillis]
  * exceeds the whole 1s + 2s failure backoff.
  */
 class TftNavigationBridgeTest {
@@ -44,6 +44,7 @@ class TftNavigationBridgeTest {
         bridge.start()
 
         assertFalse(bridge.presentTextAlert("HELLO"))
+        bridge.stop()
         settle()
 
         assertEquals(emptyList<UUID>(), connection.writtenCharacteristics())
@@ -90,6 +91,107 @@ class TftNavigationBridgeTest {
     }
 
     @Test
+    fun `stopping a requested route before its first update clears the cluster`() =
+        withBridge { bridge, connection ->
+            connection.authenticate()
+            settle()
+            bridge.start("HOME")
+            settle()
+            connection.clearWrites()
+
+            bridge.stop()
+            settle()
+
+            val written = connection.writtenCharacteristics()
+            assertTrue(
+                "expected the pending route to be cleared, got $written",
+                BleCharacteristics.NavigationClear in written,
+            )
+            assertFalse("a stale session followed the clear", BleCharacteristics.NavigationSession in written)
+            assertFalse("a stale status followed the clear", BleCharacteristics.NavigationStatus in written)
+        }
+
+    @Test
+    fun `a staged destination is restored after reconnect`() = withBridge { bridge, connection ->
+        connection.authenticate()
+        settle()
+        bridge.previewDestination("HOME")
+        settle()
+        connection.clearWrites()
+
+        connection.disconnect()
+        settle()
+        connection.authenticate()
+        settle()
+
+        val sessions = connection.payloadsFor(BleCharacteristics.NavigationSession)
+        assertEquals(83, sessions.single()[2].toInt() and 0xFF)
+        assertTrue(
+            "expected destination text after reconnect",
+            BleCharacteristics.NavigationText in connection.writtenCharacteristics(),
+        )
+    }
+
+    @Test
+    fun `rerouting keeps an active alert on the text rows`() = withBridge { bridge, connection ->
+        connection.authenticate()
+        settle()
+        bridge.start("HOME")
+        assertTrue(bridge.presentTextAlert("ROUTE ALERT"))
+        settle()
+        connection.clearWrites()
+
+        bridge.rerouting()
+        settle()
+
+        val written = connection.writtenCharacteristics()
+        assertTrue(
+            "expected the recalculation pictogram, got $written",
+            BleCharacteristics.NavigationManeuver in written,
+        )
+        assertFalse("rerouting overwrote the active alert", BleCharacteristics.NavigationText in written)
+    }
+
+    @Test
+    fun `a superseded session coalesces but its status word still goes out once`() =
+        withBridge { bridge, connection ->
+            // The transport is down, so both marks sit as state and coalesce before anything
+            // drains: staging a destination marks the preview session, and starting a route then
+            // replaces it while marking the status word for that request.
+            bridge.previewDestination("HOME")
+            bridge.start("HOME")
+
+            connection.authenticate()
+            settle()
+
+            val sessions = connection.payloadsFor(BleCharacteristics.NavigationSession)
+            val statuses = connection.payloadsFor(BleCharacteristics.NavigationStatus)
+            assertEquals("only the newest session value should reach the wire", 1, sessions.size)
+            assertEquals(80, sessions.single()[2].toInt() and 0xFF)
+            assertEquals("status survives session coalescing, once per request", 1, statuses.size)
+            assertEquals(132, statuses.single()[1].toInt() and 0xFF)
+        }
+
+    @Test
+    fun `teardown writes the clear without any stale session or status`() =
+        withBridge { bridge, connection ->
+            connection.authenticate()
+            settle()
+            bridge.start()
+            bridge.presentTextAlert("HELLO")
+            settle()
+            connection.clearWrites()
+
+            bridge.stop()
+            settle()
+
+            val written = connection.writtenCharacteristics()
+            assertTrue("expected a clear frame, got $written", BleCharacteristics.NavigationClear in written)
+            assertFalse("a stale session followed the clear", BleCharacteristics.NavigationSession in written)
+            assertFalse("a stale status followed the clear", BleCharacteristics.NavigationStatus in written)
+        }
+
+    @Test
     fun `a cluster that never acknowledges writes stops being retried`() = withBridge { bridge, connection ->
         connection.authenticate()
         settle()
@@ -128,6 +230,28 @@ class TftNavigationBridgeTest {
         }
     }
 
+    @Test
+    fun `a failed preview batch is retried instead of being routed into the coalescing map`() =
+        withBridge { bridge, connection ->
+            connection.authenticate()
+            settle()
+            connection.clearWrites()
+
+            // Preview runs with no session active, so anything restored into the coalescing map is
+            // stamped with a session generation it can never satisfy and is dropped silently.
+            connection.failOnce = BleCharacteristics.NavigationText
+            bridge.previewDestination("HOME")
+            delay(GiveUpMillis)
+
+            val rows = connection.payloadsFor(BleCharacteristics.NavigationText)
+            assertTrue("the failed preview batch was never retried", rows.size > 1)
+            assertEquals(
+                "the retry did not carry all three rows",
+                listOf(0, 1, 2),
+                rows.takeLast(3).map { it[1].toInt() and 0xFF },
+            )
+        }
+
     private companion object {
         const val SettleMillis = 1_500L
         const val GiveUpMillis = 5_000L
@@ -139,6 +263,10 @@ private class FakeBikeConnection : BikeConnection {
 
     @Volatile
     var acceptWrites = true
+
+    /** Fails the next write to this characteristic only, then clears itself. */
+    @Volatile
+    var failOnce: UUID? = null
 
     private val mutableConnectionState =
         MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
@@ -161,16 +289,26 @@ private class FakeBikeConnection : BikeConnection {
 
     fun writeCount(): Int = writes.size
 
+    fun payloadsFor(characteristic: UUID): List<ByteArray> =
+        writes.filter { it.characteristic == characteristic }.map { it.payload }
+
     fun clearWrites() = writes.clear()
 
     override fun connect(target: BikeConnectionTarget) = Unit
 
-    override fun disconnect() = Unit
+    override fun disconnect() {
+        mutableConnectionState.value = BikeConnectionState.Disconnected
+        mutableDiagnostics.value = BleDiagnostics()
+    }
 
     override fun enqueueWrite(characteristic: UUID, payload: ByteArray) = Unit
 
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
         writes += write
+        if (failOnce == write.characteristic) {
+            failOnce = null
+            return false
+        }
         return acceptWrites
     }
 }

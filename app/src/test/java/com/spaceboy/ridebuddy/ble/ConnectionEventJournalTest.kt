@@ -23,6 +23,7 @@ class ConnectionEventJournalTest {
 
         try {
             val journal = ConnectionEventJournal(
+                mirror = {},
                 store = store,
                 scope = scope,
                 ioDispatcher = Dispatchers.Unconfined,
@@ -64,6 +65,7 @@ class ConnectionEventJournalTest {
 
         try {
             val journal = ConnectionEventJournal(
+                mirror = {},
                 store = store,
                 scope = scope,
                 persistenceDebounceMillis = 30L,
@@ -101,6 +103,7 @@ class ConnectionEventJournalTest {
 
         try {
             val journal = ConnectionEventJournal(
+                mirror = {},
                 store = store,
                 scope = scope,
                 ioDispatcher = Dispatchers.Unconfined,
@@ -125,6 +128,7 @@ class ConnectionEventJournalTest {
 
         try {
             val journal = ConnectionEventJournal(
+                mirror = {},
                 store = store,
                 scope = scope,
                 ioDispatcher = Dispatchers.Unconfined,
@@ -151,6 +155,7 @@ class ConnectionEventJournalTest {
 
         try {
             val journal = ConnectionEventJournal(
+                mirror = {},
                 store = store,
                 scope = scope,
                 ioDispatcher = Dispatchers.Unconfined,

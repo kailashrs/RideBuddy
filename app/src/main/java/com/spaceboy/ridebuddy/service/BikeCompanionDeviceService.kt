@@ -8,10 +8,25 @@ import com.spaceboy.ridebuddy.core.companion.BleAppearanceDecision
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 
-/** System-bound presence receiver. It deliberately does not masquerade as a wearable profile. */
+/**
+ * Receives presence callbacks for the associated motorcycle, so the app can connect when it
+ * comes into range without running continuously.
+ *
+ * The system binds this and calls it directly; it holds no state of its own. Decisions
+ * belong to [com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController], and
+ * every branch is journalled — presence events are otherwise invisible after the fact, and
+ * they are the usual explanation for why a reconnect did or did not happen.
+ */
 class BikeCompanionDeviceService : CompanionDeviceService() {
     private val container get() = appContainer
 
+    /**
+     * Handles one presence event.
+     *
+     * An association removed elsewhere — from system settings, say — is handled first and
+     * unconditionally: there is no longer a motorcycle to be present, so the link is
+     * dropped and the local record reconciled.
+     */
     override fun onDevicePresenceEvent(event: DevicePresenceEvent) {
         if (event.event == DevicePresenceEvent.EVENT_ASSOCIATION_REMOVED) {
             container.connectionEventJournal.record(
@@ -88,10 +103,17 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
     }
 }
 
+/** What a presence event means for the app-owned GATT link. */
 internal enum class CompanionPresenceAction {
+    /** The bike is advertising; a connection may be warranted. */
     EvaluateBleAppearance,
+
+    /** The bike has gone; record it, which re-arms automatic connection. */
     MarkBleAbsent,
+
+    /** Informative only. Must not disturb a link or a retry budget. */
     KeepConnection,
+
     Ignore,
 }
 
@@ -107,9 +129,15 @@ internal fun companionPresenceAction(event: Int): CompanionPresenceAction = when
     else -> CompanionPresenceAction.Ignore
 }
 
+/**
+ * Whether an appearance should trigger a connection. Only from a settled state: an attempt
+ * already in flight will either succeed or run its own backoff, and starting a second would
+ * tear down the first.
+ */
 internal fun shouldRequestPresenceReconnect(state: BikeConnectionState): Boolean =
     state is BikeConnectionState.Disconnected || state is BikeConnectionState.Failed
 
+/** Readable name for the journal, so a presence event is legible in a diagnostics export. */
 internal fun companionPresenceEventLabel(event: Int): String = when (event) {
     DevicePresenceEvent.EVENT_BLE_APPEARED -> "BLE appeared"
     DevicePresenceEvent.EVENT_BLE_DISAPPEARED -> "BLE disappeared"

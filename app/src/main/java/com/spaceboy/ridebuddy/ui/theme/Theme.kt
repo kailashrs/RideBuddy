@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spaceboy.ridebuddy.data.ThemeMode
 
+// The app's own colour schemes, used when dynamic colour is off or unavailable. Built
+// around a red primary rather than Material's baseline purple.
+
 private val LightColors = lightColorScheme(
     primary = Color(0xFFB3261E),
     onPrimary = Color.White,
@@ -182,8 +185,14 @@ private val HighContrastDarkStatusColors = Rs457StatusColors(
     error = Color(0xFFFFB4AB),
 )
 
+/**
+ * Carries the status palette down the tree. `static` because it changes only when the theme
+ * itself does — a dynamic composition local would track every reader for a value that is
+ * effectively constant for the life of a screen.
+ */
 val LocalRs457StatusColors = staticCompositionLocalOf { LightStatusColors }
 
+/** `MaterialTheme.statusColors.connected` and friends, alongside the standard M3 tokens. */
 val MaterialTheme.statusColors: Rs457StatusColors
     @Composable
     @ReadOnlyComposable
@@ -310,6 +319,7 @@ val TelemetryHero = TextStyle(
     letterSpacing = 0.sp,
 )
 
+/** Corner radii for the whole app, so no component defines its own. */
 val Rs457Shapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
     small = RoundedCornerShape(8.dp),
@@ -318,6 +328,17 @@ val Rs457Shapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+/**
+ * The app's Material 3 theme.
+ *
+ * Three inputs decide the palette, in a fixed order of precedence. High contrast wins
+ * outright — an accessibility setting must not be overridden by a preference. Dynamic
+ * colour comes next, taking the palette from the system wallpaper. Failing both, the app's
+ * own schemes are used.
+ *
+ * The scheme is remembered against the configuration as well as the flags, because dynamic
+ * colour is derived from system state that a configuration change can alter.
+ */
 @Composable
 fun Rs457Theme(
     themeMode: ThemeMode = ThemeMode.System,

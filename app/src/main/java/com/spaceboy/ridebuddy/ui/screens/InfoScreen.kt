@@ -15,7 +15,6 @@ import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -35,12 +34,18 @@ import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 
+/** One label/value row, with an icon that identifies the kind of information at a glance. */
 private data class InfoRowItem(
     val label: String,
     val value: String,
     val icon: ImageVector,
 )
 
+/**
+ * What is set up and what is not: the motorcycle's identity, link state, and which optional
+ * features are ready. The rider-facing counterpart to the diagnostics screen — the same
+ * underlying state, in plain terms and without the protocol detail.
+ */
 @Composable
 fun InfoScreen(
     modifier: Modifier = Modifier,
@@ -48,7 +53,6 @@ fun InfoScreen(
     connectionState: BikeConnectionState,
     identity: BikeIdentity,
     notificationAccessEnabled: Boolean,
-    onReconnect: () -> Unit,
 ) {
     val connected = connectionState is BikeConnectionState.Connected
     val context = LocalContext.current
@@ -124,14 +128,6 @@ fun InfoScreen(
                 ),
             ),
         )
-
-        Button(
-            onClick = onReconnect,
-            enabled = !connected,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Reconnect")
-        }
     }
 }
 

@@ -15,6 +15,15 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.Locale
 
+/**
+ * Raises the rider's opt-in warnings: speed, engine speed, hard acceleration and braking,
+ * route hazards, and weather.
+ *
+ * Every alert is off by default and rate-limited per kind. The cooldown is what makes these
+ * usable at all — the conditions that trigger them persist for many seconds, so an
+ * un-throttled check running at telemetry rate would produce a continuous stream of
+ * notifications for one event.
+ */
 class RidingAlertMonitor(
     context: Context,
     private val connection: BikeConnection,
@@ -26,6 +35,7 @@ class RidingAlertMonitor(
     private val notifications = appContext.getSystemService(NotificationManager::class.java)
     private val lastAlertAt = mutableMapOf<String, Long>()
 
+    /** Creates the notification channel and starts watching every alert source. */
     fun start() {
         createChannel()
         scope.launch {
@@ -61,9 +71,11 @@ class RidingAlertMonitor(
         }
     }
 
+    /** Route hazard reported by the navigation provider. Returns whether it was raised. */
     fun navigationHazard(message: String): Boolean =
         settings.settings.value.hazardAlerts && alert("navigation_hazard", "Route alert", message)
 
+    /** Weather warning. The attribution is required by the forecast data's licence. */
     fun weatherAlert(message: String): Boolean = settings.settings.value.weatherAlerts &&
         alert("weather", "Riding weather", "$message Weather data by Open-Meteo.com.")
 
@@ -106,12 +118,22 @@ class RidingAlertMonitor(
 
     private companion object {
         const val ChannelId = "riding_alerts"
+
+        /** Per-kind quiet period. Long enough that one sustained event raises one alert. */
         const val AlertCooldownMillis = 30_000L
     }
 }
 
 internal enum class RidingMotionAlert { HardAcceleration, HardBraking }
 
+/**
+ * Classifies a longitudinal acceleration sample.
+ *
+ * The braking threshold is the larger of the two in magnitude, because a bike decelerates
+ * far harder than it accelerates: symmetric thresholds would fire on ordinary braking.
+ * Values are in m/s², derived from wheel speed, so they are unsigned in the sense that only
+ * the sign distinguishes the two cases.
+ */
 internal fun ridingMotionAlert(
     accelerationMetresPerSecondSquared: Double,
     accelerationAlertsEnabled: Boolean,

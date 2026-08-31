@@ -35,6 +35,16 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
+// Shared building blocks for the settings screens, so every row looks and behaves the same
+// and each screen only has to say what the setting is.
+
+/**
+ * A setting with a continuous value.
+ *
+ * The slider position is held locally and re-seeded whenever the incoming value changes, so
+ * dragging stays smooth without a round trip through the settings repository for every
+ * intermediate position.
+ */
 @Composable
 internal fun SettingsSliderRow(
     title: String,
@@ -119,6 +129,12 @@ internal fun <T> SettingsChoiceRow(
     }
 }
 
+/**
+ * A setting that is on or off.
+ *
+ * The switch itself takes no callback — the whole row is `toggleable` instead — so the tap
+ * target is the full row and accessibility services announce one control, not two.
+ */
 @Composable
 internal fun SettingsSwitchRow(
     title: String,
@@ -156,6 +172,7 @@ internal fun SettingsSwitchRow(
     )
 }
 
+/** A titled group of settings rows. The title is marked as a heading for screen readers. */
 @Composable
 internal fun SettingsSection(
     title: String,
@@ -182,6 +199,7 @@ internal fun SettingsSection(
     }
 }
 
+/** A row that performs an action or opens something, rather than holding a value. */
 @Composable
 internal fun SettingsRow(
     icon: ImageVector,
