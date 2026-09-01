@@ -82,10 +82,15 @@ internal enum class TftCallState { Ringing, Answered, Outgoing }
 internal fun tftCallStateFor(
     callStyleIncoming: Boolean,
     hasAnswerIntent: Boolean,
-    keyWasAlreadyTracked: Boolean,
+    previousState: TftCallState?,
 ): TftCallState = when {
     callStyleIncoming || hasAnswerIntent -> TftCallState.Ringing
-    keyWasAlreadyTracked -> TftCallState.Answered
+    // Only a call that was ringing here can become answered. Android reposts the same
+    // notification key as a call runs — the duration ticks, the audio route changes — and
+    // treating any repost as an answer turned every outgoing call into "Answered" on its
+    // first update, whether or not anyone had picked up.
+    previousState == TftCallState.Ringing -> TftCallState.Answered
+    previousState != null -> previousState
     else -> TftCallState.Outgoing
 }
 
@@ -236,7 +241,7 @@ class CallNotificationBridge(
             val callState = tftCallStateFor(
                 callStyleIncoming = callStyleIncoming,
                 hasAnswerIntent = intents.answer != null,
-                keyWasAlreadyTracked = activeCall.value.notificationKey == sbn.key,
+                previousState = activeCall.value.takeIf { it.notificationKey == sbn.key }?.callState,
             )
             activeCall.value = ActiveCallState(
                 notificationKey = sbn.key,

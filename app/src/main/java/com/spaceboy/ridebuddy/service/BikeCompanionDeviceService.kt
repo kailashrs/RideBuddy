@@ -59,13 +59,6 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
                     return
                 }
                 when (container.bikeConnectionDemand.onBleAppeared()) {
-                    BleAppearanceDecision.IgnoreDuplicate -> {
-                        container.connectionEventJournal.record(
-                            "Companion event: duplicate $eventLabel ignored",
-                        )
-                        return
-                    }
-
                     BleAppearanceDecision.IgnoreWhileSuppressed -> {
                         container.connectionEventJournal.record(
                             "Companion event: $eventLabel ignored after manual disconnect",

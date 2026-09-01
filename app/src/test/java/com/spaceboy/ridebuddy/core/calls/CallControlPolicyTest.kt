@@ -39,7 +39,7 @@ class CallControlPolicyTest {
     fun `an incoming ring is reported as ringing`() {
         assertEquals(
             TftCallState.Ringing,
-            tftCallStateFor(callStyleIncoming = true, hasAnswerIntent = false, keyWasAlreadyTracked = false),
+            tftCallStateFor(callStyleIncoming = true, hasAnswerIntent = false, previousState = null),
         )
     }
 
@@ -47,15 +47,23 @@ class CallControlPolicyTest {
     fun `an answer intent alone still means the call is ringing`() {
         assertEquals(
             TftCallState.Ringing,
-            tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = true, keyWasAlreadyTracked = true),
+            tftCallStateFor(
+                callStyleIncoming = false,
+                hasAnswerIntent = true,
+                previousState = TftCallState.Ringing,
+            ),
         )
     }
 
     @Test
-    fun `a tracked key that stops ringing has been answered`() {
+    fun `a call that was ringing here and stops ringing has been answered`() {
         assertEquals(
             TftCallState.Answered,
-            tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = false, keyWasAlreadyTracked = true),
+            tftCallStateFor(
+                callStyleIncoming = false,
+                hasAnswerIntent = false,
+                previousState = TftCallState.Ringing,
+            ),
         )
     }
 
@@ -63,7 +71,36 @@ class CallControlPolicyTest {
     fun `a call first seen already in progress was dialled from this phone`() {
         assertEquals(
             TftCallState.Outgoing,
-            tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = false, keyWasAlreadyTracked = false),
+            tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = false, previousState = null),
+        )
+    }
+
+    /**
+     * Android reposts the same notification key as a call runs — the duration ticks, the audio
+     * route changes. Every repost used to be read as an answer, so an outgoing call flipped to
+     * "Answered" on its first update whether or not anyone had picked up.
+     */
+    @Test
+    fun `an outgoing call stays outgoing when its notification is updated`() {
+        assertEquals(
+            TftCallState.Outgoing,
+            tftCallStateFor(
+                callStyleIncoming = false,
+                hasAnswerIntent = false,
+                previousState = TftCallState.Outgoing,
+            ),
+        )
+    }
+
+    @Test
+    fun `an answered call stays answered across further updates`() {
+        assertEquals(
+            TftCallState.Answered,
+            tftCallStateFor(
+                callStyleIncoming = false,
+                hasAnswerIntent = false,
+                previousState = TftCallState.Answered,
+            ),
         )
     }
 

@@ -100,7 +100,7 @@ internal class AndroidBikeConnection(
     private var connectedDeviceBonded = false
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
-    private var consecutiveEncryptionStalls = 0
+    private var consecutiveSecureLinkFailures = 0
     private var reconnectScheduled = false
     private var connectionGeneration = 0L
     private var connectionMonitoringActive = false
@@ -488,13 +488,20 @@ internal class AndroidBikeConnection(
 
             BluetoothProfile.STATE_DISCONNECTED -> {
                 val linkAge = session.linkAgeMillis(SystemClock.elapsedRealtime())
+                // Whether any ATT operation completed is recorded but not interpreted. A link that
+                // dropped before the first one may have failed to encrypt — or the motorcycle may
+                // simply have gone away mid-setup. The status cannot tell those apart, so the
+                // journal states the observation and stops there.
                 val message = "Link lost: ${gattConnectionStatusLabel(status)} ($status)" +
-                    linkAge?.let { ", link age ${it / 1_000}s" }.orEmpty()
+                    linkAge?.let { ", link age ${it / 1_000}s" }.orEmpty() +
+                    if (session.completedAnyOperation) {
+                        ""
+                    } else {
+                        "; lost before the first application operation, so encryption may not have completed"
+                    }
                 if (intentionalDisconnect) {
                     log(message)
                     disconnectInternal(closeOnly = true)
-                } else if (isEncryptionStall(session, status)) {
-                    reportEncryptionStall(message, linkAge)
                 } else {
                     retireLinkAndReconnect(
                         connectionFailure(
@@ -566,7 +573,7 @@ internal class AndroidBikeConnection(
         status: Int,
     ) {
         if (!isCurrent(callbackGatt)) return
-        sessions.current()?.markOperationCompleted()
+        if (status == BluetoothGatt.GATT_SUCCESS) sessions.current()?.markOperationCompleted()
         val uuid = descriptor.characteristic.uuid
         operationCoordinator.complete(
             status = status,
@@ -588,7 +595,7 @@ internal class AndroidBikeConnection(
         status: Int,
     ) {
         if (!isCurrent(callbackGatt)) return
-        sessions.current()?.markOperationCompleted()
+        if (status == BluetoothGatt.GATT_SUCCESS) sessions.current()?.markOperationCompleted()
         operationCoordinator.complete(
             status = status,
             label = "write ${characteristic.uuid.shortName()}",
@@ -741,7 +748,6 @@ internal class AndroidBikeConnection(
     private fun completeAuthentication(evidence: String, path: ProtectionPath?) {
         if (diagnosticsRecorder.value.authenticated) return
         reconnectAttempt = 0
-        consecutiveEncryptionStalls = 0
         authenticatedAtMillis = System.currentTimeMillis()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
         diagnosticsRecorder.markAuthenticated(path)
@@ -772,59 +778,11 @@ internal class AndroidBikeConnection(
     }
 
     /** The single path that retires a live GATT session and hands the link back to the backoff. */
-    /**
-     * Whether this disconnect is the motorcycle refusing the stored bonding key.
-     *
-     * The signature is narrow on purpose: a **bonded** peer whose link reached STATE_CONNECTED,
-     * dropped with the timeout status, and completed **no** ATT operation at all. A link that
-     * transacted even once got through encryption, so an ordinary dropout can never match.
-     *
-     * The link age is not part of the test. It would only be restating the supervision timeout the
-     * controller has already applied by reporting the disconnect, and hard-coding a window here
-     * would mean a peer that negotiates a different one stops being recognised.
-     */
-    private fun isEncryptionStall(session: GattSession<BluetoothGatt>, status: Int): Boolean =
-        connectedDeviceBonded &&
-            status == LinkSupervisionTimeoutStatus &&
-            session.connectedAtElapsedRealtime != null &&
-            !session.completedAnyOperation
-
-    /**
-     * Records a stall and, once it repeats, stops retrying and says so.
-     *
-     * Two in a row rather than one: a genuine range dropout in the instant between connecting and
-     * the first CCCD write produces the same signature once, and retiring the link over a single
-     * sample would strand a rider whose bike simply moved out of range at the wrong moment.
-     *
-     * Past that the state is terminal. The phone cannot present a different key, so every further
-     * attempt costs a five-second connection and ends identically — which is what filled a capture
-     * with forty-four of them. Only a fresh appearance or an explicit user action resumes.
-     */
-    private fun reportEncryptionStall(message: String, linkAgeMillis: Long?) {
-        consecutiveEncryptionStalls++
-        val failure = connectionFailure(
-            message = "$message; no operation completed, so encryption did not finish",
-            category = ConnectionFailureCategory.PairingRejected,
-            statusCode = LinkSupervisionTimeoutStatus,
-            statusName = gattConnectionStatusLabel(LinkSupervisionTimeoutStatus),
-            linkAgeMillis = linkAgeMillis,
-        )
-        if (consecutiveEncryptionStalls < MinStallsBeforeGivingUp) {
-            retireLinkAndReconnect(failure, updateConnectingState = false)
-            return
-        }
-        recordConnectionFailure(failure)
-        disconnectInternal(closeOnly = true)
-        val reason = "The motorcycle is refusing the saved pairing. Turn the ignition off and on; " +
-            "if that does not help, forget it in Bluetooth settings and pair again."
-        mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
-        log(reason)
-    }
-
     private fun retireLinkAndReconnect(
         failure: ConnectionFailure,
         updateConnectingState: Boolean = true,
     ) {
+        noteSecureLinkOutcome(sessions.current())
         recordConnectionFailure(failure)
         disconnectInternal(closeOnly = true)
         if (intentionalDisconnect) return
@@ -832,6 +790,35 @@ internal class AndroidBikeConnection(
             mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
         }
         scheduleReconnect()
+    }
+
+    /**
+     * Counts sessions that connected but never managed a single GATT operation.
+     *
+     * Recorded, not acted on: the retry policy is unchanged and no attempt is cut short. All this
+     * decides is *which sentence the rider reads* once the ordinary budget is spent, because
+     * "could not reconnect" sends them looking for a bike that is sitting right there answering
+     * connection requests.
+     *
+     * A captured session of this shape shows the LE encryption procedure starting and never
+     * completing — `Encryption Change` with `Connection Timeout` after 5.2 s, 65 times in one
+     * capture — so the link comes up, the ATT bearer exists, and the first operation needing an
+     * encrypted link is the one that dies. Android surfaces that as `GATT_ERROR` on the first
+     * subscription when services came from its cache, and as a supervision timeout when it did
+     * not. Both look the same from here: connected, bonded, nothing transacted.
+     *
+     * The count is only meaningful consecutively, so any session that does transact clears it.
+     */
+    private fun noteSecureLinkOutcome(session: GattSession<BluetoothGatt>?) {
+        val connectedButSilent = session != null &&
+            connectedDeviceBonded &&
+            session.connectedAtElapsedRealtime != null &&
+            !session.completedAnyOperation
+        if (connectedButSilent) {
+            consecutiveSecureLinkFailures++
+        } else {
+            consecutiveSecureLinkFailures = 0
+        }
     }
 
     /**
@@ -932,11 +919,21 @@ internal class AndroidBikeConnection(
         if (intentionalDisconnect || reconnectScheduled) return
         val delay = reconnectDelayMillis(reconnectAttempt)
         if (delay == null) {
-            // Deliberately does not name a cause. Exhausted retries are equally consistent with
-            // the bike being out of range, switched off, or an adapter problem on this phone,
-            // and the failure that actually caused it is already on record above.
-            val reason = "Could not reconnect; automatic retries paused after " +
-                "$MaxReconnectAttempts attempts"
+            // Two sentences, chosen by what the attempts actually looked like. The default
+            // names no cause, because exhausted retries are equally consistent with the bike
+            // being out of range, switched off, or an adapter problem on this phone.
+            //
+            // But when every attempt connected and then transacted nothing, "could not
+            // reconnect" sends the rider looking for a motorcycle that is sitting there
+            // answering connection requests. That case has one known remedy — re-pairing —
+            // and it is worth naming rather than making them rediscover it. The wording stays
+            // on what was observed; the cluster's reason for it is not ours to assert.
+            val reason = if (consecutiveSecureLinkFailures >= MinSecureLinkFailures) {
+                "The motorcycle is not completing the secure link. Forget it in Bluetooth " +
+                    "settings and pair again."
+            } else {
+                "Could not reconnect; automatic retries paused after $MaxReconnectAttempts attempts"
+            }
             mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
             // The real failure stays on record; this only explains why nothing is retrying.
             diagnosticsRecorder.recordSuppression(
@@ -1097,22 +1094,12 @@ internal class AndroidBikeConnection(
         const val ConnectionTimeoutMillis = 20_000L
 
         /**
-         * Status 8: an *established* link that died on the supervision timeout — which is what a
-         * stalled encryption produces, since the ACL comes up before encryption is attempted.
+         * Connected-but-silent sessions before the exhaustion message names re-pairing.
          *
-         * Deliberately not named after a connection timeout. `BluetoothGatt.GATT_CONNECTION_TIMEOUT`
-         * is **147** and means the opposite: a link that never established at all. A journal from
-         * a session where the motorcycle was simply switched off shows exactly that value, with no
-         * "GATT connected" before it. Confusing the two would make this test fire on an ordinary
-         * out-of-range failure and never on the one it exists for.
-         *
-         * Android also reuses 8 for GATT_INSUFFICIENT_AUTHORIZATION, which is why the stall test
-         * needs the rest of its signature rather than the status alone.
+         * Only consulted after the whole retry budget is spent, so this is not a hair trigger:
+         * it takes six attempts of that shape in a row to reach the message at all.
          */
-        const val LinkSupervisionTimeoutStatus = 8
-
-        /** Consecutive encryption stalls before the state becomes terminal. */
-        const val MinStallsBeforeGivingUp = 2
+        const val MinSecureLinkFailures = 2
 
         /** The ATT default. No larger MTU is requested; see [onConnectionStateChanged]. */
         const val DefaultAttMtu = 23

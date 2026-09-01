@@ -16,10 +16,8 @@
     <string name="settings_unavailable">System settings are unavailable on this device</string>
     <string name="diagnostics_share_unavailable">No app is available to share diagnostics</string>
     <string name="ble_capture_share_unavailable">No app is available to share the BLE capture</string>
-    <string name="navigation_end_failed">Navigation may still be active because it could not be stopped (%1$d)</string>
     <string name="navigation_end_request_failed">Navigation may still be active because it could not be stopped</string>
     <string name="navigation_end_cleanup_failed">The route was cleared locally, but Navigation SDK cleanup did not finish</string>
-    <string name="navigation_tft_clear_failed">Navigation ended, but the TFT clear command failed</string>
     <string name="navigation_maneuver_distance">In %1$s</string>
     <string name="navigation_full_map">Full map</string>
     <string name="browser_unavailable">No browser is available to open this page</string>

@@ -29,10 +29,10 @@ internal class GattSession<T : Any>(
     /**
      * Whether any ATT operation completed on this transport.
      *
-     * A connected link that never transacts is the signature of an encryption stall: the peer
-     * accepts the connection and answers every link-layer procedure, then does not complete the
-     * security procedure, so no ATT PDU is ever transmitted and the link dies on the supervision
-     * timeout. Nothing else about the connection distinguishes that from an ordinary dropout.
+     * Reported in the journal, never acted on. A link that dropped before the first operation may
+     * have failed to encrypt, or the motorcycle may have gone away during setup — the disconnect
+     * status is identical either way, and only an HCI capture separates them. Recording it makes
+     * that distinction possible after the fact without the app pretending it can make it live.
      */
     var completedAnyOperation = false
         private set

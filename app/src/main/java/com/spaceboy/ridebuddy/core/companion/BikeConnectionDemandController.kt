@@ -15,16 +15,8 @@ internal enum class AutomaticConnectionDemand {
     SuppressedUntilBleDisappears,
 }
 
-/** Last observed presence. [Unknown] until the first callback of the process arrives. */
-internal enum class ObservedBlePresence {
-    Unknown,
-    Present,
-    Absent,
-}
-
 internal data class BikeConnectionDemandState(
     val automaticConnectionDemand: AutomaticConnectionDemand = AutomaticConnectionDemand.Allowed,
-    val blePresence: ObservedBlePresence = ObservedBlePresence.Unknown,
 )
 
 internal enum class BikeConnectionDemandEvent {
@@ -34,19 +26,16 @@ internal enum class BikeConnectionDemandEvent {
     BleDisappeared,
 }
 
-/** What to do about an appearance callback. */
+/**
+ * What to do about an appearance callback.
+ *
+ * There is deliberately no "already present" case. Presence callbacks are edge-triggered, and the
+ * caller already refuses to start a second attempt while one is in flight — so a duplicate-tracking
+ * state added nothing but a second way to discard an appearance, which is exactly the event that
+ * exists to resume a link that has stopped retrying.
+ */
 internal enum class BleAppearanceDecision {
     RequestConnection,
-
-    /**
-     * Already recorded as present, so there is nothing new to act on.
-     *
-     * Not because the platform polls — `onDevicePresenceEvent` is edge-triggered and fires on
-     * change, not while the bike sits in range. This covers an appearance arriving with no
-     * disappearance between, which is what a re-registered listener or a replayed state
-     * produces.
-     */
-    IgnoreDuplicate,
 
     /** The rider disconnected on purpose and the bike has not left since. */
     IgnoreWhileSuppressed,
@@ -79,25 +68,17 @@ internal fun bikeConnectionDemandTransition(
     )
 
     BikeConnectionDemandEvent.BleDisappeared -> BikeConnectionDemandTransition(
-        state.copy(
-            automaticConnectionDemand = AutomaticConnectionDemand.Allowed,
-            blePresence = ObservedBlePresence.Absent,
-        ),
+        state.copy(automaticConnectionDemand = AutomaticConnectionDemand.Allowed),
     )
 
     BikeConnectionDemandEvent.BleAppeared -> {
-        val duplicate = state.blePresence == ObservedBlePresence.Present
-        val decision = when {
-            state.automaticConnectionDemand == AutomaticConnectionDemand.SuppressedUntilBleDisappears ->
+        val decision =
+            if (state.automaticConnectionDemand == AutomaticConnectionDemand.SuppressedUntilBleDisappears) {
                 BleAppearanceDecision.IgnoreWhileSuppressed
-
-            duplicate -> BleAppearanceDecision.IgnoreDuplicate
-            else -> BleAppearanceDecision.RequestConnection
-        }
-        BikeConnectionDemandTransition(
-            state.copy(blePresence = ObservedBlePresence.Present),
-            decision,
-        )
+            } else {
+                BleAppearanceDecision.RequestConnection
+            }
+        BikeConnectionDemandTransition(state, decision)
     }
 }
 

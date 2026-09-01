@@ -75,7 +75,6 @@ class NavigationActivity : ComponentActivity() {
     private var retryVisibleState = mutableStateOf(false)
     private var navigator: Navigator? = null
     private var guidanceStarted = false
-    private var navigationEndedByUser = false
     private var tftRouteRequestNeedsRestart = false
     private var tftUpdatesRegistered = false
     private val navigationSessionId = NextNavigationSessionId.incrementAndGet()
@@ -286,11 +285,11 @@ class NavigationActivity : ComponentActivity() {
             NavigationApi.getNavigator(this, object : NavigationApi.NavigatorListener {
                 override fun onNavigatorReady(readyNavigator: Navigator) {
                     if (isFinishing || isDestroyed) {
-                        if ((navigationEndedByUser || !readyNavigator.isGuidanceRunning) &&
+                        if (!readyNavigator.isGuidanceRunning &&
                             // Cleanup path: only release if no live session has taken ownership.
                             NavigationSessionOwners.claim(navigationSessionId)
                         ) {
-                            releaseNavigationSession(readyNavigator, stopGuidance = navigationEndedByUser)
+                            releaseNavigationSession(readyNavigator, stopGuidance = false)
                         }
                         return
                     }
@@ -513,15 +512,12 @@ class NavigationActivity : ComponentActivity() {
         val currentNavigator = navigator
         currentNavigator?.removeReroutingListener(reroutingListener)
         val continueInBackground = shouldKeepGuidanceInBackground(
-            navigationEndedByUser = navigationEndedByUser,
             guidanceStarted = guidanceStarted,
             guidanceIsRunning = currentNavigator?.isGuidanceRunning == true,
         )
         if (!continueInBackground) {
             if (currentNavigator != null) {
-                releaseNavigationSession(currentNavigator, stopGuidance = navigationEndedByUser)
-            } else if (navigationEndedByUser) {
-                clearNavigationOutput()
+                releaseNavigationSession(currentNavigator, stopGuidance = false)
             }
         } else {
             appContainer.navigationGuidanceLifecycle.detachUi(navigationSessionId)
@@ -622,14 +618,14 @@ internal fun navigationLaunchPolicy(
 }
 
 /**
- * Whether guidance should survive this Activity being destroyed. Yes unless the rider ended
- * it — a rotation, a back press, or the app being backgrounded all keep the route.
+ * Whether guidance should survive this Activity being destroyed. A rotation, a back press, the
+ * app being backgrounded, and the handlebar EXIT all keep the route: stopping is the
+ * process-scoped handler's job, never this screen's.
  */
 internal fun shouldKeepGuidanceInBackground(
-    navigationEndedByUser: Boolean,
     guidanceStarted: Boolean,
     guidanceIsRunning: Boolean,
-): Boolean = !navigationEndedByUser && (guidanceStarted || guidanceIsRunning)
+): Boolean = guidanceStarted || guidanceIsRunning
 
 /**
  * Decides which Activity instance owns the process's single navigator.

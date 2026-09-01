@@ -44,10 +44,10 @@ class NavigationActivityPolicyTest {
 
     @Test
     fun `background lifecycle keeps only started or running guidance`() {
-        assertFalse(shouldKeepGuidanceInBackground(false, false, false))
-        assertTrue(shouldKeepGuidanceInBackground(false, true, false))
-        assertTrue(shouldKeepGuidanceInBackground(false, false, true))
-        assertFalse(shouldKeepGuidanceInBackground(true, true, true))
+        assertFalse(shouldKeepGuidanceInBackground(guidanceStarted = false, guidanceIsRunning = false))
+        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = true, guidanceIsRunning = false))
+        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = false, guidanceIsRunning = true))
+        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = true, guidanceIsRunning = true))
     }
 
     @Test

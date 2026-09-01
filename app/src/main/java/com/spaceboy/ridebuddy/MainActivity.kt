@@ -390,8 +390,12 @@ class MainActivity : ComponentActivity() {
         // lifecycleScope cancels the work when the activity is destroyed, so the
         // late state update never lands on a dead view tree.
         lifecycleScope.launch(Dispatchers.IO) {
+            // Reconciles what the system knows against what the app stored — the rider can remove
+            // the association from system settings while the app is backgrounded. Registration
+            // itself is not repeated here: the manager does it once at startup and again when an
+            // association is accepted, and re-registering on every resume only made it harder to
+            // see which call was the one that mattered.
             container.bikeCompanionManager.refresh()
-            container.bikeCompanionManager.ensurePresenceObservation()
         }
         if (viewModel.connectionState.value !is BikeConnectionState.Disconnected &&
             viewModel.connectionState.value !is BikeConnectionState.Failed
