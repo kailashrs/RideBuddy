@@ -119,12 +119,18 @@ fun LiveScreen(
     onCancelNavigationStart: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
+    // Deliberately unkeyed. A share arriving later is applied by the effect below; keying this on
+    // sharedDestination instead would re-initialise the field when it goes back to null — which is
+    // what clearing the field does — and wipe whatever the rider had typed.
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
     var liveDetailLevel by rememberSaveable { mutableStateOf(LiveDetailLevel.Glance) }
     var showSharedConfirmation by rememberSaveable(sharedDestination, sharedDestinationError) {
         mutableStateOf(!sharedDestination.isNullOrBlank() && sharedDestinationError == null)
     }
+    // Applies a share that arrives while this screen is already composed; the initial value above
+    // covers first composition and state restore. Blank is ignored rather than assigned, so
+    // clearing the share leaves the field alone.
     LaunchedEffect(sharedDestination, sharedDestinationError) {
         if (!sharedDestination.isNullOrBlank()) {
             destination = sharedDestination

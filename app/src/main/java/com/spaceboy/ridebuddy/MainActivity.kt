@@ -566,7 +566,6 @@ class MainActivity : ComponentActivity() {
     private fun requiredNearbyDevicePermissions(): Array<String> =
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
-    /** Starts navigation for a destination the rider chose here, clearing any staged one. */
     /** Starts a destination the rider entered in the app, dropping any staged GO prompt with it. */
     private fun startNavigation(rawDestination: String) {
         appContainer.stageDestination(null)
@@ -610,12 +609,12 @@ class MainActivity : ComponentActivity() {
 
         var navigationStartAttemptId: Long? = null
         try {
+            // Length and emptiness are settled at the three entry points, not here: the Start
+            // button is disabled on blank input and its field truncates as the rider types, the
+            // share handler rejects both before queueing, and staging filters them out. Anything
+            // this cannot parse still fails through the onFailure branch below with a message
+            // that describes the actual problem.
             val destination = rawDestination.trim()
-            if (destination.isEmpty() || destination.length > MaxDestinationInputLength) {
-                autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
-                viewModel.showMessage(getString(R.string.destination_too_long))
-                return
-            }
             if (autoStartSuperseded()) return
             navigationStartAttemptId = viewModel.beginNavigationStart()
 
