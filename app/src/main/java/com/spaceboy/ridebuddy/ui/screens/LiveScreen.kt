@@ -72,7 +72,6 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
 import com.spaceboy.ridebuddy.ui.theme.TelemetryHero
 import com.spaceboy.ridebuddy.ui.theme.statusColors
-import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
@@ -192,7 +191,7 @@ fun LiveScreen(
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = guidance.instruction.ifBlank { "Guidance active" },
+                                text = guidance.instruction.ifBlank { "Navigating" },
                                 style = MaterialTheme.typography.titleLarge,
                             )
                             if (guidance.roadName.isNotBlank()) {
@@ -268,7 +267,7 @@ fun LiveScreen(
                         ) {
                             Icon(Icons.Outlined.Close, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("End Route")
+                            Text("End route")
                         }
                         Button(
                             onClick = onOpenActiveNavigation,
@@ -338,7 +337,7 @@ fun LiveScreen(
             Text(
                 text = lastRide?.let {
                     "${UnitFormatter.distance(it.distanceKilometres, units, locale)} • ${formatDuration(it.durationMillis)} • ${UnitFormatter.speed(it.averageSpeedKph, units, locale)} average"
-                } ?: "Your first ride summary will appear here automatically.",
+                } ?: "Your rides will appear here once you set off.",
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -488,24 +487,6 @@ private fun ConnectionCard(
                         .size(10.dp)
                         .background(statusColor, shape = CircleShape),
                 )
-                Text(
-                    text = when (state) {
-                        is BikeConnectionState.Connecting -> {
-                            val attempt = state.reconnectAttempt
-                            val max = state.maxAttempts
-                            if (attempt != null && max != null) {
-                                "Reconnecting (${attempt}/$max)"
-                            } else {
-                                "Connecting"
-                            }
-                        }
-                        is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
-                        is BikeConnectionState.Failed -> "Connection Failed"
-                        else -> "Disconnected"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Spacer(Modifier.height(8.dp))
             Icon(
@@ -516,26 +497,21 @@ private fun ConnectionCard(
             )
             Spacer(Modifier.height(8.dp))
             Text(
+                // The retry count is deliberately not shown. It is the app's own bookkeeping, and
+                // a rider waiting for their bike cannot act differently on attempt four than on
+                // attempt two.
                 text = when (state) {
-                    is BikeConnectionState.Connecting -> {
-                        val attempt = state.reconnectAttempt
-                        val max = state.maxAttempts
-                        if (attempt != null && max != null) {
-                            "Reconnecting (${attempt}/$max)…"
-                        } else {
-                            "Connecting…"
-                        }
-                    }
-                    is BikeConnectionState.Authenticating -> "Verifying motorcycle link…"
-                    is BikeConnectionState.Failed -> "Connection failed"
-                    else -> "Bike not connected"
+                    is BikeConnectionState.Connecting -> "Connecting…"
+                    is BikeConnectionState.Authenticating -> "Connecting…"
+                    is BikeConnectionState.Failed -> "Couldn't connect"
+                    else -> "Not connected"
                 },
                 style = MaterialTheme.typography.headlineSmall,
             )
             Text(
                 text = when (state) {
                     is BikeConnectionState.Failed -> state.message
-                    else -> "Keep the bike switched on and nearby"
+                    else -> "Switch the bike on and keep it nearby"
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -686,15 +662,16 @@ private fun LiveDetailsSheet(
         if (level != LiveDetailLevel.Glance) {
             activeRide?.let {
                 Text("Current ride • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)} • ${formatDuration(System.currentTimeMillis() - it.startedAtMillis)}")
-            } ?: Text("Ride recording will begin when the bike moves.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ConnectionQuality(diagnostics, metrics.estimatedPacketGapPercent)
+            } ?: Text("Recording starts when you set off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SignalStrength(diagnostics.rssi)
             Text(
-                "Recent events • ${metrics.hardAccelerationEvents} acceleration • ${metrics.hardBrakingEvents} braking",
+                "${metrics.hardAccelerationEvents} hard ${"acceleration".pluralised(metrics.hardAccelerationEvents)} " +
+                    "• ${metrics.hardBrakingEvents} hard ${"brake".pluralised(metrics.hardBrakingEvents)}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (level == LiveDetailLevel.Charts) {
-            Text("Rolling telemetry", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text("Statistics", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             val speedData = remember(chartSamples, units) { chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) } }
             val rpmData = remember(chartSamples) { chartSamples.map { it.rpm.toDouble() } }
             val throttleData = remember(chartSamples) { chartSamples.map { it.throttlePercent.toDouble() } }
@@ -703,31 +680,27 @@ private fun LiveDetailsSheet(
             LiveChart("RPM", rpmData, "rpm")
             LiveChart("Throttle", throttleData, "%")
             LiveChart("Mileage", mileageData, UnitFormatter.mileageUnit(units))
-            Text(
-                "${samples.size} recent packets • ${diagnostics.notificationsReceived} notifications received • ${diagnostics.malformedTelemetryFrames} malformed • ${diagnostics.droppedRawTelemetryFrames} dropped",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
 
 /**
- * Link health in rider terms: signal strength, telemetry rate, and estimated packet loss.
- * Worth surfacing here rather than only in diagnostics, because a poor link is the usual
- * reason a figure on this screen looks frozen.
+ * Signal strength in words.
+ *
+ * Worth showing here rather than only in diagnostics, because a weak link is the usual reason a
+ * figure on this screen looks frozen — which is the only thing a rider can act on. The dBm value,
+ * the telemetry rate and the packet-gap estimate are all on the diagnostics screen; none of them
+ * tell a rider anything they could do differently.
  */
 @Composable
-private fun ConnectionQuality(diagnostics: BleDiagnostics, estimatedPacketGapPercent: Int?) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Connection quality", style = MaterialTheme.typography.titleMedium)
-            Text("Signal ${diagnostics.rssi?.let { "$it dBm" } ?: "—"} • %.1f Hz".format(diagnostics.telemetryHz))
-            Text(
-                "Estimated packet gaps ${estimatedPacketGapPercent?.let { "$it%" } ?: "collecting data"}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+private fun SignalStrength(rssi: Int?) {
+    val label = when {
+        rssi == null -> "Signal — measuring"
+        rssi >= StrongSignalDbm -> "Signal — strong"
+        rssi >= WeakSignalDbm -> "Signal — good"
+        else -> "Signal — weak, readings may lag"
     }
+    Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -736,13 +709,16 @@ private fun LiveChart(title: String, values: List<Double?>, unit: String) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(values.lastOrNull { it != null }?.let { "Latest %.1f %s".format(it, unit) } ?: "Waiting for samples", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                values.lastOrNull { it != null }?.let { "Latest %.1f %s".format(it, unit) } ?: "No data yet",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             LineChart(
                 values = values,
                 height = 100.dp,
                 topPadding = 8.dp,
                 color = color,
-                contentDescription = "$title chart with ${values.size} samples",
+                contentDescription = "$title over the last few minutes",
                 scalePolicy = LineChartScalePolicy.AutoRange,
                 clampNegativeValues = false,
                 smooth = true,
@@ -752,6 +728,16 @@ private fun LiveChart(title: String, values: List<Double?>, unit: String) {
         }
     }
 }
+
+/**
+ * RSSI bands for the signal wording. Deliberately coarse: the only decision a rider makes from
+ * this is whether to move the phone, and three bands carry that where a number does not.
+ */
+private const val StrongSignalDbm = -70
+private const val WeakSignalDbm = -85
+
+/** Adds a plural "s" for any count but one, so a single event does not read as "1 hard brakes". */
+private fun String.pluralised(count: Int): String = if (count == 1) this else this + "s"
 
 /** Where the RS 457 tachometer turns red; the gauge fill and its warning colour key off this. */
 private const val RedlineRpm = 10_500

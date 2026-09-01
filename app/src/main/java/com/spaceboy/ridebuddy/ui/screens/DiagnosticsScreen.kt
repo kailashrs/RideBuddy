@@ -55,6 +55,7 @@ fun DiagnosticsScreen(
 ) {
     // Diagnostics is a live readout, so it is the one screen that should follow the frame rate.
     val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
+    val rideMetrics = live.rideMetrics.collectAsStateWithLifecycle().value
     val companionLinkStatus = stringResource(
         if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
     )
@@ -120,6 +121,8 @@ fun DiagnosticsScreen(
                 "Last frame" to (diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
                 "Estimated malformed frames" to diagnostics.malformedTelemetryFrames.toString(),
                 "Dropped ride frames" to diagnostics.droppedRawTelemetryFrames.toString(),
+                "Estimated packet gaps" to
+                    (rideMetrics.estimatedPacketGapPercent?.let { "$it%" } ?: "—"),
                 "BLE capture" to if (bleCapture.enabled) {
                     "On • ${bleCapture.entries.size} packets"
                 } else {
