@@ -785,7 +785,7 @@ internal class AndroidBikeConnection(
      */
     private fun isEncryptionStall(session: GattSession<BluetoothGatt>, status: Int): Boolean =
         connectedDeviceBonded &&
-            status == GattConnectionTimeoutStatus &&
+            status == LinkSupervisionTimeoutStatus &&
             session.connectedAtElapsedRealtime != null &&
             !session.completedAnyOperation
 
@@ -805,8 +805,8 @@ internal class AndroidBikeConnection(
         val failure = connectionFailure(
             message = "$message; no operation completed, so encryption did not finish",
             category = ConnectionFailureCategory.PairingRejected,
-            statusCode = GattConnectionTimeoutStatus,
-            statusName = gattConnectionStatusLabel(GattConnectionTimeoutStatus),
+            statusCode = LinkSupervisionTimeoutStatus,
+            statusName = gattConnectionStatusLabel(LinkSupervisionTimeoutStatus),
             linkAgeMillis = linkAgeMillis,
         )
         if (consecutiveEncryptionStalls < MinStallsBeforeGivingUp) {
@@ -1097,11 +1097,19 @@ internal class AndroidBikeConnection(
         const val ConnectionTimeoutMillis = 20_000L
 
         /**
-         * Android's status for a link that died on the supervision timeout. Also its value for
-         * GATT_INSUFFICIENT_AUTHORIZATION, which is why the stall test above needs the rest of
-         * its signature rather than the status alone.
+         * Status 8: an *established* link that died on the supervision timeout — which is what a
+         * stalled encryption produces, since the ACL comes up before encryption is attempted.
+         *
+         * Deliberately not named after a connection timeout. `BluetoothGatt.GATT_CONNECTION_TIMEOUT`
+         * is **147** and means the opposite: a link that never established at all. A journal from
+         * a session where the motorcycle was simply switched off shows exactly that value, with no
+         * "GATT connected" before it. Confusing the two would make this test fire on an ordinary
+         * out-of-range failure and never on the one it exists for.
+         *
+         * Android also reuses 8 for GATT_INSUFFICIENT_AUTHORIZATION, which is why the stall test
+         * needs the rest of its signature rather than the status alone.
          */
-        const val GattConnectionTimeoutStatus = 8
+        const val LinkSupervisionTimeoutStatus = 8
 
         /** Consecutive encryption stalls before the state becomes terminal. */
         const val MinStallsBeforeGivingUp = 2

@@ -178,7 +178,9 @@ Android's `mDeviceBusy` set and wedges the connection.
 and cluster software were not populating, and `ac1e466` restored a hybrid after `7e06f68` removed
 them. Neither can have worked as believed: the reads return nothing. What populates the values is
 the indication arriving, on the cluster's own schedule — `8910` about seven seconds after subscribe
-in this capture, `8810` roughly ten minutes in.
+in this capture, `8810` roughly ten minutes in — though a later 955-second session on the same
+motorcycle ended with the software version still unread, so ten minutes is a lower bound and not a
+period.
 
 **Authentication never depended on them.** Valid telemetry is accepted as verification evidence and
 arrives at about 4 Hz, well inside the 8 s deadline. Verification therefore arms as soon as the
@@ -254,5 +256,6 @@ Questions the source cannot answer. Each needs a parked bike.
 - Does the cluster require passing through preview `83` before `87` on a direct start?
 - Does one-control-per-tick session entry behave differently from a batched entry?
 - Do any fields go missing under single-pass writing? (See [D1](#d1) reversal criteria.)
-- What prompts the `8810` indication? It arrived about ten minutes into the capture, far later than
+- What prompts the `8810` indication? It arrived about ten minutes into one capture and not at all
+  in a later 955-second session, so it is not on a fixed timer. Far later than
   `8910`, and nothing establishes whether that is a timer, an event, or coincidence.
