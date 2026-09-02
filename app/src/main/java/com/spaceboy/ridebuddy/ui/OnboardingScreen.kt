@@ -112,7 +112,7 @@ fun OnboardingScreen(
                 )
                 3 -> OnboardingPage(
                     icon = if (bikeAssociated && authenticated) Icons.Outlined.CheckCircle else Icons.Outlined.Bluetooth,
-                    title = if (bikeAssociated) "Confirm your motorcycle" else "Associate your motorcycle",
+                    title = if (bikeAssociated) "Confirm your motorcycle" else "Pair your motorcycle",
                     body = if (bikeAssociated) {
                         "Your motorcycle (${associatedBikeLabel ?: "saved motorcycle"}) is saved. RideBuddy will automatically connect whenever you switch on the ignition."
                     } else {
@@ -130,9 +130,9 @@ fun OnboardingScreen(
                     title = "Calls and alerts",
                     body = "Grant notification access to display incoming caller names, call controls, and weather alerts directly on your motorcycle screen.",
                     actions = buildList {
-                        if (!notificationAccessEnabled) add("Enable TFT access" to onOpenNotificationAccess)
+                        if (!notificationAccessEnabled) add("Allow notification access" to onOpenNotificationAccess)
                         if (!appNotificationPermissionGranted) add("Enable riding alerts" to onRequestAppNotificationPermission)
-                        if (!legacyCallPermissionGranted) add("Enable legacy call fallback" to onEnableLegacyCalls)
+                        if (!legacyCallPermissionGranted) add("Allow answering calls" to onEnableLegacyCalls)
                     },
                     status = when {
                         notificationAccessEnabled && appNotificationPermissionGranted -> "Standard call actions and riding alerts are ready"
@@ -155,9 +155,9 @@ fun OnboardingScreen(
                     title = "Setup summary",
                     body = "You can change every optional permission and feature later in Settings.",
                     readiness = listOf(
-                        "Nearby access" to nearbyDeviceAccessGranted,
-                        "Bike association" to bikeAssociated,
-                        "Companion link ready" to (authenticated && telemetryReceiving),
+                        "Nearby devices" to nearbyDeviceAccessGranted,
+                        "Motorcycle paired" to bikeAssociated,
+                        "Live data from the bike" to (authenticated && telemetryReceiving),
                         "Route recording" to preciseLocationGranted,
                         "TFT calls and alerts" to notificationAccessEnabled,
                         "Google navigation" to navigationConfigured,

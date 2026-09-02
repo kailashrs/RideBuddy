@@ -888,7 +888,7 @@ private fun ForgetBikeDialog(
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = { Text("Forget this bike?") },
-        text = { Text("The app will stop reconnecting automatically. You can associate the bike again at any time.") },
+        text = { Text("The app will stop reconnecting automatically. You can pair the bike again at any time.") },
         confirmButton = {
             Button(
                 onClick = { onDismiss(); onConfirm() },

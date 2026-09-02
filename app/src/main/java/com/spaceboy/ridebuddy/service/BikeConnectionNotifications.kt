@@ -81,17 +81,10 @@ internal fun connectionNotificationStatus(
 ): String {
     val connectionLabel = when (state) {
         is BikeConnectionState.Connected -> "Connected to ${state.deviceName}"
-        is BikeConnectionState.Connecting -> {
-            val attempt = state.reconnectAttempt
-            val max = state.maxAttempts
-            if (attempt != null && max != null) {
-                "Reconnecting ($attempt/$max)"
-            } else {
-                "Connecting to ${state.deviceName ?: "bike"}"
-            }
-        }
-
-        is BikeConnectionState.Authenticating -> "Authenticating ${state.deviceName}"
+        // Connecting and authenticating read the same on a lock screen, and the retry count is
+        // the app's own bookkeeping — nobody waits differently on attempt four than on attempt two.
+        is BikeConnectionState.Connecting -> "Connecting to ${state.deviceName ?: "your motorcycle"}"
+        is BikeConnectionState.Authenticating -> "Connecting to ${state.deviceName}"
         is BikeConnectionState.Failed -> state.message
         BikeConnectionState.Disconnected -> "Disconnected"
     }
