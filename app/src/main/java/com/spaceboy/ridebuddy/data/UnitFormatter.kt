@@ -34,8 +34,13 @@ object UnitFormatter {
         mileageValue(kilometresPerLitre, units, locale)?.let { "%.1f %s".format(locale, it, mileageUnit(units)) }
             ?: "— ${mileageUnit(units)}"
 
-    /** Numeric mileage in the rider's units — US mpg and imperial mpg are different numbers. */
-    fun mileageValue(
+    /**
+     * Numeric mileage in the rider's units — US mpg and imperial mpg are different numbers.
+     *
+     * Private since the mileage charts were removed: an instantaneous fuel figure only reads as
+     * anything once it is formatted next to its unit, which is what [mileage] is for.
+     */
+    private fun mileageValue(
         kilometresPerLitre: Double?,
         units: DistanceUnits,
         locale: Locale = Locale.getDefault(),

@@ -306,7 +306,6 @@ private data class RideDetailUiData(
     val speedValues: List<Double>,
     val rpmValues: List<Double>,
     val throttleValues: List<Double>,
-    val mileageValues: List<Double?>,
     val events: List<RideEvent>,
 )
 
@@ -337,9 +336,6 @@ private fun buildRideDetailUiData(
         speedValues = chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) },
         rpmValues = chartSamples.map { it.rpm.toDouble() },
         throttleValues = chartSamples.map { it.throttlePercent.toDouble() },
-        mileageValues = chartSamples.map { sample ->
-            UnitFormatter.mileageValue(sample.mileageKilometresPerLitre, units, Locale.getDefault())
-        },
         events = RideEventDetector.detect(samples).take(MaxVisibleEvents),
     )
 }
@@ -443,9 +439,6 @@ private fun RideDetailContent(
         }
         item(key = "chart_throttle", contentType = "telemetry_chart") {
             TelemetryChart("Throttle", "%", data.throttleValues)
-        }
-        item(key = "chart_mileage", contentType = "telemetry_chart") {
-            TelemetryChart("Mileage", UnitFormatter.mileageUnit(units), data.mileageValues)
         }
         item(key = "ride_events", contentType = "events_card") {
             OutlinedCard(Modifier.fillMaxWidth()) {
