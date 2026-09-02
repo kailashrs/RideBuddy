@@ -571,11 +571,11 @@ private fun SafetyAlertsSection(
         if (settings.overspeedAlerts) {
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsSliderRow(
-                "Overspeed threshold",
-                speed.label(settings.overspeedThresholdKph.toDouble()),
-                speed.display(settings.overspeedThresholdKph.toDouble()),
-                speed.display(40.0)..speed.display(200.0),
-                15,
+                title = "Overspeed threshold",
+                supportingText = speed.label(settings.overspeedThresholdKph.toDouble()),
+                value = speed.display(settings.overspeedThresholdKph.toDouble()),
+                range = speed.display(40.0)..speed.display(200.0),
+                steps = 15,
                 icon = Icons.Outlined.Speed,
             ) { value -> settingsActions.onOverspeedThresholdChanged(speed.stored(value).roundToInt()) }
         }
@@ -591,11 +591,11 @@ private fun SafetyAlertsSection(
         if (settings.rpmAlerts) {
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsSliderRow(
-                "RPM threshold",
-                "${settings.rpmThreshold} rpm",
-                settings.rpmThreshold.toFloat(),
-                3_000f..12_000f,
-                17,
+                title = "RPM threshold",
+                supportingText = "${settings.rpmThreshold} rpm",
+                value = settings.rpmThreshold.toFloat(),
+                range = 3_000f..12_000f,
+                steps = 17,
                 icon = Icons.Outlined.Tune,
             ) { settingsActions.onRpmThresholdChanged(it.toInt()) }
         }
