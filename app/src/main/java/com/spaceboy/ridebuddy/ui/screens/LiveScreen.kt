@@ -675,11 +675,9 @@ private fun LiveDetailsSheet(
             val speedData = remember(chartSamples, units) { chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) } }
             val rpmData = remember(chartSamples) { chartSamples.map { it.rpm.toDouble() } }
             val throttleData = remember(chartSamples) { chartSamples.map { it.throttlePercent.toDouble() } }
-            val mileageData = remember(chartSamples, units, locale) { chartSamples.map { UnitFormatter.mileageValue(it.mileageKilometresPerLitre, units, locale) } }
             LiveChart("Speed", speedData, UnitFormatter.speedUnit(units))
             LiveChart("RPM", rpmData, "rpm")
             LiveChart("Throttle", throttleData, "%")
-            LiveChart("Mileage", mileageData, UnitFormatter.mileageUnit(units))
         }
     }
 }
