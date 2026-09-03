@@ -15,6 +15,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,6 +68,7 @@ class RideRecorder(
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
     private var stopCandidate: StopCandidate? = null
     private var resumePending = false
+    private val pendingWrites = MutableStateFlow(0)
     private var lastTelemetryAtMillis: Long? = null
 
     /** Loads history and begins watching telemetry. Called once, at app start. */
@@ -247,12 +250,30 @@ class RideRecorder(
             zeroToSixtyMillis = zeroToSixty,
             zeroToHundredMillis = zeroToHundred,
         )
+        // Counted around the whole write, because the connection state that finalises a ride is
+        // the same one that stops the foreground service. Without this the app can drop its
+        // foreground notification — and with it the process's protection from being killed —
+        // while the ride it just finished is still being written.
+        pendingWrites.update { it + 1 }
         scope.launch {
-            val rideId = persistRide(completedRide, completedSamples) ?: return@launch
-            val startArea = locationLabeler.label(start?.latitude, start?.longitude)
-            val endArea = locationLabeler.label(end?.latitude, end?.longitude)
-            updateRideAreas(rideId, startArea, endArea)
+            try {
+                val rideId = persistRide(completedRide, completedSamples) ?: return@launch
+                val startArea = locationLabeler.label(start?.latitude, start?.longitude)
+                val endArea = locationLabeler.label(end?.latitude, end?.longitude)
+                updateRideAreas(rideId, startArea, endArea)
+            } finally {
+                pendingWrites.update { it - 1 }
+            }
         }
+    }
+
+    /**
+     * Suspends until every finished ride has been written.
+     *
+     * For the foreground service to hold the process up until the last ride is safely stored.
+     */
+    suspend fun awaitPendingWrites() {
+        pendingWrites.first { it == 0 }
     }
 
     private suspend fun refreshHistory() {

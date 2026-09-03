@@ -20,6 +20,7 @@ import com.spaceboy.ridebuddy.core.companion.AssociatedBikeStore
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -274,11 +275,26 @@ class BikeConnectionService : Service() {
         notifications.publish(connectionNotificationStatus(state, locationPermissionMissing))
     }
 
+    /**
+     * Stops the service, but not before the last ride is on disk.
+     *
+     * The connection state that ends a ride — a disconnect, or reconnection giving up — is the
+     * same one that stops this service, and the ride is written asynchronously. Dropping the
+     * foreground notification first hands the OS a killable process holding an unwritten ride,
+     * which is exactly the ride a rider most expects to find afterwards.
+     *
+     * The wait is bounded so a stuck write cannot leave a foreground notification up for ever.
+     */
     private fun stopForegroundAndSelf() {
         if (shuttingDown) return
         shuttingDown = true
-        removeForegroundNotification()
-        stopSelf()
+        scope.launch {
+            withTimeoutOrNull(PendingRideWriteTimeoutMillis) {
+                container.rideRecorder.awaitPendingWrites()
+            }
+            removeForegroundNotification()
+            stopSelf()
+        }
     }
 
     private fun removeForegroundNotification() {
@@ -309,6 +325,12 @@ class BikeConnectionService : Service() {
         } ?: ConnectionAttemptTrigger.UserRequest
 
     companion object {
+        /**
+         * How long the service stays up waiting for a finished ride to be written. Generous
+         * against a slow disk, short enough that a wedged write cannot strand the notification.
+         */
+        private const val PendingRideWriteTimeoutMillis = 5_000L
+
         internal const val NotificationId = 457
         internal const val ActionDisconnect = "com.spaceboy.ridebuddy.action.DISCONNECT_BIKE"
         private const val ActionEnableLocation = "enable_location"

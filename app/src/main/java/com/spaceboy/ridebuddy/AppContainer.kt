@@ -36,6 +36,7 @@ import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.core.alerts.RidingAlertMonitor
 import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
 import com.spaceboy.ridebuddy.domain.BikeConnection
+import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.update
@@ -256,6 +257,26 @@ class AppContainer(context: Context) {
                     }
                 }
             }
+        }
+        applicationScope.launch {
+            // Reconnection giving up ends the route as well as the link. Guidance exists to be
+            // read off the motorcycle, and the app has just concluded it cannot reach one — so
+            // leaving a route running would keep the SDK, its foreground service and the phone's
+            // GPS alive for a display nobody is looking at.
+            //
+            // Only the transition into the state acts. Failed is republished for other reasons,
+            // and stopping an already-stopped route on each of them would fill the journal with
+            // AlreadyStopping for no gain.
+            bikeConnection.connectionState
+                .map { state -> state is BikeConnectionState.Failed && state.retriesExhausted }
+                .distinctUntilChanged()
+                .collect { gaveUp ->
+                    if (!gaveUp) return@collect
+                    connectionEventJournal.record("Reconnection gave up; ending navigation")
+                    navigationStopController.stop { result ->
+                        connectionEventJournal.record("Navigation stopped after giving up: $result")
+                    }
+                }
         }
         // Mirror the staged destination onto the cluster, so GO appears and disappears with
         // it rather than every staging call site having to remember to draw it.
