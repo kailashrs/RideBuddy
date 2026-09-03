@@ -9,6 +9,8 @@ import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import java.util.ArrayDeque
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -68,7 +70,8 @@ class RideRecorder(
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
     private var stopCandidate: StopCandidate? = null
     private var resumePending = false
-    private val pendingWrites = MutableStateFlow(0)
+    /** The most recent finished ride's primary insert, for [finalizeAndAwaitSave] to wait on. */
+    private var lastSave: CompletableDeferred<Unit>? = null
     private var lastTelemetryAtMillis: Long? = null
 
     /** Loads history and begins watching telemetry. Called once, at app start. */
@@ -250,30 +253,43 @@ class RideRecorder(
             zeroToSixtyMillis = zeroToSixty,
             zeroToHundredMillis = zeroToHundred,
         )
-        // Counted around the whole write, because the connection state that finalises a ride is
-        // the same one that stops the foreground service. Without this the app can drop its
-        // foreground notification — and with it the process's protection from being killed —
-        // while the ride it just finished is still being written.
-        pendingWrites.update { it + 1 }
+        val stored = CompletableDeferred<Unit>()
+        lastSave = stored
         scope.launch {
             try {
-                val rideId = persistRide(completedRide, completedSamples) ?: return@launch
+                val rideId = persistRide(completedRide, completedSamples)
+                // The barrier opens here, not at the end of the block. Everything past this
+                // point is place-name enrichment over the network: two geocoder calls that can
+                // each take seconds and are allowed to fail. Holding the foreground service up
+                // for those would mean the service's own timeout usually expired before a ride
+                // that was safely on disk within milliseconds.
+                stored.complete(Unit)
+                if (rideId == null) return@launch
                 val startArea = locationLabeler.label(start?.latitude, start?.longitude)
                 val endArea = locationLabeler.label(end?.latitude, end?.longitude)
                 updateRideAreas(rideId, startArea, endArea)
             } finally {
-                pendingWrites.update { it - 1 }
+                stored.complete(Unit)
             }
         }
     }
 
     /**
-     * Suspends until every finished ride has been written.
+     * Ends any active ride and suspends until it is on disk.
      *
-     * For the foreground service to hold the process up until the last ride is safely stored.
+     * The service cannot do this by watching a counter. It collects the same connection state
+     * this recorder does, on a different dispatcher, so it can reach the barrier before the
+     * recorder has even seen the state that ends the ride — finding a count of zero and
+     * shutting down while the ride is still un-finalised. Finalisation therefore happens *here*,
+     * on the recorder's own single-threaded dispatcher, which orders it against the collector:
+     * whichever runs first, the other finds the ride already ended and simply awaits the save.
      */
-    suspend fun awaitPendingWrites() {
-        pendingWrites.first { it == 0 }
+    suspend fun finalizeAndAwaitSave() {
+        withContext(RecordingDispatcher) {
+            if (mutableActiveRide.value != null) finishRide(stopCandidate)
+            clearLiveTelemetryState()
+        }
+        lastSave?.await()
     }
 
     private suspend fun refreshHistory() {

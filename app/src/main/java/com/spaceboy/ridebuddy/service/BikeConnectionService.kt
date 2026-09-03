@@ -2,7 +2,6 @@ package com.spaceboy.ridebuddy.service
 
 import com.spaceboy.ridebuddy.appContainer
 
-import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -60,6 +59,9 @@ class BikeConnectionService : Service() {
     private var foregroundPromotionSucceeded = false
     private var foregroundPromotionFailed = false
     private var shuttingDown = false
+    private var shutdownJob: Job? = null
+    /** The newest start command, so a delayed stop cannot retire a connection asked for since. */
+    private var latestStartId = 0
 
     /**
      * Promotes to the foreground immediately.
@@ -119,6 +121,8 @@ class BikeConnectionService : Service() {
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
+        latestStartId = startId
+        cancelPendingShutdown()
         receivedStartCommand = true
         when (intent?.action) {
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
@@ -288,13 +292,36 @@ class BikeConnectionService : Service() {
     private fun stopForegroundAndSelf() {
         if (shuttingDown) return
         shuttingDown = true
-        scope.launch {
-            withTimeoutOrNull(PendingRideWriteTimeoutMillis) {
-                container.rideRecorder.awaitPendingWrites()
+        val stopId = latestStartId
+        shutdownJob = scope.launch {
+            val saved = withTimeoutOrNull(PendingRideWriteTimeoutMillis) {
+                container.rideRecorder.finalizeAndAwaitSave()
+                true
+            }
+            if (saved == null) {
+                container.connectionEventJournal.record(
+                    "Gave up waiting for the ride to be stored after " +
+                        "${PendingRideWriteTimeoutMillis / 1_000}s; stopping anyway",
+                )
             }
             removeForegroundNotification()
-            stopSelf()
+            // stopSelfResult, not stopSelf: a connection requested while this was waiting has
+            // already claimed a newer start id, and must not be torn down by this one.
+            stopSelfResult(stopId)
         }
+    }
+
+    /**
+     * Abandons a shutdown that has not completed, because a new start command supersedes it.
+     *
+     * The wait above can last seconds. Without this, a rider tapping Connect during that window
+     * would have their connection ignored — state handling stays gated on [shuttingDown] — and
+     * then torn down when the old shutdown finally ran.
+     */
+    private fun cancelPendingShutdown() {
+        shutdownJob?.cancel()
+        shutdownJob = null
+        shuttingDown = false
     }
 
     private fun removeForegroundNotification() {
@@ -353,8 +380,11 @@ class BikeConnectionService : Service() {
             appContainer.bikeConnectionDemand.suppressAutomaticConnections()
             appContainer.connectionEventJournal.record("Manual disconnect requested")
             appContainer.bikeConnection.disconnect()
-            appContext.stopService(Intent(appContext, BikeConnectionService::class.java))
-            appContext.getSystemService(NotificationManager::class.java).cancel(NotificationId)
+            // Deliberately no stopService() and no notification cancel here. The Disconnected
+            // state reaches the service's own collector, which stops through the path that first
+            // waits for a ride finished by that same disconnect to reach the disk. Tearing the
+            // service down from outside would skip exactly that wait — which is how a rider ends
+            // a ride, so it is the last path that should be missing it.
         }
 
         /**
