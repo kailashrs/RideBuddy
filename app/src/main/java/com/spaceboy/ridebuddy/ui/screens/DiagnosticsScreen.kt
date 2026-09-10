@@ -28,11 +28,7 @@ import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
-import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ui.labelResource
-import java.util.UUID
-
-private fun UUID.shortNameForUi(): String = toString().takeLast(4)
 
 /**
  * Live protocol readout: link state, handshake phase, GATT counters, recent frames and

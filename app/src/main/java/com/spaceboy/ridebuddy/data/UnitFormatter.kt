@@ -19,14 +19,16 @@ import kotlin.math.roundToInt
  * the rider's.
  */
 object UnitFormatter {
-    fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String =
+    /** One decimal: a rider reads tenths of a kilometre, and nothing finer survives wheel speed. */
+    fun distance(kilometres: Double, units: DistanceUnits, locale: Locale): String =
         kilometres.takeIf { it.isFinite() && it >= 0.0 }?.let {
-            "%.${decimals.coerceIn(0, 2)}f %s".format(locale, distanceValue(it, units), distanceUnit(units))
+            "%.1f %s".format(locale, distanceValue(it, units), distanceUnit(units))
         } ?: "— ${distanceUnit(units)}"
 
-    fun speed(kph: Double, units: DistanceUnits, locale: Locale, decimals: Int = 0): String =
+    /** Whole units: the cluster itself reports speed to the nearest km/h. */
+    fun speed(kph: Double, units: DistanceUnits, locale: Locale): String =
         kph.takeIf { it.isFinite() && it >= 0.0 }?.let {
-            "%.${decimals.coerceIn(0, 2)}f %s".format(locale, chartSpeed(it, units), speedUnit(units))
+            "%.0f %s".format(locale, chartSpeed(it, units), speedUnit(units))
         } ?: "— ${speedUnit(units)}"
 
     /** The numeric distance in the rider's units, for charts that format their own labels. */
