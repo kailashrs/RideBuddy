@@ -143,8 +143,11 @@ Each consumer clears the flag with `K(false)` after acting, and each ignores com
 other screen. So the GO and EXIT glyphs the cluster draws are both real controls; they are simply
 handled in different places, and only one of the two is ever listening.
 
-RideBuddy mirrors this with a staged-destination state: a destination the rider has chosen but not
-started puts the cluster into session `83`, and command `1` starts it.
+RideBuddy calculates a route from the current location before entering session `83`, with its
+destination, distance and ETA. The phone frames all SDK route segments (Google's built-in overview
+only covers the next 45 minutes) and offers Go. Command `1` and that Go button start the same
+prepared navigator. Closing an unstarted preview clears it; backgrounding the screen preserves
+its handlebar listener while the Activity exists. Auto-started shared links may skip the preview.
 
 ## How the OEM decides what to write
 
@@ -166,11 +169,10 @@ RideBuddy instead queues every field on each `NavInfo` and drains a coalescing m
 traffic than the OEM sends but is not a correctness difference — the packets are identical and
 idempotent.
 
-The speed limit is a real difference. The OEM reads the posted limit straight off each route step
-(`h0(aVar.a())`) and writes it whenever it changes. The Google Navigation SDK exposes no equivalent
-— only how far over the limit the rider is — so RideBuddy back-calculates an estimate and can only
-do so while the rider is actually speeding. It zeroes the field on teardown so a stale limit does
-not persist.
+The OEM reads the posted limit from each route step (`h0(aVar.a())`). The pinned Google Navigation
+SDK 7.9.0 does not expose that value to the app. RideBuddy leaves the TFT limit blank and clears
+any previous value on teardown; it does not combine wheel speed with Google's GPS speeding ratio,
+which would produce an unreliable estimate. Google's own navigation UI can still show its limit.
 
 ## Live telemetry (`8410`)
 
@@ -341,10 +343,34 @@ own on-screen arrow. Rendering `ic_step_<id>` therefore labels the pictogram it 
 | `13`, `14` | unknown — no `ic_step_*` art ships for ids 26–31 | 26–31 |
 | `15` | exit / ramp right | 75 |
 | `16` | exit / ramp left | 73, 74 |
-| `151`–`157` | roundabout, 1st through 7th exit | 71 … 65 |
-| `158` | roundabout, no exit number | 72 |
+| `101`–`107` | counter-clockwise roundabout: sharp right, right, slight right, straight, slight left, left, sharp left | 58 … 64 |
+| `151`–`157` | clockwise roundabout: sharp right, right, slight right, straight, slight left, left, sharp left | 71 … 65 |
+| `158` | roundabout, unspecified bearing | 72 |
 | `200` | ferry | 36 |
 | `201` | destination / unknown | 8, 9, 10 |
+
+The roundabout IDs encode **bearing and circulation direction, not exit number**. Fresh extraction
+of `Artifacts/apriliaindia.apk` with JADX 1.5.5 establishes this through these original APK paths:
+
+- `com/mappls/sdk/plugin/directions/DirectionsUtils.java:getManeuverId` passes the maneuver's
+  degree and driving side into `e.a`.
+- `com/mappls/sdk/plugin/directions/e.java:a` bins degree at 45/90/135/180/225/270, producing
+  Mappls 65–71 for left-side traffic and 58–64 for right-side traffic.
+- `com/piaggio/apriliaindia/data/bluetooth/model/a.java:b` maps 65–71 to 157–151 and 58–64 to
+  101–107. JADX substitutes `R.styleable` names for 101–107; their numeric values are in
+  `me/zhanghai/android/materialprogressbar/R.java`, so they must not be discarded as resource IDs.
+- `res/drawable-nodpi/ic_step_58.xml` through `ic_step_71.xml` show the corresponding exit bearings.
+
+Google's named roundabout maneuver supplies bearing/circulation for this table. Its separate
+`roundaboutTurnNumber` is sent only in byte 2 of `8210`. An unspecified bearing uses 158 even when
+the exit ordinal is known. Treating the ordinal as the glyph offset could point the wrong way.
+The current and next pictograms both use the bearing mapping. Non-roundabout keep-left/right ramp
+maneuvers preserve their side instead of collapsing into an unspecified merge.
+
+Text row content is normalized, common road words abbreviated (for example Road to Rd), then
+wrapped at word boundaries where possible. Final-row truncation uses `...` within the 16 UTF-8-byte
+budget. All unused rows are cleared. The byte envelope stays the same; support for non-Latin glyphs
+still requires firmware observation. The instruction banner prefers the SDK's simple road name.
 
 Ids 0–7 and 50–57 are the same compass rotation twice over (N straight, NE slight right, E right,
 SE sharp right, S U-turn, SW sharp left, W left, NW slight left), which is what makes the reading

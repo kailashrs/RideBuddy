@@ -30,9 +30,11 @@ object TftPacketEncoder {
     /**
      * Maneuver packet from Google maneuver ids, resolving them to cluster pictograms first.
      */
-    fun maneuver(current: Int, next: Int, roundaboutExit: Int, distanceMetres: Int): ByteArray =
+    fun maneuver(
+        current: Int, next: Int, roundaboutExit: Int, distanceMetres: Int,
+    ): ByteArray =
         pictogram(
-            current = clusterManeuver(current, roundaboutExit),
+            current = clusterManeuver(current),
             next = clusterManeuver(next),
             roundaboutExit = roundaboutExit,
             // Sent raw. This is the one distance field the cluster does not want rounded —
@@ -111,8 +113,8 @@ object TftPacketEncoder {
      * whatever was on the rows the new text does not reach.
      */
     fun guidanceTextRows(destination: String, instruction: String): List<ByteArray> {
-        val destinationRows = utf8Chunks(destination, bytesPerRow = 16, maxRows = 2)
-        val instructionRows = utf8Chunks(instruction, bytesPerRow = 16, maxRows = 1)
+        val destinationRows = readableTextRows(destination, maxRows = 2)
+        val instructionRows = readableTextRows(instruction, maxRows = 1)
         return listOf(
             textRow(0, destinationRows.getOrElse(0) { ByteArray(0) }),
             textRow(1, destinationRows.getOrElse(1) { ByteArray(0) }),
@@ -125,7 +127,7 @@ object TftPacketEncoder {
      * is no destination/instruction split to honour.
      */
     fun displayTextRows(text: String, maxContentRows: Int = 3): List<ByteArray> {
-        val chunks = utf8Chunks(text, bytesPerRow = 16, maxRows = maxContentRows.coerceIn(1, 3))
+        val chunks = readableTextRows(text, maxRows = maxContentRows.coerceIn(1, 3))
         return (0 until 3).map { row -> textRow(row, chunks.getOrElse(row) { byteArrayOf() }) }
     }
 
@@ -142,27 +144,12 @@ object TftPacketEncoder {
     fun status(code: Int): ByteArray = byteArrayOf(6, code.coerceIn(0, 255).toByte(), End.toByte())
 
     /**
-     * Cluster pictogram for a Google maneuver.
-     *
-     * The pictogram numbers are the cluster's own and are not ordered by direction, so they
-     * cannot be derived — the mapping below is the vocabulary, established by pairing each
-     * id with the arrow the cluster draws for it and confirmed on the wire (the cluster
-     * drew a right arrow for `6` while the banner read "Turn right onto"):
-     *
-     * 1 straight · 2/3 U-turn cw/ccw · 4 keep right · 5 slight right · 6 right · 7 sharp
-     * right · 8 merge · 9 keep left · 10 slight left · 11 left · 12 sharp left · 15/16 exit
-     * right/left · 151-157 roundabout Nth exit · 158 roundabout · 200 ferry · 201
-     * destination.
-     *
-     * Ids 13 and 14 exist in the vocabulary but no artwork was ever identified for them, so
-     * their meaning is unknown and nothing here emits them.
-     *
-     * A numbered roundabout exit takes priority over the maneuver itself, because the
-     * cluster has a dedicated glyph per exit number and that is more informative than the
-     * generic turn it would otherwise draw.
+     * OEM Mappls ids are translated through data/bluetooth/model/a.b. The roundabout
+     * glyphs encode exit BEARING, not exit ordinal: plugin/directions/e.a selects them
+     * by angle and driving side. Google supplies the same bearing in its maneuver enum;
+     * the separate roundaboutTurnNumber belongs only in byte 2 of the maneuver packet.
      */
-    fun clusterManeuver(maneuver: Int, roundaboutExit: Int = 0): Int {
-        if (roundaboutExit in 1..7) return 150 + roundaboutExit
+    fun clusterManeuver(maneuver: Int): Int {
         return when (maneuver) {
             Maneuver.DEPART, Maneuver.STRAIGHT, Maneuver.NAME_CHANGE -> 1
             Maneuver.TURN_U_TURN_CLOCKWISE,
@@ -173,32 +160,37 @@ object TftPacketEncoder {
             Maneuver.ON_RAMP_U_TURN_COUNTERCLOCKWISE,
             Maneuver.OFF_RAMP_U_TURN_COUNTERCLOCKWISE,
             -> 3
-            Maneuver.TURN_KEEP_RIGHT, Maneuver.FORK_RIGHT -> 4
+            Maneuver.TURN_KEEP_RIGHT, Maneuver.FORK_RIGHT, Maneuver.ON_RAMP_KEEP_RIGHT -> 4
             Maneuver.TURN_SLIGHT_RIGHT, Maneuver.ON_RAMP_SLIGHT_RIGHT -> 5
             Maneuver.TURN_RIGHT, Maneuver.ON_RAMP_RIGHT -> 6
             Maneuver.TURN_SHARP_RIGHT, Maneuver.ON_RAMP_SHARP_RIGHT, Maneuver.OFF_RAMP_SHARP_RIGHT -> 7
             // The merge glyph carries "you are joining another road" without claiming a side, which
             // is all an unspecified ramp knows.
             Maneuver.MERGE_UNSPECIFIED, Maneuver.MERGE_LEFT, Maneuver.MERGE_RIGHT,
-            Maneuver.ON_RAMP_UNSPECIFIED, Maneuver.ON_RAMP_KEEP_LEFT, Maneuver.ON_RAMP_KEEP_RIGHT,
+            Maneuver.ON_RAMP_UNSPECIFIED,
             Maneuver.OFF_RAMP_UNSPECIFIED,
             -> 8
-            Maneuver.TURN_KEEP_LEFT, Maneuver.FORK_LEFT -> 9
+            Maneuver.TURN_KEEP_LEFT, Maneuver.FORK_LEFT, Maneuver.ON_RAMP_KEEP_LEFT -> 9
             Maneuver.TURN_SLIGHT_LEFT, Maneuver.ON_RAMP_SLIGHT_LEFT -> 10
             Maneuver.TURN_LEFT, Maneuver.ON_RAMP_LEFT -> 11
             Maneuver.TURN_SHARP_LEFT, Maneuver.ON_RAMP_SHARP_LEFT, Maneuver.OFF_RAMP_SHARP_LEFT -> 12
             Maneuver.OFF_RAMP_RIGHT, Maneuver.OFF_RAMP_KEEP_RIGHT, Maneuver.OFF_RAMP_SLIGHT_RIGHT -> 15
             Maneuver.OFF_RAMP_LEFT, Maneuver.OFF_RAMP_KEEP_LEFT, Maneuver.OFF_RAMP_SLIGHT_LEFT -> 16
-            // A roundabout the SDK gave no exit number for: the plain roundabout glyph, never an
-            // exit-numbered one, which would name an exit the rider was never told to take.
+            Maneuver.ROUNDABOUT_SHARP_RIGHT_CLOCKWISE -> 151
+            Maneuver.ROUNDABOUT_RIGHT_CLOCKWISE -> 152
+            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_CLOCKWISE -> 153
+            Maneuver.ROUNDABOUT_STRAIGHT_CLOCKWISE -> 154
+            Maneuver.ROUNDABOUT_SLIGHT_LEFT_CLOCKWISE -> 155
+            Maneuver.ROUNDABOUT_LEFT_CLOCKWISE -> 156
+            Maneuver.ROUNDABOUT_SHARP_LEFT_CLOCKWISE -> 157
+            Maneuver.ROUNDABOUT_SHARP_RIGHT_COUNTERCLOCKWISE -> 101
+            Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE -> 102
+            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_COUNTERCLOCKWISE -> 103
+            Maneuver.ROUNDABOUT_STRAIGHT_COUNTERCLOCKWISE -> 104
+            Maneuver.ROUNDABOUT_SLIGHT_LEFT_COUNTERCLOCKWISE -> 105
+            Maneuver.ROUNDABOUT_LEFT_COUNTERCLOCKWISE -> 106
+            Maneuver.ROUNDABOUT_SHARP_LEFT_COUNTERCLOCKWISE -> 107
             Maneuver.ROUNDABOUT_CLOCKWISE, Maneuver.ROUNDABOUT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_STRAIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_STRAIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_SLIGHT_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SLIGHT_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_SLIGHT_RIGHT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_SHARP_LEFT_COUNTERCLOCKWISE,
-            Maneuver.ROUNDABOUT_SHARP_RIGHT_CLOCKWISE, Maneuver.ROUNDABOUT_SHARP_RIGHT_COUNTERCLOCKWISE,
             Maneuver.ROUNDABOUT_U_TURN_CLOCKWISE, Maneuver.ROUNDABOUT_U_TURN_COUNTERCLOCKWISE,
             Maneuver.ROUNDABOUT_EXIT_CLOCKWISE, Maneuver.ROUNDABOUT_EXIT_COUNTERCLOCKWISE,
             -> 158
@@ -220,33 +212,50 @@ object TftPacketEncoder {
         this[offset + 2] = (safe ushr 16).toByte()
     }
 
-    /**
-     * Splits [text] into at most [maxRows] rows of at most [bytesPerRow] UTF-8 bytes.
-     *
-     * The row limit is a *byte* limit, so it is walked by code point rather than by
-     * character: splitting a multi-byte character across rows would put an invalid UTF-8
-     * fragment on the wire, and a surrogate pair split by index would corrupt the character
-     * outright. A single character too large to fit a row at all is skipped, since there is
-     * no row it could ever be placed on.
-     */
-    private fun utf8Chunks(text: String, bytesPerRow: Int, maxRows: Int): List<ByteArray> {
-        val chunks = mutableListOf<ByteArray>()
-        val current = mutableListOf<Byte>()
-        var index = 0
-        while (index < text.length && chunks.size < maxRows) {
-            val codePoint = Character.codePointAt(text, index)
-            val encoded = String(Character.toChars(codePoint)).toByteArray(Charsets.UTF_8)
-            if (current.isNotEmpty() && current.size + encoded.size > bytesPerRow) {
-                chunks += current.toByteArray()
-                current.clear()
-                if (chunks.size == maxRows) break
+    /** Word wrapping, common road abbreviations and byte-safe truncation for the 16-byte rows. */
+    private fun readableTextRows(text: String, maxRows: Int): List<ByteArray> {
+        val normalized = text.replace(Regex("[\\p{Cc}\\p{Cf}\\s]+"), " ").trim()
+        var remaining = RoadAbbreviations.entries.fold(normalized) { value, (word, short) ->
+            value.replace(Regex("\\b$word\\b", RegexOption.IGNORE_CASE), short)
+        }
+        return buildList {
+            repeat(maxRows) { row ->
+                if (remaining.isEmpty()) return@buildList
+                val prefix = remaining.utf8Prefix(16)
+                if (prefix.length == remaining.length) {
+                    add(prefix.toByteArray(Charsets.UTF_8))
+                    return@buildList
+                }
+                if (row == maxRows - 1) {
+                    val clipped = remaining.utf8Prefix(13).trimEnd()
+                    add((clipped + "...").toByteArray(Charsets.UTF_8))
+                    return@buildList
+                }
+                val boundary = prefix.lastIndexOf(' ').takeIf { it > 0 } ?: prefix.length
+                add(prefix.substring(0, boundary).toByteArray(Charsets.UTF_8))
+                remaining = remaining.substring(boundary).trimStart()
             }
-            if (encoded.size <= bytesPerRow) current += encoded.toList()
+        }
+    }
+
+    private fun String.utf8Prefix(byteLimit: Int): String {
+        var index = 0
+        var bytes = 0
+        while (index < length) {
+            val codePoint = Character.codePointAt(this, index)
+            val count = String(Character.toChars(codePoint)).toByteArray(Charsets.UTF_8).size
+            if (bytes + count > byteLimit) break
+            bytes += count
             index += Character.charCount(codePoint)
         }
-        if (current.isNotEmpty() && chunks.size < maxRows) chunks += current.toByteArray()
-        return chunks
+        return substring(0, index)
     }
+
+    private val RoadAbbreviations = mapOf(
+        "National Highway" to "NH", "State Highway" to "SH",
+        "Road" to "Rd", "Street" to "St", "Avenue" to "Ave",
+        "Highway" to "Hwy", "Boulevard" to "Blvd", "Junction" to "Jct",
+    )
 
     /**
      * One text-row packet: tag, row index, total packet length, the bytes, terminator.

@@ -45,17 +45,28 @@ class TftPacketEncoderTest {
         assertEquals(1, TftPacketEncoder.clusterManeuver(Maneuver.STRAIGHT))
     }
 
-    /**
-     * 151-157 name the exit the rider takes, and 158 is the plain roundabout. An exit number the
-     * cluster has no glyph for must fall back to the plain one rather than wrapping onto a glyph
-     * that names a different exit.
-     */
     @Test
-    fun roundaboutUsesTheExitNumberOnlyWhenThereIsAGlyphForIt() {
-        assertEquals(151, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 1))
-        assertEquals(157, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 7))
-        assertEquals(158, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE, roundaboutExit = 8))
+    fun roundaboutGlyphUsesBearingAndRotationNotTheExitOrdinal() {
+        assertEquals(156, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_LEFT_CLOCKWISE))
+        assertEquals(152, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_RIGHT_CLOCKWISE))
+        assertEquals(154, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_STRAIGHT_CLOCKWISE))
+        assertEquals(106, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_LEFT_COUNTERCLOCKWISE))
+        assertEquals(102, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE))
+        assertEquals(104, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_STRAIGHT_COUNTERCLOCKWISE))
         assertEquals(158, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE))
+        val packet = TftPacketEncoder.maneuver(
+            Maneuver.ROUNDABOUT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE,
+            roundaboutExit = 3, distanceMetres = 150,
+        )
+        assertEquals(156, packet[1].toInt() and 255)
+        assertEquals(3, packet[2].toInt() and 255)
+        assertEquals(102, packet[4].toInt() and 255)
+    }
+
+    @Test
+    fun onRampKeepManeuversPreserveTheSpecifiedSide() {
+        assertEquals(4, TftPacketEncoder.clusterManeuver(Maneuver.ON_RAMP_KEEP_RIGHT))
+        assertEquals(9, TftPacketEncoder.clusterManeuver(Maneuver.ON_RAMP_KEEP_LEFT))
     }
 
     /** The OEM's ferry glyph is 200 and its destination marker is 201; these were swapped. */
@@ -201,9 +212,9 @@ class TftPacketEncoderTest {
         )
 
         assertEquals(3, rows.size)
-        assertEquals("Marina Beach Mar", rowText(rows[0]))
-        assertEquals("ina Beach Road, ", rowText(rows[1]))
-        assertEquals("Turn right onto ", rowText(rows[2]))
+        assertEquals("Marina Beach", rowText(rows[0]))
+        assertEquals("Marina Beach...", rowText(rows[1]))
+        assertEquals("Turn right on...", rowText(rows[2]))
         rows.forEach { assertEquals(0x00, it.last().toInt() and 0xFF) }
     }
 
@@ -247,13 +258,17 @@ class TftPacketEncoderTest {
             TftPacketEncoder.pictogram(current = 6, next = 6, distanceMetres = 277).toHex(),
         )
 
-        val rows = TftPacketEncoder.guidanceTextRows(
-            destination = "Marina Beach Marina Beach Road, ",
-            instruction = "Turn right onto Marina Beach Road",
-        )
-        assertEquals("0400144d6172696e61204265616368204d617200", rows[0].toHex())
-        assertEquals("040114696e6120426561636820526f61642c2000", rows[1].toHex())
-        assertEquals("0402145475726e207269676874206f6e746f2000", rows[2].toHex())
+    }
+
+    @Test
+    fun textNormalizesControlsAndAbbreviatesRoadNamesWithinTheEnvelope() {
+        val rows = TftPacketEncoder.guidanceTextRows("Marina\nBeach\u0000Road", "Marina Beach Road")
+        assertEquals("Marina Beach Rd", rowText(rows[0]))
+        assertEquals("Marina Beach Rd", rowText(rows[2]))
+        rows.forEach { row ->
+            assertEquals(row.size, row[2].toInt() and 255)
+            assert(row.size <= 20)
+        }
     }
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
