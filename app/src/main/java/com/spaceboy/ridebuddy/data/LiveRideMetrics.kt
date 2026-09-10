@@ -14,26 +14,12 @@ data class LiveRideMetrics(
     val estimatedPacketGapPercent: Int? = null,
 )
 
-/**
- * Recomputes the live counters from scratch over the current sample window.
- *
- * Note this counts *samples* over threshold rather than episodes, so one sustained hard
- * braking contributes several. That is deliberate for a live intensity readout;
- * [RideEventDetector] does the episode-level analysis used for stored ride history.
- */
+/** The live window and ride details count the same discrete maneuvers. */
 internal fun calculateLiveRideMetrics(samples: List<RideSample>): LiveRideMetrics {
-    var hardAccelerationEvents = 0
-    var hardBrakingEvents = 0
-    samples.forEach { sample ->
-        when {
-            sample.accelerationMetresPerSecondSquared >= HardAccelerationThreshold -> hardAccelerationEvents++
-            sample.accelerationMetresPerSecondSquared <= HardBrakingThreshold -> hardBrakingEvents++
-        }
-    }
-
+    val events = RideEventDetector.detect(samples)
     return LiveRideMetrics(
-        hardAccelerationEvents = hardAccelerationEvents,
-        hardBrakingEvents = hardBrakingEvents,
+        hardAccelerationEvents = events.count { it.type == RideEventType.HardAcceleration },
+        hardBrakingEvents = events.count { it.type == RideEventType.HardBraking },
         estimatedPacketGapPercent = estimatePacketGapPercent(samples),
     )
 }
@@ -52,6 +38,7 @@ private fun estimatePacketGapPercent(samples: List<RideSample>): Int? {
     val intervals = LongArray(samples.lastIndex) { index ->
         (samples[index + 1].timestampMillis - samples[index].timestampMillis).coerceAtLeast(1L)
     }
+    if (samples.zipWithNext().any { (first, second) -> second.timestampMillis <= first.timestampMillis }) return null
     intervals.sort()
     val baseline = intervals[intervals.size / 2].coerceAtLeast(1L)
     val expected = ((samples.last().timestampMillis - samples.first().timestampMillis) / baseline + 1L)
@@ -60,11 +47,6 @@ private fun estimatePacketGapPercent(samples: List<RideSample>): Int? {
         .roundToInt()
         .coerceIn(0, 100)
 }
-
-private const val HardAccelerationThreshold = 3.0
-
-/** Larger in magnitude: a bike brakes considerably harder than it accelerates. */
-private const val HardBrakingThreshold = -3.5
 
 /** Below this, the median interval is not a meaningful baseline. */
 private const val MinimumPacketGapSamples = 4

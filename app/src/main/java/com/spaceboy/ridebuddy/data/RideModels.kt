@@ -31,9 +31,13 @@ data class Ride(
     val routePreview: List<RoutePoint> = emptyList(),
     val zeroToSixtyMillis: Long? = null,
     val zeroToHundredMillis: Long? = null,
+    /** Time covered by measured telemetry intervals; null for legacy records. */
+    val telemetryDurationMillis: Long? = null,
 ) {
     /** Clamped at zero, so a clock adjustment mid-ride cannot produce a negative duration. */
     val durationMillis: Long get() = (endedAtMillis - startedAtMillis).coerceAtLeast(0)
+
+    val averagingDurationMillis: Long get() = telemetryDurationMillis?.coerceAtLeast(0L) ?: durationMillis
 
     /** Distance over fuel, or null when either is missing or zero. */
     val averageMileageKilometresPerLitre: Double?
@@ -62,7 +66,10 @@ fun Iterable<Ride>.combinedMileageKilometresPerLitre(): Double? {
 }
 
 /** One point of a stored route trace, thinned for the history preview map. */
-data class RoutePoint(val latitude: Double, val longitude: Double)
+data class RoutePoint(val latitude: Double, val longitude: Double) {
+    val isValid: Boolean get() = latitude.isFinite() && latitude in -90.0..90.0 &&
+        longitude.isFinite() && longitude in -180.0..180.0
+}
 
 /** Window the insights screen aggregates over. A null [days] means no lower bound. */
 enum class InsightPeriod(val days: Int?) {

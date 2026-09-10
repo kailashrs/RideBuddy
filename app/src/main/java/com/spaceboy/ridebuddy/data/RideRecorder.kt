@@ -9,7 +9,6 @@ import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import java.util.ArrayDeque
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,8 +16,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,9 +67,25 @@ class RideRecorder(
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
     private var stopCandidate: StopCandidate? = null
     private var resumePending = false
-    /** The most recent finished ride's primary insert, for [finalizeAndAwaitSave] to wait on. */
-    private var lastSave: CompletableDeferred<Unit>? = null
-    private var lastTelemetryAtMillis: Long? = null
+    /**
+     * Set when the rider ends a ride by hand, and cleared once speed falls back under the stop
+     * threshold. Without it the next telemetry frame at road speed opens a fresh ride straight
+     * away and the button looks inert.
+     */
+    private var awaitStopBeforeNextRide = false
+    private val saveQueue = RideSaveQueue(
+        insert = repository::insert,
+        onSaved = { rideId, ride ->
+            // Enrichment is optional and runs after the primary save barrier opens.
+            scope.launch {
+                val startArea = locationLabeler.label(ride.startLatitude, ride.startLongitude)
+                val endArea = locationLabeler.label(ride.endLatitude, ride.endLongitude)
+                updateRideAreas(rideId, startArea, endArea)
+            }
+        },
+        onFailure = { error -> Log.e(LogTag, "Could not save completed ride; retained for retry", error) },
+    )
+    val saveFailed: StateFlow<Boolean> = saveQueue.saveFailed
 
     /** Loads history and begins watching telemetry. Called once, at app start. */
     fun start() {
@@ -91,7 +104,10 @@ class RideRecorder(
                     BikeConnectionState.Disconnected,
                     is BikeConnectionState.Failed,
                     -> {
-                        if (mutableActiveRide.value != null) finishRide(stopCandidate)
+                        if (mutableActiveRide.value != null) finishRide(stopCandidate, endOfSession = true)
+                        // The next session is a new outing, so a hand-ended ride stops holding
+                        // recording closed across it.
+                        awaitStopBeforeNextRide = false
                         clearLiveTelemetryState()
                     }
 
@@ -103,10 +119,6 @@ class RideRecorder(
         }
     }
 
-    /**
-     * Handles one telemetry frame: updates the live window, and starts, extends or ends the
-     * ride as its speed dictates.
-     */
     /**
      * Holds an active ride open while the link is re-established.
      *
@@ -135,9 +147,10 @@ class RideRecorder(
     private fun record(reading: TelemetryReading) {
         if (bikeConnection.connectionState.value !is BikeConnectionState.Connected) return
         val frame = reading.frame
-        val now = reading.receivedAtMillis
-        lastTelemetryAtMillis = now
         val nowElapsedRealtime = reading.receivedAtElapsedRealtime
+        val now = mutableActiveRide.value?.let {
+            it.startedAtMillis + (nowElapsedRealtime - it.startedAtElapsedRealtime).coerceAtLeast(0L)
+        } ?: reading.receivedAtMillis
         val previousFrame = lastLiveFrame
         val previousAt = lastLiveAtElapsedRealtime
         val liveElapsedMillis = previousAt?.let { nowElapsedRealtime - it } ?: 0L
@@ -162,6 +175,16 @@ class RideRecorder(
 
         val current = mutableActiveRide.value
         if (current == null) {
+            if (awaitStopBeforeNextRide) {
+                if (shouldStopRide(
+                        frame.speedKilometresPerHour,
+                        settingsRepository.settings.value.rideStopSpeedKph,
+                    )
+                ) {
+                    awaitStopBeforeNextRide = false
+                }
+                return
+            }
             if (frame.speedKilometresPerHour >= settingsRepository.settings.value.rideStartSpeedKph) {
                 samples.clear()
                 // Seed with the last few seconds of pre-threshold samples. A standing-start
@@ -180,9 +203,7 @@ class RideRecorder(
         val resumed = resumePending
         if (resumed) resumePending = false
         val baseline = if (resumed) current.copy(lastSampleAtElapsedRealtime = nowElapsedRealtime) else current
-        val elapsedMillis = nowElapsedRealtime - baseline.lastSampleAtElapsedRealtime
-        val distanceDelta = distanceDeltaKilometres(baseline.lastSpeedKph, frame.speedKilometresPerHour, elapsedMillis)
-        val updated = baseline.add(frame, nowElapsedRealtime, distanceDelta)
+        val updated = baseline.add(frame, nowElapsedRealtime)
         mutableActiveRide.value = updated
         appendStoredSample(liveSample)
 
@@ -195,7 +216,6 @@ class RideRecorder(
         if (shouldStopRide(frame.speedKilometresPerHour, settings.rideStopSpeedKph)) {
             if (stopJob == null) {
                 stopCandidate = StopCandidate(
-                    endedAtMillis = now,
                     activeRide = updated,
                     samples = samples.toList(),
                 )
@@ -218,14 +238,14 @@ class RideRecorder(
     /**
      * Closes out a ride and saves it.
      *
-     * Rides under [MinimumSavedDistanceKm] are dropped rather than stored: they are sensor
-     * noise or a bike rolled a few metres, and they would distort every average in history.
+     * Automatic stop detection discards rides below [MinimumSavedDistanceKm]. A terminal
+     * session end always saves an already active ride, including a deliberately short one.
      *
      * Saving happens in two stages. The ride is persisted first, then reverse geocoding
      * fills in the place labels — that needs a network and must not delay or endanger the
      * write of the ride itself.
      */
-    private fun finishRide(confirmedStop: StopCandidate? = null) {
+    private fun finishRide(confirmedStop: StopCandidate? = null, endOfSession: Boolean = false) {
         stopJob?.cancel()
         stopJob = null
         stopCandidate = null
@@ -233,18 +253,13 @@ class RideRecorder(
         val latestActive = mutableActiveRide.getAndUpdate { null } ?: return
         val active = confirmedStop?.activeRide ?: latestActive
         val completedSamples = (confirmedStop?.samples ?: samples.toList()).also { samples.clear() }
-        if (active.distanceKilometres < MinimumSavedDistanceKm) return
+        if (!endOfSession && active.distanceKilometres < MinimumSavedDistanceKm) return
         val start = completedSamples.firstOrNull { it.latitude != null && it.longitude != null }
         val end = completedSamples.lastOrNull { it.latitude != null && it.longitude != null }
         val route = completedSamples.routePreview()
         val zeroToSixty = completedSamples.accelerationTime(60.0)
         val zeroToHundred = completedSamples.accelerationTime(100.0)
-        val completedRide = active.toRide(
-            // Without a confirmed stop, the ride ended when telemetry did — not when the app
-            // noticed. Using the wall clock here would add the whole reconnect schedule to the
-            // duration of every ride that ends in a failed reconnect.
-            confirmedStop?.endedAtMillis ?: lastTelemetryAtMillis ?: System.currentTimeMillis(),
-        ).copy(
+        val completedRide = active.toRide().copy(
             startLatitude = start?.latitude,
             startLongitude = start?.longitude,
             endLatitude = end?.latitude,
@@ -253,29 +268,39 @@ class RideRecorder(
             zeroToSixtyMillis = zeroToSixty,
             zeroToHundredMillis = zeroToHundred,
         )
-        val stored = CompletableDeferred<Unit>()
-        lastSave = stored
-        scope.launch {
-            try {
-                val rideId = persistRide(completedRide, completedSamples)
-                // The barrier opens here, not at the end of the block. Everything past this
-                // point is place-name enrichment over the network: two geocoder calls that can
-                // each take seconds and are allowed to fail. Holding the foreground service up
-                // for those would mean the service's own timeout usually expired before a ride
-                // that was safely on disk within milliseconds.
-                stored.complete(Unit)
-                if (rideId == null) return@launch
-                val startArea = locationLabeler.label(start?.latitude, start?.longitude)
-                val endArea = locationLabeler.label(end?.latitude, end?.longitude)
-                updateRideAreas(rideId, startArea, endArea)
-            } finally {
-                stored.complete(Unit)
-            }
+        saveQueue.enqueue(completedRide, completedSamples)
+        scope.launch { saveQueue.flush() }
+    }
+
+    /**
+     * Retries a save the disk refused. Needed on its own because a ride ended by hand fails
+     * while the service is still running, so there is no shutdown pass to carry the retry.
+     */
+    fun retrySave() {
+        scope.launch { saveQueue.flush() }
+    }
+
+    /**
+     * Ends the ride the rider is on, at their request, without ending the session.
+     *
+     * The link, guidance and cluster notifications are separate features they have not asked to
+     * give up — a rider who ends a ride at a stop is usually about to carry on. Recording stays
+     * closed until the bike is actually stationary, so pressing this at road speed cannot be
+     * undone by the very next frame.
+     *
+     * Runs on the recording dispatcher, which orders it against the telemetry collector rather
+     * than racing it for [mutableActiveRide].
+     */
+    fun endRideNow() {
+        scope.launch(RecordingDispatcher) {
+            if (mutableActiveRide.value == null) return@launch
+            finishRide(stopCandidate, endOfSession = true)
+            awaitStopBeforeNextRide = true
         }
     }
 
     /**
-     * Ends any active ride and suspends until it is on disk.
+     * Ends any active ride and waits for its primary insert. False retains it for Retry save.
      *
      * The service cannot do this by watching a counter. It collects the same connection state
      * this recorder does, on a different dispatcher, so it can reach the barrier before the
@@ -284,12 +309,12 @@ class RideRecorder(
      * on the recorder's own single-threaded dispatcher, which orders it against the collector:
      * whichever runs first, the other finds the ride already ended and simply awaits the save.
      */
-    suspend fun finalizeAndAwaitSave() {
+    suspend fun finalizeAndAwaitSave(): Boolean {
         withContext(RecordingDispatcher) {
-            if (mutableActiveRide.value != null) finishRide(stopCandidate)
+            if (mutableActiveRide.value != null) finishRide(stopCandidate, endOfSession = true)
             clearLiveTelemetryState()
         }
-        lastSave?.await()
+        return saveQueue.flush()
     }
 
     private suspend fun refreshHistory() {
@@ -300,15 +325,6 @@ class RideRecorder(
         } catch (error: Exception) {
             Log.e(LogTag, "Could not load ride history", error)
         }
-    }
-
-    private suspend fun persistRide(ride: Ride, completedSamples: List<RideSample>): Long? = try {
-        repository.insert(ride, completedSamples)
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Exception) {
-        Log.e(LogTag, "Could not save completed ride", error)
-        null
     }
 
     private suspend fun updateRideAreas(rideId: Long, startArea: String?, endArea: String?) {
@@ -383,7 +399,6 @@ class RideRecorder(
  * recorded after that moment belongs to the ride.
  */
 private data class StopCandidate(
-    val endedAtMillis: Long,
     val activeRide: ActiveRide,
     val samples: List<RideSample>,
 )
@@ -400,7 +415,9 @@ internal fun shouldStopRide(speedKph: Double, stopSpeedKph: Double): Boolean = s
  * two distant readings would silently invent distance.
  */
 internal fun distanceDeltaKilometres(lastSpeedKph: Double, currentSpeedKph: Double, elapsedMillis: Long): Double =
-    if (elapsedMillis !in 1..MaxDistanceIntegrationGapMillis) 0.0
+    if (elapsedMillis !in 1..MaxDistanceIntegrationGapMillis ||
+        !lastSpeedKph.isFinite() || !currentSpeedKph.isFinite() || lastSpeedKph < 0.0 || currentSpeedKph < 0.0
+    ) 0.0
     else ((lastSpeedKph + currentSpeedKph) / 2.0) * elapsedMillis / 3_600_000.0
 
 internal const val MaxDistanceIntegrationGapMillis = 2_500L
@@ -408,8 +425,8 @@ internal const val MaxDistanceIntegrationGapMillis = 2_500L
 /**
  * Fuel used over one interval, or null when it cannot be known.
  *
- * The vehicle reports km/L, so consumption is its reciprocal — L/km — and the two endpoints
- * are averaged over the interval, matching how distance is integrated. Both readings are
+ * The vehicle reports km/L, so speed divided by mileage gives L/hour. Trapezoidal
+ * integration of that rate matches the speed integration used for distance. Both readings are
  * required: a missing one is "no data", and treating it as zero consumption would
  * understate a ride's fuel use for as long as the gap lasted.
  */
@@ -417,6 +434,8 @@ internal fun fuelDeltaLitres(
     distanceKilometres: Double,
     previousMileageKilometresPerLitre: Double?,
     currentMileageKilometresPerLitre: Double?,
+    previousSpeedKph: Double,
+    currentSpeedKph: Double,
 ): Double? {
     if (!distanceKilometres.isFinite() || distanceKilometres <= 0.0) return null
     val previousFuelLitresPerKilometre = previousMileageKilometresPerLitre
@@ -427,7 +446,12 @@ internal fun fuelDeltaLitres(
         ?.takeIf { it.isFinite() && it > 0.0 }
         ?.let { 1.0 / it }
         ?: return null
-    return distanceKilometres * (previousFuelLitresPerKilometre + currentFuelLitresPerKilometre) / 2.0
+    val speedSum = previousSpeedKph + currentSpeedKph
+    if (!speedSum.isFinite() || previousSpeedKph < 0.0 || currentSpeedKph < 0.0 || speedSum <= 0.0) return null
+    // Distance was integrated from speed, so weight endpoint L/km by endpoint speed.
+    // Multiplying two independent endpoint averages introduces incorrect cross terms.
+    return distanceKilometres *
+        (previousSpeedKph * previousFuelLitresPerKilometre + currentSpeedKph * currentFuelLitresPerKilometre) / speedSum
 }
 
 /**
@@ -441,32 +465,35 @@ internal fun fuelDeltaLitres(
  * mid-run — a gap makes the elapsed time real but the acceleration unverifiable.
  */
 internal fun List<RideSample>.accelerationTime(targetKph: Double): Long? {
-    if (size < 2) return null
+    if (size < 2 || !targetKph.isFinite() || targetKph <= LaunchSpeedKph) return null
     var launchAtMillis: Long? = null
     var previous: RideSample? = null
+    var bestMillis: Long? = null
     for (sample in this) {
         val prior = previous
-        if (prior != null && sample.timestampMillis <= prior.timestampMillis) continue
-        if (prior != null && sample.timestampMillis - prior.timestampMillis > MaxPerformanceSampleGapMillis) {
+        if (!sample.speedKph.isFinite() || sample.speedKph < 0.0 ||
+            (prior != null && sample.timestampMillis - prior.timestampMillis !in 1..MaxPerformanceSampleGapMillis)
+        ) {
             launchAtMillis = null
         }
-
-        if (sample.speedKph <= LaunchSpeedKph) {
+        if (sample.speedKph in 0.0..LaunchSpeedKph) {
             launchAtMillis = sample.timestampMillis
         } else if (launchAtMillis != null && sample.speedKph >= targetKph) {
             val crossingAt = if (prior != null && prior.speedKph < targetKph && sample.speedKph > prior.speedKph) {
                 val fraction = ((targetKph - prior.speedKph) / (sample.speedKph - prior.speedKph)).coerceIn(0.0, 1.0)
                 prior.timestampMillis + ((sample.timestampMillis - prior.timestampMillis) * fraction).toLong()
             } else sample.timestampMillis
-            return (crossingAt - launchAtMillis).takeIf { it in MinimumPerformanceMillis..MaximumPerformanceMillis }
+            val duration = (crossingAt - launchAtMillis).takeIf { it in MinimumPerformanceMillis..MaximumPerformanceMillis }
+            if (duration != null) bestMillis = bestMillis?.let { minOf(it, duration) } ?: duration
+            launchAtMillis = null
         }
         previous = sample
     }
-    return null
+    return bestMillis
 }
 
 /** Treated as a standing start. Not zero: wheel speed idles noisily just above it. */
-private const val LaunchSpeedKph = 5.0
+private const val LaunchSpeedKph = 0.5
 private const val MaxPerformanceSampleGapMillis = 2_500L
 private const val MinimumPerformanceMillis = 500L
 private const val MaximumPerformanceMillis = 60_000L
@@ -494,7 +521,7 @@ private fun List<RideSample>.routePreview(maxPoints: Int = 32): List<RoutePoint>
     val points = mapNotNull { sample ->
         val latitude = sample.latitude ?: return@mapNotNull null
         val longitude = sample.longitude ?: return@mapNotNull null
-        RoutePoint(latitude, longitude)
+        RoutePoint(latitude, longitude).takeIf(RoutePoint::isValid)
     }
     if (points.size <= maxPoints) return points
     val step = (points.lastIndex.toDouble() / (maxPoints - 1)).coerceAtLeast(1.0)
@@ -510,76 +537,82 @@ private fun List<RideSample>.routePreview(maxPoints: Int = 32): List<RoutePoint>
  */
 data class ActiveRide(
     val startedAtMillis: Long,
+    val startedAtElapsedRealtime: Long,
     val lastSampleAtElapsedRealtime: Long,
     val lastSpeedKph: Double,
+    val lastRpm: Long,
+    val lastThrottlePercent: Int,
     val distanceKilometres: Double,
-    val sampleCount: Long,
-    val speedSum: Double,
+    val telemetryDurationMillis: Long,
     val maximumSpeedKph: Double,
-    val rpmSum: Double,
+    val rpmMillis: Double,
     val maximumRpm: Long,
-    val throttleSum: Double,
+    val throttleMillis: Double,
     val lastMileageKilometresPerLitre: Double?,
     val estimatedFuelLitres: Double?,
+    val fuelCoverageComplete: Boolean,
 ) {
-    /** Folds one frame into the totals. Fuel only accumulates while mileage is reported. */
-    fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long, distanceDelta: Double): ActiveRide {
+    /** Integrates only measured intervals; a missing fuel interval makes the total unavailable. */
+    fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long): ActiveRide {
+        val elapsed = (receivedAtElapsedRealtime - lastSampleAtElapsedRealtime)
+            .takeIf { it in 1..MaxDistanceIntegrationGapMillis } ?: 0L
+        val distanceDelta = distanceDeltaKilometres(lastSpeedKph, frame.speedKilometresPerHour, elapsed)
         val currentMileage = frame.instantaneousMileageKilometresPerLitre
-        val fuelDelta = fuelDeltaLitres(
-            distanceDelta,
-            lastMileageKilometresPerLitre,
-            currentMileage,
-        )
+        val fuelDelta = fuelDeltaLitres(distanceDelta, lastMileageKilometresPerLitre, currentMileage, lastSpeedKph, frame.speedKilometresPerHour)
+        val completeFuel = fuelCoverageComplete && (distanceDelta <= 0.0 || fuelDelta != null)
         return copy(
             lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
             lastSpeedKph = frame.speedKilometresPerHour,
+            lastRpm = frame.engineRpm,
+            lastThrottlePercent = frame.throttlePercent,
             distanceKilometres = distanceKilometres + distanceDelta,
-            sampleCount = sampleCount + 1,
-            speedSum = speedSum + frame.speedKilometresPerHour,
+            telemetryDurationMillis = telemetryDurationMillis + elapsed,
             maximumSpeedKph = maxOf(maximumSpeedKph, frame.speedKilometresPerHour),
-            rpmSum = rpmSum + frame.engineRpm,
+            rpmMillis = rpmMillis + (lastRpm / 2.0 + frame.engineRpm / 2.0) * elapsed,
             maximumRpm = maxOf(maximumRpm, frame.engineRpm),
-            throttleSum = throttleSum + frame.throttlePercent,
+            throttleMillis = throttleMillis + (lastThrottlePercent / 2.0 + frame.throttlePercent / 2.0) * elapsed,
             lastMileageKilometresPerLitre = currentMileage,
-            estimatedFuelLitres = fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
-                ?: estimatedFuelLitres,
+            estimatedFuelLitres = if (completeFuel) fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
+                ?: estimatedFuelLitres else null,
+            fuelCoverageComplete = completeFuel,
         )
     }
 
-    /**
-     * Converts the running totals into a stored ride. `id` is left at zero; the database
-     * assigns the real one on insert.
-     */
-    fun toRide(endedAtMillis: Long): Ride {
-        val divisor = sampleCount.coerceAtLeast(1).toDouble()
+    /** Wall-clock corrections cannot change duration: anchor the elapsed time to the start. */
+    fun toRide(): Ride {
+        val measuredMillis = telemetryDurationMillis.coerceAtLeast(1).toDouble()
         return Ride(
             id = 0,
             startedAtMillis = startedAtMillis,
-            endedAtMillis = endedAtMillis,
+            endedAtMillis = startedAtMillis + (lastSampleAtElapsedRealtime - startedAtElapsedRealtime).coerceAtLeast(0L),
             distanceKilometres = distanceKilometres,
-            averageSpeedKph = speedSum / divisor,
+            averageSpeedKph = distanceKilometres * 3_600_000.0 / measuredMillis,
             maximumSpeedKph = maximumSpeedKph,
-            averageRpm = rpmSum / divisor,
+            averageRpm = if (telemetryDurationMillis > 0) rpmMillis / measuredMillis else lastRpm.toDouble(),
             maximumRpm = maximumRpm,
-            averageThrottlePercent = throttleSum / divisor,
+            averageThrottlePercent = if (telemetryDurationMillis > 0) throttleMillis / measuredMillis else lastThrottlePercent.toDouble(),
             estimatedFuelLitres = estimatedFuelLitres,
+            telemetryDurationMillis = telemetryDurationMillis,
         )
     }
 
     companion object {
         fun started(startedAtMillis: Long, receivedAtElapsedRealtime: Long, frame: TelemetryFrame) = ActiveRide(
             startedAtMillis = startedAtMillis,
+            startedAtElapsedRealtime = receivedAtElapsedRealtime,
             lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
             lastSpeedKph = frame.speedKilometresPerHour,
+            lastRpm = frame.engineRpm,
+            lastThrottlePercent = frame.throttlePercent,
             distanceKilometres = 0.0,
-            sampleCount = 1,
-            speedSum = frame.speedKilometresPerHour,
+            telemetryDurationMillis = 0L,
             maximumSpeedKph = frame.speedKilometresPerHour,
-            rpmSum = frame.engineRpm.toDouble(),
+            rpmMillis = 0.0,
             maximumRpm = frame.engineRpm,
-            throttleSum = frame.throttlePercent.toDouble(),
+            throttleMillis = 0.0,
             lastMileageKilometresPerLitre = frame.instantaneousMileageKilometresPerLitre,
             estimatedFuelLitres = null,
+            fuelCoverageComplete = true,
         )
     }
 }

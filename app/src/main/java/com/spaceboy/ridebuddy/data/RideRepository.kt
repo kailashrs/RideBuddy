@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.util.Log
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
@@ -52,7 +53,15 @@ class RideRepository(
     suspend fun insert(ride: Ride, samples: List<RideSample> = emptyList()): Long = withContext(ioDispatcher) {
         databaseMutex.withLock {
             val rideId = database.insertRide(ride, samples)
-            mutableRides.value = database.readRides()
+            try {
+                mutableRides.value = database.readRides()
+            } catch (error: Exception) {
+                // The transaction already committed. Report the successful insert even if a
+                // history refresh fails, or the retained-save queue would insert it twice.
+                Log.w("RideRepository", "Ride saved but history could not be refreshed", error)
+                mutableRides.value = (mutableRides.value + ride.copy(id = rideId))
+                    .sortedByDescending { it.startedAtMillis }
+            }
             rideId
         }
     }
@@ -114,22 +123,20 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 end_longitude REAL,
                 route_preview TEXT,
                 zero_to_sixty INTEGER,
-                zero_to_hundred INTEGER
+                zero_to_hundred INTEGER,
+                telemetry_duration INTEGER
             )""".trimIndent(),
         )
         createSamplesTable(db)
     }
 
-    /**
-     * Recreates the schema on any version change, in either direction, discarding history.
-     *
-     * The app is unreleased and its history is derived data a rider can regenerate by
-     * riding, so carrying migrations for every schema iteration would cost more than the
-     * data is worth. This needs revisiting before any release that expects to retain data
-     * across an update.
-     */
+    /** Version 4 already uses the current fuel units; preserve its rides and samples. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        recreate(db)
+        if (oldVersion == 4) {
+            db.execSQL("ALTER TABLE $Table ADD COLUMN telemetry_duration INTEGER")
+        } else {
+            recreate(db)
+        }
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = recreate(db)
@@ -163,6 +170,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                 ride.routePreview.takeIf { it.isNotEmpty() }?.let { put("route_preview", it.encode()) }
                 ride.zeroToSixtyMillis?.let { put("zero_to_sixty", it) }
                 ride.zeroToHundredMillis?.let { put("zero_to_hundred", it) }
+                ride.telemetryDurationMillis?.let { put("telemetry_duration", it) }
             })
             db.compileStatement(InsertSampleSql).use { statement ->
                 samples.forEach { sample ->
@@ -281,6 +289,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
         val routePreview = cursor.getColumnIndexOrThrow("route_preview")
         val zeroToSixty = cursor.getColumnIndexOrThrow("zero_to_sixty")
         val zeroToHundred = cursor.getColumnIndexOrThrow("zero_to_hundred")
+        val telemetryDuration = cursor.getColumnIndexOrThrow("telemetry_duration")
         buildList(cursor.count) {
             while (cursor.moveToNext()) {
                 add(
@@ -304,6 +313,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
                         routePreview = cursor.nullableString(routePreview).decodeRoute(),
                         zeroToSixtyMillis = cursor.nullableLong(zeroToSixty),
                         zeroToHundredMillis = cursor.nullableLong(zeroToHundred),
+                        telemetryDurationMillis = cursor.nullableLong(telemetryDuration),
                     ),
                 )
             }
@@ -313,7 +323,7 @@ private class RideDatabase(context: Context, name: String) : SQLiteOpenHelper(co
     companion object {
         const val Table = "rides"
         const val SamplesTable = "ride_samples"
-        const val Version = 4
+        const val Version = 5
         private const val InsertSampleSql = """INSERT INTO $SamplesTable (
             ride_id, timestamp, speed, rpm, throttle, mileage_km_per_litre,
             acceleration, latitude, longitude, accuracy, altitude
@@ -354,5 +364,5 @@ private fun String?.decodeRoute(): List<RoutePoint> = this?.split(';').orEmpty()
     val values = encoded.split(',', limit = 2)
     val latitude = values.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
     val longitude = values.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-    RoutePoint(latitude, longitude)
+    RoutePoint(latitude, longitude).takeIf(RoutePoint::isValid)
 }

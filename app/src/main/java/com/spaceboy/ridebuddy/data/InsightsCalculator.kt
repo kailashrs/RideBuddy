@@ -46,7 +46,8 @@ object InsightsCalculator {
                     .atStartOfDay(zone)
                     .toInstant()
                     .toEpochMilli()
-                Pair(todayStart, todayStart - MillisPerDay)
+                Pair(todayStart, Instant.ofEpochMilli(todayStart).atZone(zone).toLocalDate()
+                    .minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli())
             }
 
             InsightPeriod.AllTime -> Pair(Long.MIN_VALUE, null)
@@ -58,7 +59,12 @@ object InsightsCalculator {
         }
 
         val current = rides.filter { it.startedAtMillis in currentStart..nowMillis }
-        if (current.isEmpty()) return RideInsights()
+        if (current.isEmpty()) {
+            val previousDistance = previousStart?.let { start ->
+                rides.filter { it.startedAtMillis in start..<currentStart }.sumOf(Ride::distanceKilometres)
+            } ?: 0.0
+            return RideInsights(distanceChangePercent = if (previousDistance > 0.0) -100.0 else null)
+        }
 
         val totalDuration = current.sumOf(Ride::durationMillis)
         val fuelEstimates = current.mapNotNull { ride ->
@@ -66,7 +72,7 @@ object InsightsCalculator {
         }
         // Duration-weighted, not a plain mean of the per-ride averages: a five-minute
         // commute would otherwise pull the average speed as hard as a three-hour tour.
-        val weightedSeconds = current.sumOf { it.durationMillis / 1_000.0 }.takeIf { it > 0.0 }
+        val weightedSeconds = current.sumOf { it.averagingDurationMillis / 1_000.0 }.takeIf { it > 0.0 }
         // Null rather than 100% when the previous window holds no distance: there is no
         // meaningful percentage change from zero, and reporting one would be nonsense.
         val distanceChange = previousStart?.let { prevStart ->
@@ -82,14 +88,14 @@ object InsightsCalculator {
             rideCount = current.size,
             totalDistanceKilometres = current.sumOf(Ride::distanceKilometres),
             totalDurationMillis = totalDuration,
-            estimatedFuelLitres = fuelEstimates.sum().takeIf { fuelEstimates.isNotEmpty() },
+            estimatedFuelLitres = fuelEstimates.sum().takeIf { fuelEstimates.size == current.size },
             averageRideDistanceKilometres = current.map(Ride::distanceKilometres).average(),
             averageRideDurationMillis = totalDuration / current.size,
-            averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.durationMillis / 1_000.0 } / seconds }
+            averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.averagingDurationMillis / 1_000.0 } / seconds }
                 ?: 0.0,
-            averageRpm = weightedSeconds?.let { seconds -> current.sumOf { it.averageRpm * it.durationMillis / 1_000.0 } / seconds }
+            averageRpm = weightedSeconds?.let { seconds -> current.sumOf { it.averageRpm * it.averagingDurationMillis / 1_000.0 } / seconds }
                 ?: 0.0,
-            averageThrottlePercent = weightedSeconds?.let { seconds -> current.sumOf { it.averageThrottlePercent * it.durationMillis / 1_000.0 } / seconds }
+            averageThrottlePercent = weightedSeconds?.let { seconds -> current.sumOf { it.averageThrottlePercent * it.averagingDurationMillis / 1_000.0 } / seconds }
                 ?: 0.0,
             averageMileageKilometresPerLitre = current.combinedMileageKilometresPerLitre(),
             longestRideKilometres = current.maxOf(Ride::distanceKilometres),
@@ -121,7 +127,7 @@ object InsightsCalculator {
             .atStartOfDay(zone)
             .toInstant()
             .toEpochMilli()
-        val week = rides.filter { it.startedAtMillis >= weekStart }
+        val week = rides.filter { it.startedAtMillis in weekStart..nowMillis }
         if (week.isEmpty()) return RideWeekSummary()
         return RideWeekSummary(
             rideCount = week.size,

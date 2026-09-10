@@ -108,7 +108,7 @@ class InsightsCalculatorTest {
 
         val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
 
-        assertEquals(0.5, requireNotNull(result.estimatedFuelLitres), 0.0)
+        assertNull(result.estimatedFuelLitres)
         assertEquals(20.0, requireNotNull(result.averageMileageKilometresPerLitre), 0.0)
     }
 
@@ -157,6 +157,24 @@ class InsightsCalculatorTest {
         assertEquals(0, summary.rideCount)
         assertEquals(0.0, summary.distanceKilometres, 0.0)
         assertNull(summary.mileageKilometresPerLitre)
+    }
+
+    @Test
+    fun telemetryCoverageWeightsAveragesWithoutIncludingReconnectGaps() {
+        val rides = listOf(
+            ride(0, 36.0, 2, 36.0).copy(telemetryDurationMillis = 3_600_000L, averageRpm = 3_000.0),
+            ride(1, 72.0, 1, 72.0).copy(telemetryDurationMillis = 3_600_000L, averageRpm = 6_000.0),
+        )
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
+        assertEquals(54.0, result.averageSpeedKph, 0.001)
+        assertEquals(4_500.0, result.averageRpm, 0.001)
+    }
+
+    @Test
+    fun aPeriodWithNoRidesCanStillHaveADecline() {
+        val day = 86_400_000L
+        val result = InsightsCalculator.calculate(listOf(ride(10 * day, 10.0, 1, 10.0)), InsightPeriod.SevenDays, 20 * day)
+        assertEquals(-100.0, requireNotNull(result.distanceChangePercent), 0.0)
     }
 
     private fun ride(

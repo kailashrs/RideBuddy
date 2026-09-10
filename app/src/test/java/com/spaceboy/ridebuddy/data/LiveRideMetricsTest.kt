@@ -26,6 +26,17 @@ class LiveRideMetricsTest {
         assertNull(calculateLiveRideMetrics(listOf(sample(0L, 0.0))).estimatedPacketGapPercent)
     }
 
+    @Test
+    fun sustainedAccelerationCountsAsOneManeuver() {
+        val metrics = calculateLiveRideMetrics(listOf(sample(0, 3.1), sample(250, 4.0), sample(500, 3.2), sample(750, 0.0)))
+        assertEquals(1, metrics.hardAccelerationEvents)
+    }
+
+    @Test
+    fun wallClockReversalCannotInventPacketLoss() {
+        assertNull(calculateLiveRideMetrics(listOf(sample(0, 0.0), sample(250, 0.0), sample(100, 0.0), sample(500, 0.0))).estimatedPacketGapPercent)
+    }
+
     private fun sample(timestampMillis: Long, acceleration: Double) = RideSample(
         timestampMillis = timestampMillis,
         speedKph = 0.0,

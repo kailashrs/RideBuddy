@@ -52,8 +52,8 @@ internal class BikeTelemetryStream(
     /**
      * Parses one telemetry payload and publishes it to both streams.
      *
-     * [elapsedRealtime] is passed as a lambda rather than a value so it is only sampled
-     * on the success path, and so tests can drive the monotonic clock.
+     * [elapsedRealtime] drives both the rate window and freshness, so changing the phone's
+     * date or time cannot distort the rate or retain timestamps indefinitely.
      */
     fun accept(
         payload: ByteArray,
@@ -63,8 +63,9 @@ internal class BikeTelemetryStream(
         // Rolling window of arrival times, trimmed to the last few seconds; its size is
         // the measured rate. Recorded before parsing so malformed frames still count as
         // link activity — the rate answers "is the bike talking", not "is it talking sense".
-        timestamps.addLast(receivedAtMillis)
-        while (timestamps.firstOrNull()?.let { receivedAtMillis - it > TelemetryWindowMillis } == true) {
+        val monotonicNow = elapsedRealtime()
+        timestamps.addLast(monotonicNow)
+        while (timestamps.firstOrNull()?.let { monotonicNow - it > TelemetryWindowMillis } == true) {
             timestamps.removeFirst()
         }
         val telemetryHz = timestamps.size / (TelemetryWindowMillis / 1_000.0)
@@ -77,9 +78,7 @@ internal class BikeTelemetryStream(
         val reading = TelemetryReading(
             frame = frame,
             receivedAtMillis = receivedAtMillis,
-            // Match the previous connection path: freshness time is captured only after parsing
-            // succeeds, so malformed frames never advance the monotonic telemetry clock.
-            receivedAtElapsedRealtime = elapsedRealtime(),
+            receivedAtElapsedRealtime = monotonicNow,
         )
         mutableLatestReading.value = reading
         mutableTelemetry.value = mileageSmoother.smooth(frame)

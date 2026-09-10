@@ -17,7 +17,7 @@ class BikeTelemetryStreamTest {
         }
 
         assertFalse(malformed.valid)
-        assertEquals(0, elapsedRealtimeCalls)
+        assertEquals(1, elapsedRealtimeCalls)
         assertNull(stream.latestReading.value)
 
         val valid = stream.accept(validTelemetryPayload(), 1_100L) {
@@ -26,7 +26,7 @@ class BikeTelemetryStreamTest {
         }
 
         assertTrue(valid.valid)
-        assertEquals(1, elapsedRealtimeCalls)
+        assertEquals(2, elapsedRealtimeCalls)
         assertEquals(1_100L, stream.latestReading.value?.receivedAtMillis)
         assertEquals(2_100L, stream.latestReading.value?.receivedAtElapsedRealtime)
         // The OEM-rate diagnostic counts every telemetry notification, including malformed ones.
@@ -65,6 +65,15 @@ class BikeTelemetryStreamTest {
 
         assertFalse(malformed.valid)
         assertEquals(0L, malformed.droppedRawTelemetryFrames)
+    }
+
+    @Test
+    fun `wall clock changes do not retain old rate samples or affect freshness`() {
+        val stream = BikeTelemetryStream()
+        stream.accept(validTelemetryPayload(), 100_000L) { 10_000L }
+        val next = stream.accept(validTelemetryPayload(), 1_000L) { 16_000L }
+        assertEquals(0.2, next.telemetryHz, 0.0001)
+        assertEquals(16_000L, stream.latestReading.value?.receivedAtElapsedRealtime)
     }
 
     private fun validTelemetryPayload(): ByteArray = byteArrayOf(
