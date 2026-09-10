@@ -8,7 +8,6 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +15,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,22 +26,30 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.core.view.doOnLayout
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMap
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.NavigationUpdatesOptions
 import com.google.android.libraries.navigation.NavigationView
@@ -48,7 +57,10 @@ import com.google.android.libraries.navigation.Navigator
 import com.google.android.libraries.navigation.RoutingOptions
 import com.google.android.libraries.navigation.SpeedAlertOptions
 import com.google.android.libraries.navigation.Waypoint
+import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
+import java.util.Locale
 import com.spaceboy.ridebuddy.service.NavInfoReceivingService
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.util.concurrent.atomic.AtomicLong
@@ -74,9 +86,13 @@ class NavigationActivity : ComponentActivity() {
     private var statusTextState = mutableStateOf("")
     private var retryVisibleState = mutableStateOf(false)
     private var navigator: Navigator? = null
-    private var guidanceStarted = false
-    private var tftRouteRequestNeedsRestart = false
-    private var tftUpdatesRegistered = false
+    private var guidanceStarted by mutableStateOf(false)
+    private val stagingVisibleState = mutableStateOf(true)
+    private var previewPanelHeight = 0
+    private val routeReadyState = mutableStateOf(false)
+    private val routeSummaryState = mutableStateOf("")
+    private var routeRequestGeneration = 0L
+    private var connectionSessionSeen = false
     private val navigationSessionId = NextNavigationSessionId.incrementAndGet()
 
     /**
@@ -122,7 +138,53 @@ class NavigationActivity : ComponentActivity() {
                     dynamicColor = settings.dynamicColor,
                     highContrast = settings.highContrast,
                 ) {
-                    // Retry Overlay Dialog
+                    if (stagingVisibleState.value && !retryVisibleState.value) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                            ElevatedCard(
+                                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)
+                                    .onSizeChanged { size ->
+                                        if (previewPanelHeight != size.height) {
+                                            previewPanelHeight = size.height
+                                            if (routeReadyState.value) navigator?.let(::showWholeRoute)
+                                        }
+                                    },
+                                shape = RoundedCornerShape(24.dp),
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Text(
+                                        intent.getStringExtra(ExtraTitle) ?: "Route preview",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        if (routeReadyState.value) routeSummaryState.value else statusTextState.value,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Button(
+                                        onClick = ::startPreparedGuidance,
+                                        enabled = routeReadyState.value,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        if (routeReadyState.value) {
+                                            Icon(Icons.Outlined.Navigation, contentDescription = null)
+                                        } else {
+                                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (routeReadyState.value) "Go" else "Finding route…")
+                                    }
+                                    if (routeReadyState.value && settings.tftNavigationOutputEnabled) {
+                                        Text("You can also press GO on the bike.", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Route errors keep the preview available for retry.
                     if (retryVisibleState.value) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             ElevatedCard(
@@ -156,14 +218,6 @@ class NavigationActivity : ComponentActivity() {
                                                     initializeNavigation()
                                                 } else {
                                                     navigator?.let { currentNavigator ->
-                                                        if (tftRouteRequestNeedsRestart) {
-                                                            if (tftUpdatesRegistered) {
-                                                                appContainer.tftNavigationBridge.start(
-                                                                    intent.getStringExtra(ExtraTitle).orEmpty(),
-                                                                )
-                                                            }
-                                                            tftRouteRequestNeedsRestart = false
-                                                        }
                                                         calculateRoute(currentNavigator)
                                                     } ?: initializeNavigation()
                                                 }
@@ -221,7 +275,12 @@ class NavigationActivity : ComponentActivity() {
                     // makes onDestroy tear the session down, and the whole point here is that it
                     // must not. onDestroy takes the detach-and-leave-running branch instead, and
                     // the stop controller retires the session a moment later.
-                    BikeControlEvent.ExitNavigation -> finish()
+                    BikeControlEvent.ExitNavigation -> {
+                        routeRequestGeneration++
+                        routeReadyState.value = false
+                        finish()
+                    }
+                    BikeControlEvent.StartNavigation -> startPreparedGuidance()
                     BikeControlEvent.SkipManeuver -> {
                         val currentNavigator = navigator
                         if ((currentNavigator?.timeAndDistanceList?.size ?: 0) > 1) {
@@ -230,13 +289,23 @@ class NavigationActivity : ComponentActivity() {
                             navigationView.showRouteOverview()
                         }
                     }
-                    // Calls, cluster readiness and starting a staged route are handled at
-                    // process scope, not by the map.
+                    // Calls and cluster readiness are handled at process scope.
                     is BikeControlEvent.CallAction,
                     BikeControlEvent.ClusterReady,
                     BikeControlEvent.ClusterCallActive,
-                    BikeControlEvent.StartNavigation,
                     -> Unit
+                }
+            }
+        }
+        lifecycleScope.launch {
+            appContainer.bikeConnection.connectionState.collect { state ->
+                val terminal = state is BikeConnectionState.Failed ||
+                    (state is BikeConnectionState.Disconnected && connectionSessionSeen)
+                if (state !is BikeConnectionState.Disconnected) connectionSessionSeen = true
+                if (terminal) {
+                    routeRequestGeneration++
+                    routeReadyState.value = false
+                    finish()
                 }
             }
         }
@@ -310,6 +379,7 @@ class NavigationActivity : ComponentActivity() {
                         )
                     ) {
                         NavigationLaunchPolicy.AttachExisting -> {
+                            stagingVisibleState.value = false
                             guidanceStarted = true
                             appContainer.navigationGuidanceLifecycle
                                 .markGuidanceStarted(navigationSessionId)
@@ -360,22 +430,9 @@ class NavigationActivity : ComponentActivity() {
                     return@finalArrival
                 }
                 guidanceStarted = false
+                stagingVisibleState.value = false
                 readyNavigator.removeReroutingListener(reroutingListener)
                 runOnUiThread { statusTextState.value = getString(R.string.navigation_arrived) }
-            },
-            // The cluster wants a posted speed limit, but the Navigation SDK never exposes
-            // one — only how far over it the rider currently is. The limit is therefore
-            // back-calculated from current speed and that percentage, which means it can
-            // only be produced while the rider is actually speeding. Rounded to 5 km/h,
-            // which is as much precision as an estimate of this kind honestly supports.
-            // The field is zeroed on teardown so a stale limit does not persist.
-            onSpeeding = speeding@{ percentageAboveLimit ->
-                val speed = container.bikeConnection.telemetry.value
-                    ?.speedKilometresPerHour ?: return@speeding
-                if (percentageAboveLimit >= 0f && speed > 0.0) {
-                    val limit = (speed / (1.0 + percentageAboveLimit)).div(5.0).toInt().times(5)
-                    if (limit > 0) container.tftNavigationBridge.speedLimit(limit)
-                }
             },
         )
         if (!attached) {
@@ -385,33 +442,21 @@ class NavigationActivity : ComponentActivity() {
     }
 
     private fun prepareNewRoute(readyNavigator: Navigator) {
-        val container = appContainer
-        tftRouteRequestNeedsRestart = false
-        if (readyNavigator.isGuidanceRunning) {
-            runCatching(readyNavigator::stopGuidance)
-            runCatching(readyNavigator::unregisterServiceForNavUpdates)
-            tftUpdatesRegistered = false
-            guidanceStarted = false
-            container.navigationFeed.clear()
-            container.tftNavigationBridge.stop()
-        }
-        val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
-        container.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
-        tftUpdatesRegistered = runCatching {
-            readyNavigator.registerServiceForNavUpdates(
-                packageName,
-                NavInfoReceivingService::class.java.name,
-                options,
-            )
-        }.getOrDefault(false)
-        if (!tftUpdatesRegistered) {
-            container.tftNavigationBridge.stop()
-            Toast.makeText(this, R.string.navigation_tft_updates_unavailable, Toast.LENGTH_LONG).show()
-        }
+        runCatching(readyNavigator::stopGuidance)
+        runCatching(readyNavigator::unregisterServiceForNavUpdates)
+        guidanceStarted = false
+        appContainer.navigationFeed.clear()
+        appContainer.tftNavigationBridge.stop()
+        navigationView.isNavigationUiEnabled = false
         calculateRoute(readyNavigator)
     }
 
     private fun calculateRoute(navigator: Navigator) {
+        val requestGeneration = ++routeRequestGeneration
+        stagingVisibleState.value = true
+        routeReadyState.value = false
+        retryVisibleState.value = false
+        statusTextState.value = getString(R.string.navigation_preparing_route)
         val latitude = intent.getDoubleExtra(ExtraLatitude, Double.NaN)
         val longitude = intent.getDoubleExtra(ExtraLongitude, Double.NaN)
         if (!latitude.isFinite() || !longitude.isFinite()) {
@@ -431,45 +476,106 @@ class NavigationActivity : ComponentActivity() {
         navigator.setDestination(waypoint, routing).setOnResultListener { status ->
             runOnUiThread {
                 if (isFinishing || isDestroyed ||
+                    requestGeneration != routeRequestGeneration ||
                     !NavigationSessionOwners.isOwner(navigationSessionId) || this.navigator !== navigator
                 ) return@runOnUiThread
                 if (status == Navigator.RouteStatus.OK) {
-                    tftRouteRequestNeedsRestart = false
-                    retryVisibleState.value = false
-                    statusTextState.value = intent.getStringExtra(ExtraTitle) ?: "Navigation active"
-                    val startResult = runCatching(navigator::startGuidance)
-                    if (startResult.isSuccess) {
-                        guidanceStarted = true
-                        appContainer.navigationGuidanceLifecycle
-                            .markGuidanceStarted(navigationSessionId)
+                    routeReadyState.value = true
+                    val trip = navigator.currentTimeAndDistance
+                    val distance = trip?.let {
+                        UnitFormatter.distance(it.meters / 1_000.0, preferences.distanceUnits, Locale.getDefault())
+                    }
+                    val minutes = trip?.seconds?.let { (it.coerceAtLeast(0).toLong() + 59) / 60 }
+                    routeSummaryState.value = listOfNotNull(
+                        distance,
+                        minutes?.let { if (it < 60) "$it min" else "${it / 60} hr ${it % 60} min" },
+                    ).joinToString(" • ").ifBlank { "Route ready from your current location" }
+                    if (intent.getBooleanExtra(ExtraAutoStartGuidance, false)) {
+                        startPreparedGuidance()
                     } else {
-                        guidanceStarted = false
-                        runCatching(navigator::unregisterServiceForNavUpdates)
-                        tftUpdatesRegistered = false
-                        clearNavigationOutput()
-                        showError(getString(R.string.navigation_start_failed_unknown))
+                        appContainer.tftNavigationBridge.previewDestination(
+                            intent.getStringExtra(ExtraTitle).orEmpty(),
+                            destinationDistanceMetres = trip?.meters,
+                            timeToDestinationSeconds = trip?.seconds,
+                        )
+                        showWholeRoute(navigator)
                     }
                 } else {
-                    // Session 80/status 132 may already be visible even though no NavInfo has
-                    // arrived. Clear that pending route now; Retry explicitly starts a fresh TFT
-                    // request while retaining the Navigation SDK's update registration.
                     clearNavigationOutput()
-                    tftRouteRequestNeedsRestart = tftUpdatesRegistered
                     showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
                 }
             }
         }
     }
 
+    /** Both the phone Go button and handlebar GO enter this same, idempotent start path. */
+    private fun startPreparedGuidance() {
+        val currentNavigator = navigator ?: return
+        if (!routeReadyState.value || guidanceStarted || isFinishing || isDestroyed ||
+            !NavigationSessionOwners.isOwner(navigationSessionId)
+        ) return
+        routeReadyState.value = false
+        val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
+        val tftUpdatesRegistered = runCatching {
+            currentNavigator.registerServiceForNavUpdates(
+                packageName, NavInfoReceivingService::class.java.name, options,
+            )
+        }.getOrDefault(false)
+        if (!tftUpdatesRegistered) {
+            showError(getString(R.string.navigation_tft_updates_unavailable))
+            clearNavigationOutput()
+            return
+        }
+        appContainer.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
+        runCatching(currentNavigator::startGuidance).onSuccess {
+            stagingVisibleState.value = false
+            guidanceStarted = true
+            appContainer.navigationGuidanceLifecycle.markGuidanceStarted(navigationSessionId)
+            navigationView.isNavigationUiEnabled = true
+            navigationView.getMapAsync { map ->
+                if (guidanceStarted && NavigationSessionOwners.isOwner(navigationSessionId)) {
+                    map.setPadding(0, 0, 0, 0)
+                    // Checked inline rather than through hasRequiredLocationPermissions(), which
+                    // lint cannot follow. A revoked grant leaves the map where it is instead of
+                    // throwing SecurityException out of a Maps callback.
+                    if (ContextCompat.checkSelfPermission(
+                            this,
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        map.followMyLocation(GoogleMap.CameraPerspective.TILTED)
+                    }
+                }
+            }
+            statusTextState.value = getString(R.string.navigation_active)
+        }.onFailure {
+            runCatching(currentNavigator::unregisterServiceForNavUpdates)
+            clearNavigationOutput()
+            showError(getString(R.string.navigation_start_failed_unknown))
+        }
+    }
+
+    /** SDK showRouteOverview stops at 45 minutes; fit every segment for a full-trip preview. */
+    private fun showWholeRoute(currentNavigator: Navigator) {
+        val points = currentNavigator.routeSegments.flatMap { it.latLngs }
+        if (points.isEmpty()) return
+        val bounds = LatLngBounds.builder().apply { points.forEach(::include) }.build()
+        navigationView.doOnLayout {
+            navigationView.getMapAsync { map ->
+                if (!routeReadyState.value || !NavigationSessionOwners.isOwner(navigationSessionId)) return@getMapAsync
+                val density = resources.displayMetrics.density
+                map.setPadding(0, (24 * density).toInt(), 0, previewPanelHeight + (32 * density).toInt())
+                map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, (32 * density).toInt()))
+            }
+        }
+    }
+
     private fun showError(message: String) {
+        routeReadyState.value = false
         statusTextState.value = message
         retryVisibleState.value = true
     }
 
-    /**
-     * The rider ended navigation from the UI. The flag is what distinguishes this from the
-     * Activity merely being backgrounded, which leaves guidance running.
-     */
     override fun onStart() {
         super.onStart()
         navigationView.onStart()
@@ -509,6 +615,8 @@ class NavigationActivity : ComponentActivity() {
      * down.
      */
     override fun onDestroy() {
+        routeRequestGeneration++
+        routeReadyState.value = false
         val currentNavigator = navigator
         currentNavigator?.removeReroutingListener(reroutingListener)
         val continueInBackground = shouldKeepGuidanceInBackground(
@@ -545,7 +653,6 @@ class NavigationActivity : ComponentActivity() {
             .release(navigationSessionId, target)
         if (stopGuidance) runCatching(target::stopGuidance)
         runCatching(target::unregisterServiceForNavUpdates)
-        tftUpdatesRegistered = false
         runCatching(target::cleanup)
         if (navigator === target) navigator = null
         guidanceStarted = false
@@ -568,6 +675,7 @@ class NavigationActivity : ComponentActivity() {
         private const val ExtraLatitude = "latitude"
         private const val ExtraLongitude = "longitude"
         private const val ExtraTitle = "title"
+        private const val ExtraAutoStartGuidance = "auto_start_guidance"
         private const val ExtraAttachExistingGuidance = "attach_existing_guidance"
         private const val KeyGuidanceStarted = "guidance_started"
         private val NextNavigationSessionId = AtomicLong()
@@ -577,11 +685,15 @@ class NavigationActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
         )
 
-        fun intent(context: Context, latitude: Double, longitude: Double, title: String): Intent =
+        fun intent(
+            context: Context, latitude: Double, longitude: Double, title: String,
+            autoStartGuidance: Boolean = false,
+        ): Intent =
             Intent(context, NavigationActivity::class.java)
                 .putExtra(ExtraLatitude, latitude)
                 .putExtra(ExtraLongitude, longitude)
                 .putExtra(ExtraTitle, title)
+                .putExtra(ExtraAutoStartGuidance, autoStartGuidance)
 
         fun activeGuidanceIntent(context: Context): Intent =
             Intent(context, NavigationActivity::class.java)

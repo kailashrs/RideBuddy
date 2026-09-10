@@ -202,12 +202,6 @@ class MainActivity : ComponentActivity() {
             }
             val mainScreenActions = remember(settingsActions) { createMainScreenActions(settingsActions) }
             LaunchedEffect(Unit) { maybeAutoConnect() }
-            // A destination the rider has chosen but not started puts the cluster into its GO
-            // state, so the handlebar can start it without them touching the phone.
-            val stagedDestination = uiState.sharedDestination
-                ?: uiState.autoStartSharedDestination?.destination
-            LaunchedEffect(stagedDestination) { appContainer.stageDestination(stagedDestination) }
-
             Rs457Theme(
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,
@@ -293,6 +287,7 @@ class MainActivity : ComponentActivity() {
                 telemetry = viewModel.telemetry,
                 diagnostics = viewModel.diagnostics,
                 activeRide = viewModel.activeRide,
+                saveFailed = viewModel.rideSaveFailed,
                 rideSamples = viewModel.liveRideSamples,
                 rideMetrics = viewModel.liveRideMetrics,
             )
@@ -330,6 +325,8 @@ class MainActivity : ComponentActivity() {
         onRemoveNavigationApiKey = viewModel::removeNavigationApiKey,
         onTestNavigationApiKey = viewModel::testNavigationApiKey,
         onDisconnectBike = { BikeConnectionService.disconnect(this) },
+        onEndRide = { BikeConnectionService.endRide(this) },
+        onRetryRideSave = { BikeConnectionService.retryRideSave(this) },
         onStartNavigation = ::startNavigation,
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,
@@ -521,21 +518,6 @@ class MainActivity : ComponentActivity() {
 
     /** Handles one-shot launch commands before dispatching ordinary share intents. */
     private fun handleIncomingIntent(intent: Intent?) {
-        if (intent?.action == ActionStartStagedNavigation) {
-            val requestId = intent.getLongExtra(ExtraStagedDestinationId, 0L)
-            val destination = intent.getStringExtra(ExtraStagedDestination).orEmpty()
-            // Consumed before validation so Activity recreation cannot start it twice.
-            setIntent(Intent(this, MainActivity::class.java))
-            val staged = appContainer.stagedDestination.value
-            if (staged?.requestId == requestId && staged.destination == destination) {
-                startStagedNavigation(staged)
-            } else {
-                appContainer.connectionEventJournal.record(
-                    "Handlebar GO ignored; its staged destination is no longer current",
-                )
-            }
-            return
-        }
         handleShareIntent(intent)
     }
 
@@ -570,25 +552,8 @@ class MainActivity : ComponentActivity() {
     private fun requiredNearbyDevicePermissions(): Array<String> =
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
-    /** Starts a destination the rider entered in the app, dropping any staged GO prompt with it. */
+    /** Resolves the link before opening the route preview. */
     private fun startNavigation(rawDestination: String) {
-        appContainer.stageDestination(null)
-        beginNavigation(rawDestination)
-    }
-
-    /**
-     * Starts a destination the rider staged and then pressed GO for on the handlebar.
-     *
-     * Only that staging is cleared. Clearing unconditionally would drop a destination staged
-     * between the press and this running, leaving the cluster's GO prompt gone for a route the
-     * rider never started.
-     */
-    private fun startStagedNavigation(request: StagedDestination) {
-        appContainer.clearStagedDestination(request.requestId)
-        beginNavigation(request.destination)
-    }
-
-    private fun beginNavigation(rawDestination: String) {
         viewModel.uiState.value.autoStartSharedDestination
             ?.requestId
             ?.let(viewModel::completeAutoStartSharedDestination)
@@ -613,11 +578,7 @@ class MainActivity : ComponentActivity() {
 
         var navigationStartAttemptId: Long? = null
         try {
-            // Length and emptiness are settled at the three entry points, not here: the Start
-            // button is disabled on blank input and its field truncates as the rider types, the
-            // share handler rejects both before queueing, and staging filters them out. Anything
-            // this cannot parse still fails through the onFailure branch below with a message
-            // that describes the actual problem.
+            // The field and share handler constrain input; the parser reports invalid links.
             val destination = rawDestination.trim()
             if (autoStartSuperseded()) return
             navigationStartAttemptId = viewModel.beginNavigationStart()
@@ -639,7 +600,10 @@ class MainActivity : ComponentActivity() {
             parsed.fold(
                 onSuccess = { place ->
                     startActivity(
-                        NavigationActivity.intent(this, place.latitude, place.longitude, place.title),
+                        NavigationActivity.intent(
+                            this, place.latitude, place.longitude, place.title,
+                            autoStartGuidance = autoStartRequestId != null,
+                        ),
                     )
                     navigationStartStopGuard.beginStart()
                     autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)

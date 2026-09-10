@@ -1,7 +1,6 @@
 package com.spaceboy.ridebuddy
 
 import com.google.android.libraries.navigation.Navigator
-import com.google.android.libraries.navigation.SpeedingListener
 
 /**
  * Owns arrival handling for the process, independently of the map Activity.
@@ -49,12 +48,10 @@ internal class NavigationGuidanceLifecycle(
     fun attach(
         sessionId: Long,
         navigator: Navigator,
-        onSpeeding: (Float) -> Unit,
         onFinalArrival: () -> Unit,
     ): Boolean = attach(
         sessionId = sessionId,
         session = NavigatorGuidanceSession(navigator),
-        onSpeeding = onSpeeding,
         onFinalArrival = onFinalArrival,
     )
 
@@ -70,7 +67,6 @@ internal class NavigationGuidanceLifecycle(
     internal fun attach(
         sessionId: Long,
         session: NavigationGuidanceSession,
-        onSpeeding: (Float) -> Unit = {},
         onFinalArrival: () -> Unit,
     ): Boolean {
         var previous: NavigationGuidanceSession? = null
@@ -93,12 +89,10 @@ internal class NavigationGuidanceLifecycle(
             }
         }
         previous?.setArrivalHandler(null)
-        previous?.setSpeedingHandler(null)
         install?.let { installedSession ->
             installedSession.setArrivalHandler { isFinalDestination ->
                 handleArrival(sessionId, installedSession.identity, isFinalDestination)
             }
-            installedSession.setSpeedingHandler(onSpeeding)
         }
         return true
     }
@@ -184,7 +178,6 @@ internal class NavigationGuidanceLifecycle(
             current.session
         }
         released.setArrivalHandler(null)
-        released.setSpeedingHandler(null)
         return true
     }
 
@@ -197,7 +190,6 @@ internal class NavigationGuidanceLifecycle(
             current.session
         }
         released.setArrivalHandler(null)
-        released.setSpeedingHandler(null)
         return true
     }
 
@@ -223,7 +215,6 @@ internal class NavigationGuidanceLifecycle(
         runCatching(finishTftArrival)
         runCatching(completed.session::stopGuidance)
         runCatching(completed.session::unregisterServiceForNavUpdates)
-        completed.session.setSpeedingHandler(null)
         runCatching(clearNavigationFeed)
         runCatching { completed.onFinalArrival?.invoke() }
 
@@ -247,7 +238,6 @@ internal class NavigationGuidanceLifecycle(
 
     private fun NavigationGuidanceSession.detachAndCleanup() {
         setArrivalHandler(null)
-        setSpeedingHandler(null)
         runCatching(::cleanup)
     }
 
@@ -284,7 +274,6 @@ internal class NavigationGuidanceLifecycle(
 internal interface NavigationGuidanceSession {
     val identity: Any
     fun setArrivalHandler(handler: ((Boolean) -> Unit)?)
-    fun setSpeedingHandler(handler: ((Float) -> Unit)?)
     val isGuidanceRunning: Boolean
     fun continueToNextDestination()
     fun stopGuidance()
@@ -308,16 +297,6 @@ private class NavigatorGuidanceSession(
             Navigator.ArrivalListener { event -> callback(event.isFinalDestination) }
         }
         arrivalListener?.let(navigator::addArrivalListener)
-    }
-
-    override fun setSpeedingHandler(handler: ((Float) -> Unit)?) {
-        navigator.setSpeedingListener(
-            handler?.let { callback ->
-                SpeedingListener { percentageAboveLimit, _ ->
-                    callback(percentageAboveLimit)
-                }
-            },
-        )
     }
 
     override fun continueToNextDestination() {

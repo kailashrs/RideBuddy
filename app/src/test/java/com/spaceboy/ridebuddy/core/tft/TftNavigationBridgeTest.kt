@@ -133,6 +133,51 @@ class TftNavigationBridgeTest {
     }
 
     @Test
+    fun `calculated staging includes trip distance and GO without starting guidance`() =
+        withBridge { bridge, connection ->
+            connection.authenticate()
+            settle()
+            bridge.previewDestination("HOME", destinationDistanceMetres = 12_345, timeToDestinationSeconds = 900)
+            settle()
+            assertEquals(83, connection.payloadsFor(BleCharacteristics.NavigationSession).single()[2].toInt() and 255)
+            val trip = connection.payloadsFor(BleCharacteristics.NavigationTrip).single()
+            val metres = (trip[3].toInt() and 255) or ((trip[4].toInt() and 255) shl 8) or
+                ((trip[5].toInt() and 255) shl 16)
+            assertEquals(12_345, metres)
+            assertFalse(BleCharacteristics.NavigationManeuver in connection.writtenCharacteristics())
+        }
+
+    @Test
+    fun `closing a preview clears GO and never restores it on reconnect`() =
+        withBridge { bridge, connection ->
+            connection.authenticate()
+            settle()
+            bridge.previewDestination("HOME")
+            settle()
+            connection.clearWrites()
+            bridge.stop()
+            settle()
+            assertTrue(BleCharacteristics.NavigationClear in connection.writtenCharacteristics())
+            connection.disconnect()
+            settle()
+            connection.clearWrites()
+            connection.authenticate()
+            settle()
+            assertFalse(BleCharacteristics.NavigationSession in connection.writtenCharacteristics())
+            assertFalse(BleCharacteristics.NavigationText in connection.writtenCharacteristics())
+        }
+
+    @Test
+    fun `terminal cleanup discards a staged route awaiting authentication`() =
+        withBridge { bridge, connection ->
+            bridge.previewDestination("OLD ROUTE", destinationDistanceMetres = 5_000, timeToDestinationSeconds = 600)
+            bridge.clearPendingBikeOutput()
+            connection.authenticate()
+            settle()
+            assertEquals(emptyList<UUID>(), connection.writtenCharacteristics())
+        }
+
+    @Test
     fun `rerouting keeps an active alert on the text rows`() = withBridge { bridge, connection ->
         connection.authenticate()
         settle()

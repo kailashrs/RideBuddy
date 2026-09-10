@@ -47,7 +47,6 @@ class NavigationGuidanceLifecycleTest {
         lifecycle.registerPendingSession(1L)
         lifecycle.attach(1L, session) { events += "ui" }
         lifecycle.detachUi(1L)
-        assertNotNull(session.speedHandler)
 
         session.arrive(isFinalDestination = true)
 
@@ -56,7 +55,6 @@ class NavigationGuidanceLifecycleTest {
         assertEquals(1, session.unregisterCalls)
         assertEquals(1, session.cleanupCalls)
         assertNull(session.handler)
-        assertNull(session.speedHandler)
     }
 
     @Test
@@ -87,7 +85,6 @@ class NavigationGuidanceLifecycleTest {
         assertTrue(lifecycle.release(session.identity))
 
         assertNull(session.handler)
-        assertNull(session.speedHandler)
         assertFalse(lifecycle.release(session.identity))
     }
 
@@ -136,7 +133,6 @@ class NavigationGuidanceLifecycleTest {
         lifecycle.attach(1L, session) {}
         lifecycle.markGuidanceStarted(1L)
         assertNotNull(session.handler)
-        assertNotNull(session.speedHandler)
 
         session.guidanceRunning = false
         assertTrue(lifecycle.acceptAndMarkTerminalFeed())
@@ -146,7 +142,6 @@ class NavigationGuidanceLifecycleTest {
         lifecycle.detachUi(1L)
 
         assertNull(session.handler)
-        assertNull(session.speedHandler)
         assertEquals(1, session.cleanupCalls)
         assertFalse(lifecycle.release(session.identity))
     }
@@ -166,14 +161,9 @@ class NavigationGuidanceLifecycleTest {
         var stopCalls = 0
         var unregisterCalls = 0
         var cleanupCalls = 0
-        var speedHandler: ((Float) -> Unit)? = null
 
         override fun setArrivalHandler(handler: ((Boolean) -> Unit)?) {
             this.handler = handler
-        }
-
-        override fun setSpeedingHandler(handler: ((Float) -> Unit)?) {
-            speedHandler = handler
         }
 
         override fun continueToNextDestination() {

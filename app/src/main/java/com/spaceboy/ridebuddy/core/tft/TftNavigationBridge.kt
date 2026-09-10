@@ -89,11 +89,13 @@ class TftNavigationBridge(
     private var pendingStatus: Int? = null
     private var routeStatusMarked = false
     private var sessionGeneration = 0L
+    private var outputGeneration = 0L
     private var arrivalPendingGeneration: Long? = null
     private var textAlertGeneration = 0L
     private var lastInfo: NavInfo? = null
     private var destinationLabel: String = ""
     private var previewActive = false
+    private var previewTrip: ByteArray? = null
 
     init {
         scope.launch {
@@ -117,9 +119,9 @@ class TftNavigationBridge(
                         } else {
                             // Cluster-driver precedence: the owed control state first, then ordered
                             // text sequences, then whatever coalesced data is freshest.
-                            nextControlStateBatchLocked()
+                            (nextControlStateBatchLocked()
                                 ?: controlBatches.pollFirst()
-                                ?: nextDataBatchLocked()
+                                ?: nextDataBatchLocked())?.copy(outputGeneration = outputGeneration)
                         }
                     } ?: break
                     if (!isCurrent(batch)) continue
@@ -179,8 +181,14 @@ class TftNavigationBridge(
                 markClearLocked()
             }
             sessionGeneration++
+            outputGeneration++
+            textOwnerGeneration++
             acceptingUpdates = true
             previewActive = false
+            previewTrip = null
+            controlBatches.clear()
+            latestData.clear()
+            invalidateTextCacheLocked()
             // A route has been requested. The status word is emitted once for it; the transitional
             // session may well be overwritten by 87 before the worker drains, which is the same
             // coalescing the cluster's own driver does. Nothing is marked while output is off —
@@ -245,7 +253,8 @@ class TftNavigationBridge(
             // pictogram already says which way to turn, so spending it on "Head east on Gar"
             // truncates away the only thing the rider cannot read off the arrow. The OEM sends
             // the step's road name here for the same reason.
-            val instruction = current.fullRoadName?.takeUnless(String::isBlank)
+            val instruction = current.simpleRoadName?.takeUnless(String::isBlank)
+                ?: current.fullRoadName?.takeUnless(String::isBlank)
                 ?: current.fullInstructionText.orEmpty().roadNameOrSelf()
             // Compact keeps the instruction banner and drops the destination lines, which is the
             // half a rider glances at.
@@ -291,19 +300,35 @@ class TftNavigationBridge(
      * Stages a destination so the cluster draws its **GO** prompt and the rider can start
      * the route from the handlebar.
      *
-     * The staged state is session [SessionRouteReady] carrying the destination text and
-     * nothing else; guidance moves on to [SessionGuidanceActive] once it actually begins.
+     * The staged state is session [SessionRouteReady] carrying the resolved destination,
+     * route distance and ETA; guidance moves to [SessionGuidanceActive] after GO.
      * Passing a blank destination takes the cluster back out of the state.
      *
      * A route that is already running owns the display, so staging is refused rather than
      * allowed to disturb it.
      */
-    fun previewDestination(destination: String) {
+    fun previewDestination(
+        destination: String,
+        destinationDistanceMetres: Int? = null,
+        timeToDestinationSeconds: Int? = null,
+    ) {
+        val trip = if (destinationDistanceMetres != null && timeToDestinationSeconds != null) {
+            TftPacketEncoder.trip(
+                System.currentTimeMillis() + timeToDestinationSeconds.coerceAtLeast(0) * 1_000L,
+                destinationDistanceMetres,
+                maneuverDistanceMetres = 0,
+            )
+        } else null
         val frames = if (destination.isBlank()) {
             emptyList()
         } else {
-            TftPacketEncoder.guidanceTextRows(destination, "")
-                .map { payload -> Frame(BleCharacteristics.NavigationText, payload) }
+            buildList {
+                addAll(TftPacketEncoder.guidanceTextRows(destination, "")
+                    .map { payload -> Frame(BleCharacteristics.NavigationText, payload) })
+                (trip ?: synchronized(queueLock) { previewTrip })?.let {
+                    add(Frame(BleCharacteristics.NavigationTrip, it))
+                }
+            }
         }
         val queued = synchronized(queueLock) {
             if (!outputEnabled || outputSuspended) return
@@ -312,14 +337,24 @@ class TftNavigationBridge(
             if (destination.isBlank()) {
                 if (!previewActive) return
                 previewActive = false
+                textOwnerGeneration++
+                previewTrip = null
+                destinationLabel = ""
+                controlBatches.clear()
+                invalidateTextCacheLocked()
                 // Session 0 alone only suppresses the write; the clear is what takes GO off.
                 markSessionLocked(SessionNone)
                 markClearLocked()
                 transportReady
             } else {
                 destinationLabel = destination
+                if (trip != null) previewTrip = trip
                 previewActive = true
+                textOwnerGeneration++
+                controlBatches.clear()
+                invalidateTextCacheLocked()
                 markSessionLocked(SessionRouteReady)
+                markRouteStatusOnceLocked()
                 controlBatches += WriteBatch(
                     frames = frames,
                     priority = false,
@@ -407,26 +442,19 @@ class TftNavigationBridge(
     }
 
     /**
-     * Updates the posted speed limit. Coalescing, so a burst of updates leaves only the
-     * newest value queued.
-     */
-    fun speedLimit(kph: Int) {
-        if (synchronized(queueLock) { sessionActive && acceptingUpdates }) {
-            queueLatest(Frame(BleCharacteristics.NavigationSpeedLimit, TftPacketEncoder.speedLimit(kph)))
-        }
-    }
-
-    /**
      * Redraws the most recent guidance update. Used to restore the display after something
      * transient — an alert, a call — has overwritten it.
      */
     fun republishLast() {
         // A forced restoration: the caller is telling us the display no longer holds what we think
         // it does, so suppression must not decide the text is already there.
+        var preview: String? = null
         val info = synchronized(queueLock) {
             invalidateTextCacheLocked()
+            if (previewActive && !sessionActive && !acceptingUpdates) preview = destinationLabel
             lastInfo
         }
+        preview?.let(::previewDestination)
         info?.let(::accept)
     }
 
@@ -490,11 +518,15 @@ class TftNavigationBridge(
                 sessionActive = false
                 lastInfo = null
                 markClearLocked()
-                TextAlertDismissal(queuedShutdown = true)
+                TextAlertDismissal(
+                    queuedShutdown = true,
+                    previewDestination = destinationLabel.takeIf { previewActive },
+                )
             } else {
                 TextAlertDismissal(guidanceToRepublish = lastInfo)
             }
         }
+        dismissal.previewDestination?.let(::previewDestination)
         dismissal.guidanceToRepublish?.let(::accept)
         if (dismissal.queuedShutdown || dismissal.guidanceToRepublish != null) wakeWorker.trySend(Unit)
     }
@@ -533,15 +565,21 @@ class TftNavigationBridge(
     private fun stopLocked(): Boolean {
         // Session 80/status 132 can already be on the cluster before the first NavInfo makes
         // sessionActive true. A route cancelled or rejected during that window still needs clear.
-        val shouldShutdown = sessionActive || (acceptingUpdates && outputEnabled && transportReady)
+        val shouldShutdown = sessionActive || previewActive || (acceptingUpdates && outputEnabled && transportReady)
         sessionGeneration++
+        outputGeneration++
+        textOwnerGeneration++
         arrivalPendingGeneration = null
         acceptingUpdates = false
         textAlertGeneration++
         sessionActive = false
+        previewActive = false
+        previewTrip = null
+        destinationLabel = ""
         textAlertActive = false
         textAlertMessage = null
         lastInfo = null
+        invalidateTextCacheLocked()
         latestData.clear()
         controlBatches.clear()
         pendingSession = null
@@ -551,26 +589,14 @@ class TftNavigationBridge(
         return pendingClear && transportReady
     }
 
-    private fun queueLatest(frame: Frame) {
-        val queued = synchronized(queueLock) {
-            if (!sessionActive || !outputEnabled || outputSuspended) false else {
-                val key = frame.key()
-                latestData.remove(key)
-                latestData[key] = frame
-                true
-            }
+    /** A terminal connection drops all retained values; nothing replays into the next ride. */
+    fun clearPendingBikeOutput() {
+        synchronized(queueLock) {
+            stopLocked()
+            pendingClear = false
         }
-        if (queued) wakeWorker.trySend(Unit)
     }
 
-    /**
-     * Applies the rider's opt-in setting.
-     *
-     * Turning output off must clear the display: the cluster holds whatever was last
-     * written to it indefinitely, so simply stopping would leave a frozen turn on screen.
-     * Turning it back on mid-route replays the latest guidance rather than waiting for the
-     * next update.
-     */
     private fun setOutputEnabled(enabled: Boolean) {
         var replay: NavInfo? = null
         val queuedReset = synchronized(queueLock) {
@@ -743,8 +769,8 @@ class TftNavigationBridge(
      *
      * Both pending controls are dropped first, so no delayed session or status write can land
      * after the clear and put the cluster back into a state the route has left. The speed limit
-     * needs zeroing separately — the clear packet does not touch it, and a limit is only ever
-     * learned while the rider is over it, so the last one would otherwise persist.
+     * needs zeroing separately because the clear packet does not touch it. This also removes
+     * a limit left behind by a previous OEM session.
      */
     private fun markClearLocked() {
         invalidateTextCacheLocked()
@@ -912,6 +938,7 @@ class TftNavigationBridge(
      * has happened since.
      */
     private fun isCurrentLocked(batch: WriteBatch): Boolean =
+        (batch.outputGeneration == null || batch.outputGeneration == outputGeneration) &&
         (batch.textGeneration == null || batch.textGeneration == textOwnerGeneration) &&
                 (batch.alertGeneration == null ||
                 (textAlertActive && batch.alertGeneration == textAlertGeneration)) &&
@@ -962,6 +989,7 @@ class TftNavigationBridge(
     private data class WriteBatch(
         val frames: List<Frame>,
         val priority: Boolean,
+        val outputGeneration: Long? = null,
         val coalescing: Boolean = false,
         val alertGeneration: Long? = null,
         val sessionGeneration: Long? = null,
@@ -981,6 +1009,7 @@ class TftNavigationBridge(
     private data class TextAlertDismissal(
         val queuedShutdown: Boolean = false,
         val guidanceToRepublish: NavInfo? = null,
+        val previewDestination: String? = null,
     )
 
     private companion object {
