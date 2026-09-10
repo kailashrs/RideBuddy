@@ -74,6 +74,7 @@ internal class AndroidBikeConnection(
     private val protectionAcceptanceStore: ProtectionAcceptanceStore,
     private val connectionEventJournal: ConnectionEventJournal,
     private val bikeIdentityRepository: BikeIdentityRepository,
+    private val onAttemptsExhausted: () -> Unit,
 ) : BikeConnection {
     private val appContext = context.applicationContext
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
@@ -100,6 +101,7 @@ internal class AndroidBikeConnection(
     private var connectedDeviceBonded = false
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
+    private val attemptBudget = ConnectionAttemptBudget()
     private var consecutiveSecureLinkFailures = 0
     private var reconnectScheduled = false
     private var connectionGeneration = 0L
@@ -185,6 +187,7 @@ internal class AndroidBikeConnection(
             diagnosticsRecorder.setProtection(ProtectionPhase.Idle, null)
             diagnosticsRecorder.setActiveOperation(null)
             reconnectAttempt = 0
+            attemptBudget.reset()
             attemptTrigger = target.trigger
             mainHandler.removeCallbacksAndMessages(ReconnectToken)
             // Cleared before connectGatt(), not after: on an already-bonded device the whole
@@ -312,6 +315,10 @@ internal class AndroidBikeConnection(
      */
     private fun connectGatt() {
         val target = connectionTarget ?: return
+        if (!attemptBudget.beginAttempt()) {
+            scheduleReconnect()
+            return
+        }
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) !=
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -342,7 +349,11 @@ internal class AndroidBikeConnection(
             }
             protectionAcceptanceStore.clear(target.address)
         }
-        mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
+        mutableConnectionState.value = BikeConnectionState.Connecting(
+            deviceName,
+            attemptBudget.attemptsStarted,
+            MaxConnectionAttempts,
+        )
         telemetryStream.clearUiTelemetry()
         diagnosticsRecorder.beginConnectionAttempt(
             bonded = connectedDeviceBonded,
@@ -748,6 +759,7 @@ internal class AndroidBikeConnection(
     private fun completeAuthentication(evidence: String, path: ProtectionPath?) {
         if (diagnosticsRecorder.value.authenticated) return
         reconnectAttempt = 0
+        attemptBudget.reset()
         authenticatedAtMillis = System.currentTimeMillis()
         mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
         diagnosticsRecorder.markAuthenticated(path)
@@ -917,7 +929,7 @@ internal class AndroidBikeConnection(
      */
     private fun scheduleReconnect() {
         if (intentionalDisconnect || reconnectScheduled) return
-        val delay = reconnectDelayMillis(reconnectAttempt)
+        val delay = attemptBudget.nextDelayMillis()
         if (delay == null) {
             // Two sentences, chosen by what the attempts actually looked like. The default
             // names no cause, because exhausted retries are equally consistent with the bike
@@ -932,8 +944,11 @@ internal class AndroidBikeConnection(
                 "The motorcycle is not completing the secure link. Forget it in Bluetooth " +
                     "settings and pair again."
             } else {
-                "Could not reconnect; automatic retries paused after $MaxReconnectAttempts attempts"
+                "Could not connect after $MaxConnectionAttempts attempts. Tap Connect to try again."
             }
+            // Persist suppression before publishing Failed. A queued presence callback must
+            // not be able to turn the terminal state into a fresh retry budget.
+            onAttemptsExhausted()
             mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
             // The real failure stays on record; this only explains why nothing is retrying.
             diagnosticsRecorder.recordSuppression(
@@ -949,8 +964,8 @@ internal class AndroidBikeConnection(
         attemptTrigger = ConnectionAttemptTrigger.AutomaticReconnect
         diagnosticsRecorder.updateAttempt(attemptContext())
         mutableConnectionState.value =
-            BikeConnectionState.Connecting(deviceName, reconnectAttempt, MaxReconnectAttempts)
-        log("Reconnecting in ${delay / 1_000}s (attempt $reconnectAttempt/$MaxReconnectAttempts)")
+            BikeConnectionState.Connecting(deviceName, attemptBudget.attemptsStarted + 1, MaxConnectionAttempts)
+        log("Reconnecting in ${delay / 1_000}s (attempt ${attemptBudget.attemptsStarted + 1}/$MaxConnectionAttempts)")
         mainHandler.postAtTime(
             {
                 reconnectScheduled = false

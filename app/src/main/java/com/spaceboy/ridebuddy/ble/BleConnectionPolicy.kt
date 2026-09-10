@@ -4,25 +4,38 @@ import android.bluetooth.BluetoothGatt
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 
 /**
- * How many automatic reconnects a connection may make before it gives up and reports
- * failure. Bounded on purpose: an unbounded retry loop against a bike that has been
- * switched off drains the phone battery for no benefit.
+ * Total attempts in one connection cycle, including the first attempt.
+ * A successfully authenticated session ends the cycle; losing it starts a new one.
  */
-internal const val MaxReconnectAttempts = 6
-
-private const val MaxReconnectDelayMillis = 30_000L
+internal const val MaxConnectionAttempts = 3
 
 /**
- * Backoff before reconnect attempt [attempt] (zero-based), or null once the budget is
- * spent — which the caller reads as "stop retrying".
- *
- * The delay doubles from one second and is capped at 30 s. The inner `minOf(attempt, 5)`
- * guards the shift itself so the expression cannot overflow if the attempt bound is ever
- * raised without revisiting this line.
+ * Delay after [attemptsStarted] connection attempts, or null when the budget is spent.
+ * Zero is the first recovery after an established link drops; it receives the same short
+ * backoff as the first failed attempt instead of reconnecting in the callback itself.
  */
-internal fun reconnectDelayMillis(attempt: Int): Long? {
-    if (attempt !in 0 until MaxReconnectAttempts) return null
-    return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(attempt, 5))
+internal fun reconnectDelayMillis(attemptsStarted: Int): Long? = when (attemptsStarted) {
+    0, 1 -> 1_000L
+    2 -> 2_000L
+    else -> null
+}
+
+/** Counts actual attempts, so the initial request cannot sit outside the retry budget. */
+internal class ConnectionAttemptBudget {
+    var attemptsStarted: Int = 0
+        private set
+
+    fun beginAttempt(): Boolean {
+        if (attemptsStarted >= MaxConnectionAttempts) return false
+        attemptsStarted++
+        return true
+    }
+
+    fun reset() {
+        attemptsStarted = 0
+    }
+
+    fun nextDelayMillis(): Long? = reconnectDelayMillis(attemptsStarted)
 }
 
 /**

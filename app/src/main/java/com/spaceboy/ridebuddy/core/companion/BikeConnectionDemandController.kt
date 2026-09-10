@@ -8,7 +8,7 @@ internal enum class AutomaticConnectionDemand {
     Allowed,
 
     /**
-     * The rider disconnected deliberately. Automatic connection stays off until the
+     * The rider ended the session or its attempt budget was exhausted. Automatic connection stays off until the
      * motorcycle actually goes away — otherwise the presence callback that is still firing
      * for a bike parked in range would immediately undo their choice.
      */
@@ -17,11 +17,14 @@ internal enum class AutomaticConnectionDemand {
 
 internal data class BikeConnectionDemandState(
     val automaticConnectionDemand: AutomaticConnectionDemand = AutomaticConnectionDemand.Allowed,
+    /** An observed disappearance whose matching appearance has not arrived yet. */
+    val awaitingBleAppearance: Boolean = false,
 )
 
 internal enum class BikeConnectionDemandEvent {
     ExplicitConnect,
     ManualDisconnect,
+    ConnectionAttemptsExhausted,
     BleAppeared,
     BleDisappeared,
 }
@@ -29,15 +32,13 @@ internal enum class BikeConnectionDemandEvent {
 /**
  * What to do about an appearance callback.
  *
- * There is deliberately no "already present" case. Presence callbacks are edge-triggered, and the
- * caller already refuses to start a second attempt while one is in flight — so a duplicate-tracking
- * state added nothing but a second way to discard an appearance, which is exactly the event that
- * exists to resume a link that has stopped retrying.
+ * A disappearance can precede retry exhaustion. Remember that edge so the motorcycle's
+ * next real appearance can start a new cycle while duplicate present callbacks stay suppressed.
  */
 internal enum class BleAppearanceDecision {
     RequestConnection,
 
-    /** The rider disconnected on purpose and the bike has not left since. */
+    /** The session ended and the bike has not left since. */
     IgnoreWhileSuppressed,
 }
 
@@ -61,24 +62,35 @@ internal fun bikeConnectionDemandTransition(
         state.copy(automaticConnectionDemand = AutomaticConnectionDemand.Allowed),
     )
 
-    BikeConnectionDemandEvent.ManualDisconnect -> BikeConnectionDemandTransition(
+    BikeConnectionDemandEvent.ManualDisconnect,
+    BikeConnectionDemandEvent.ConnectionAttemptsExhausted,
+    -> BikeConnectionDemandTransition(
         state.copy(
             automaticConnectionDemand = AutomaticConnectionDemand.SuppressedUntilBleDisappears,
         ),
     )
 
     BikeConnectionDemandEvent.BleDisappeared -> BikeConnectionDemandTransition(
-        state.copy(automaticConnectionDemand = AutomaticConnectionDemand.Allowed),
+        state.copy(
+            automaticConnectionDemand = AutomaticConnectionDemand.Allowed,
+            awaitingBleAppearance = true,
+        ),
     )
 
     BikeConnectionDemandEvent.BleAppeared -> {
+        val nextState = state.copy(
+            automaticConnectionDemand = if (state.awaitingBleAppearance) {
+                AutomaticConnectionDemand.Allowed
+            } else state.automaticConnectionDemand,
+            awaitingBleAppearance = false,
+        )
         val decision =
-            if (state.automaticConnectionDemand == AutomaticConnectionDemand.SuppressedUntilBleDisappears) {
+            if (nextState.automaticConnectionDemand == AutomaticConnectionDemand.SuppressedUntilBleDisappears) {
                 BleAppearanceDecision.IgnoreWhileSuppressed
             } else {
                 BleAppearanceDecision.RequestConnection
             }
-        BikeConnectionDemandTransition(state, decision)
+        BikeConnectionDemandTransition(nextState, decision)
     }
 }
 
@@ -102,6 +114,7 @@ internal class BikeConnectionDemandController(context: Context) {
         } else {
             AutomaticConnectionDemand.Allowed
         },
+        awaitingBleAppearance = preferences.getBoolean(KeyAwaitingBleAppearance, false),
     )
 
     /** The rider asked to connect. Always clears suppression. */
@@ -112,6 +125,11 @@ internal class BikeConnectionDemandController(context: Context) {
     /** The rider disconnected deliberately, from the UI or the notification. */
     fun suppressAutomaticConnections() {
         transition(BikeConnectionDemandEvent.ManualDisconnect)
+    }
+
+    /** Duplicate appearance callbacks cannot grant another budget after three failures. */
+    fun onConnectionAttemptsExhausted() {
+        transition(BikeConnectionDemandEvent.ConnectionAttemptsExhausted)
     }
 
     /** Whether a launch-time or service-driven automatic attempt is permitted. */
@@ -127,22 +145,21 @@ internal class BikeConnectionDemandController(context: Context) {
     }
 
     /**
-     * Applies an event and persists the demand flag when it changed. Only that flag is
-     * stored: presence is re-established by the platform's callbacks on the next launch,
-     * whereas a forgotten suppression would silently reconnect a bike the rider had
-     * disconnected.
+     * Persists both suppression and an unmatched disappearance. A process restart must
+     * neither grant duplicate callbacks a new budget nor discard the next actual appearance.
      */
     private fun transition(event: BikeConnectionDemandEvent): BikeConnectionDemandTransition = synchronized(lock) {
-        val previousDemand = state.automaticConnectionDemand
+        val previous = state
         bikeConnectionDemandTransition(state, event).also { transition ->
             state = transition.state
-            if (state.automaticConnectionDemand != previousDemand) {
+            if (state != previous) {
                 preferences.edit {
                     putBoolean(
                         KeySuppressed,
                         state.automaticConnectionDemand ==
                             AutomaticConnectionDemand.SuppressedUntilBleDisappears,
                     )
+                    putBoolean(KeyAwaitingBleAppearance, state.awaitingBleAppearance)
                 }
             }
         }
@@ -151,5 +168,6 @@ internal class BikeConnectionDemandController(context: Context) {
     private companion object {
         const val PreferencesName = "bike_connection_demand"
         const val KeySuppressed = "automatic_connection_suppressed"
+        const val KeyAwaitingBleAppearance = "awaiting_ble_appearance"
     }
 }

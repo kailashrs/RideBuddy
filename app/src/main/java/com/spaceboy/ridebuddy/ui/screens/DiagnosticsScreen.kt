@@ -187,7 +187,7 @@ fun DiagnosticsScreen(
 private fun BikeConnectionState.diagnosticLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Disconnected"
     is BikeConnectionState.Connecting -> reconnectAttempt?.let { attempt ->
-        "Reconnecting ($attempt/${maxAttempts ?: "?"})"
+        "Connecting ($attempt/${maxAttempts ?: "?"})"
     } ?: "Connecting"
     is BikeConnectionState.Authenticating -> "Authenticating"
     is BikeConnectionState.Connected -> "Connected"

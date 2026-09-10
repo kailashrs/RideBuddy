@@ -45,28 +45,24 @@ class BikeCompanionDeviceService : CompanionDeviceService() {
         }
         when (companionPresenceAction(event.event)) {
             CompanionPresenceAction.EvaluateBleAppearance -> {
-                val state = container.bikeConnection.connectionState.value
-                if (!shouldRequestPresenceReconnect(state)) {
-                    // The appearance is deliberately not handed to the demand controller here.
-                    // Consuming it marks the bike Present, which makes the next one a duplicate,
-                    // while the attempt being deferred to can still fail its way to
-                    // retriesExhausted — the very state a fresh appearance exists to resume,
-                    // reached with the appearance already spent. That strands the app in Failed
-                    // with the bike advertising beside it.
-                    container.connectionEventJournal.record(
-                        "Companion event: $eventLabel; an attempt is already in flight",
-                    )
-                    return
-                }
+                // Consume the appearance even during a retry. Otherwise an earlier absence
+                // would remain unmatched, letting a duplicate callback reopen an exhausted cycle.
                 when (container.bikeConnectionDemand.onBleAppeared()) {
                     BleAppearanceDecision.IgnoreWhileSuppressed -> {
                         container.connectionEventJournal.record(
-                            "Companion event: $eventLabel ignored after manual disconnect",
+                            "Companion event: $eventLabel ignored while automatic connection is paused",
                         )
                         return
                     }
 
                     BleAppearanceDecision.RequestConnection -> Unit
+                }
+                val state = container.bikeConnection.connectionState.value
+                if (!shouldRequestPresenceReconnect(state)) {
+                    container.connectionEventJournal.record(
+                        "Companion event: $eventLabel; an attempt is already in flight",
+                    )
+                    return
                 }
                 container.connectionEventJournal.record(
                     "Companion event: $eventLabel; requesting connection",

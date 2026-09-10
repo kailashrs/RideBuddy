@@ -5,6 +5,69 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BikeConnectionDemandControllerTest {
+    @Test
+    fun `disappearance before retry exhaustion still permits the next real appearance`() {
+        val absent = bikeConnectionDemandTransition(
+            BikeConnectionDemandState(),
+            BikeConnectionDemandEvent.BleDisappeared,
+        ).state
+        val exhaustedWhileAbsent = bikeConnectionDemandTransition(
+            absent,
+            BikeConnectionDemandEvent.ConnectionAttemptsExhausted,
+        ).state
+
+        val nextRide = bikeConnectionDemandTransition(exhaustedWhileAbsent, BikeConnectionDemandEvent.BleAppeared)
+        assertEquals(BleAppearanceDecision.RequestConnection, nextRide.appearanceDecision)
+        assertEquals(AutomaticConnectionDemand.Allowed, nextRide.state.automaticConnectionDemand)
+    }
+
+    @Test
+    fun `appearance during an existing attempt consumes the earlier disappearance`() {
+        val absent = bikeConnectionDemandTransition(
+            BikeConnectionDemandState(),
+            BikeConnectionDemandEvent.BleDisappeared,
+        ).state
+        val appearedDuringRetry = bikeConnectionDemandTransition(absent, BikeConnectionDemandEvent.BleAppeared).state
+        val exhausted = bikeConnectionDemandTransition(
+            appearedDuringRetry,
+            BikeConnectionDemandEvent.ConnectionAttemptsExhausted,
+        ).state
+
+        assertEquals(
+            BleAppearanceDecision.IgnoreWhileSuppressed,
+            bikeConnectionDemandTransition(exhausted, BikeConnectionDemandEvent.BleAppeared).appearanceDecision,
+        )
+    }
+
+    @Test
+    fun `exhausted attempts suppress duplicate appearances until a genuine disappearance`() {
+        val exhausted = bikeConnectionDemandTransition(
+            BikeConnectionDemandState(),
+            BikeConnectionDemandEvent.ConnectionAttemptsExhausted,
+        ).state
+        repeat(3) {
+            assertEquals(
+                BleAppearanceDecision.IgnoreWhileSuppressed,
+                bikeConnectionDemandTransition(exhausted, BikeConnectionDemandEvent.BleAppeared).appearanceDecision,
+            )
+        }
+        val absent = bikeConnectionDemandTransition(exhausted, BikeConnectionDemandEvent.BleDisappeared).state
+        assertEquals(
+            BleAppearanceDecision.RequestConnection,
+            bikeConnectionDemandTransition(absent, BikeConnectionDemandEvent.BleAppeared).appearanceDecision,
+        )
+    }
+
+    @Test
+    fun `explicit connect immediately reopens an exhausted attempt cycle`() {
+        val exhausted = bikeConnectionDemandTransition(
+            BikeConnectionDemandState(),
+            BikeConnectionDemandEvent.ConnectionAttemptsExhausted,
+        ).state
+        val connected = bikeConnectionDemandTransition(exhausted, BikeConnectionDemandEvent.ExplicitConnect).state
+        assertEquals(AutomaticConnectionDemand.Allowed, connected.automaticConnectionDemand)
+    }
+
     /**
      * Every appearance can ask for a connection unless the rider disconnected on purpose.
      *
