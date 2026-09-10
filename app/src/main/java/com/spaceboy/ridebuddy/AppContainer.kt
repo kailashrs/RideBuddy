@@ -272,7 +272,15 @@ class AppContainer(context: Context) {
                 .distinctUntilChanged()
                 .collect { gaveUp ->
                     if (!gaveUp) return@collect
-                    connectionEventJournal.record("Reconnection gave up; ending navigation")
+                    connectionEventJournal.record(
+                        "Could not reach the motorcycle; dropping queued cluster output and ending navigation",
+                    )
+                    // The GATT queue is already dropped by the teardown, but two things outlive it
+                    // and would otherwise surface on whatever link comes up next: the alert timers,
+                    // and the guidance the cluster bridge holds for replay. The ride is ended and
+                    // written by RideRecorder, which watches this same state.
+                    tftPriorityCoordinator.dropDisplayedAlerts()
+                    runCatching(tftNavigationBridge::stop)
                     navigationStopController.stop { result ->
                         connectionEventJournal.record("Navigation stopped after giving up: $result")
                     }

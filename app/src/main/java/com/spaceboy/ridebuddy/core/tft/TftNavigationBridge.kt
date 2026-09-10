@@ -542,6 +542,10 @@ class TftNavigationBridge(
         textAlertActive = false
         textAlertMessage = null
         lastInfo = null
+        // Staging is display state like any other. Left set, the reconnect path in
+        // [refreshTransportAvailability] would redraw a GO prompt for a destination that was
+        // dropped along with the route.
+        previewActive = false
         latestData.clear()
         controlBatches.clear()
         pendingSession = null

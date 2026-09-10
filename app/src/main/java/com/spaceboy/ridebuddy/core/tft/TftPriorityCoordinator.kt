@@ -124,6 +124,15 @@ class TftPriorityCoordinator(
         job.start()
     }
 
+    /**
+     * Takes every alert down at once, for a link the app has given up on.
+     *
+     * Each alert still runs its own cleanup, so nothing is left believing it is on screen — but
+     * the timers are cancelled now rather than firing minutes later against a cluster that is no
+     * longer there.
+     */
+    fun dropDisplayedAlerts() = expireAllAlerts()
+
     /** The source notification is gone — drop its alert and give the display back. */
     fun notificationRemoved(eventId: Int) {
         synchronized(activeAlerts) { activeAlerts.remove(notificationKey(eventId)) }?.job?.cancel()

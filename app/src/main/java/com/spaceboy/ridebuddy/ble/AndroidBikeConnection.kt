@@ -932,7 +932,7 @@ internal class AndroidBikeConnection(
                 "The motorcycle is not completing the secure link. Forget it in Bluetooth " +
                     "settings and pair again."
             } else {
-                "Could not reconnect; automatic retries paused after $MaxReconnectAttempts attempts"
+                "Could not reach the motorcycle after $MaxConnectionAttempts attempts"
             }
             mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
             // The real failure stays on record; this only explains why nothing is retrying.
@@ -948,9 +948,11 @@ internal class AndroidBikeConnection(
         reconnectScheduled = true
         attemptTrigger = ConnectionAttemptTrigger.AutomaticReconnect
         diagnosticsRecorder.updateAttempt(attemptContext())
+        // The rider counts attempts from one and includes the first, so the state carries the
+        // attempt number this reconnect *is*, not the number of retries that came before it.
         mutableConnectionState.value =
-            BikeConnectionState.Connecting(deviceName, reconnectAttempt, MaxReconnectAttempts)
-        log("Reconnecting in ${delay / 1_000}s (attempt $reconnectAttempt/$MaxReconnectAttempts)")
+            BikeConnectionState.Connecting(deviceName, reconnectAttempt + 1, MaxConnectionAttempts)
+        log("Reconnecting in ${delay / 1_000}s (attempt ${reconnectAttempt + 1}/$MaxConnectionAttempts)")
         mainHandler.postAtTime(
             {
                 reconnectScheduled = false

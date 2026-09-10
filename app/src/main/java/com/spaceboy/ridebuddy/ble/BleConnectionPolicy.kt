@@ -4,25 +4,31 @@ import android.bluetooth.BluetoothGatt
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 
 /**
- * How many automatic reconnects a connection may make before it gives up and reports
- * failure. Bounded on purpose: an unbounded retry loop against a bike that has been
- * switched off drains the phone battery for no benefit.
+ * How many times the app tries to reach the motorcycle before it gives up, counting the first
+ * attempt.
+ *
+ * Bounded on purpose, and deliberately small. Retrying a bike that has been switched off drains
+ * the phone battery for no benefit, and giving up is not a quiet state: it ends the ride, clears
+ * everything staged for the cluster, and stops the route. Three attempts is long enough to ride
+ * through a dropout at the edge of range and short enough that a rider who has parked and walked
+ * away has their ride saved while they are still nearby.
  */
-internal const val MaxReconnectAttempts = 6
+internal const val MaxConnectionAttempts = 3
 
 private const val MaxReconnectDelayMillis = 30_000L
 
 /**
- * Backoff before reconnect attempt [attempt] (zero-based), or null once the budget is
- * spent — which the caller reads as "stop retrying".
+ * Backoff before the reconnect numbered [reconnectAttempt] — zero-based, so 0 schedules the
+ * second attempt overall — or null once the budget is spent, which the caller reads as "stop
+ * retrying".
  *
- * The delay doubles from one second and is capped at 30 s. The inner `minOf(attempt, 5)`
- * guards the shift itself so the expression cannot overflow if the attempt bound is ever
- * raised without revisiting this line.
+ * The delay doubles from one second and is capped at 30 s. Neither the cap nor the shift guard
+ * bites at three attempts; both are there so raising the budget cannot silently overflow the
+ * shift or schedule an absurd wait.
  */
-internal fun reconnectDelayMillis(attempt: Int): Long? {
-    if (attempt !in 0 until MaxReconnectAttempts) return null
-    return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(attempt, 5))
+internal fun reconnectDelayMillis(reconnectAttempt: Int): Long? {
+    if (reconnectAttempt !in 0..MaxConnectionAttempts - 2) return null
+    return minOf(MaxReconnectDelayMillis, 1_000L shl minOf(reconnectAttempt, 5))
 }
 
 /**
