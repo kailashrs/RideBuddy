@@ -11,6 +11,7 @@ class SupportedNotificationAppsTest {
             listOf(
                 SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
+                SupportedNotificationApp("com.truecaller", "Truecaller messages", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
                 SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
@@ -57,5 +58,13 @@ class SupportedNotificationAppsTest {
         assertTrue(SupportedNotificationApps.all { app ->
             app.hiddenEvent > 0 && app.shownEvent > 0 && app.hiddenEvent != app.shownEvent
         })
+    }
+
+    @Test
+    fun `truecaller messages use SMS icons but other Truecaller cards and summaries do not`() {
+        assertTrue(acceptsNotificationPayload("com.truecaller", isMessage = true, isGroupSummary = false))
+        org.junit.Assert.assertFalse(acceptsNotificationPayload("com.truecaller", isMessage = false, isGroupSummary = false))
+        org.junit.Assert.assertFalse(acceptsNotificationPayload("com.truecaller", isMessage = true, isGroupSummary = true))
+        assertEquals(7, SupportedNotificationAppsByPackage.getValue("com.truecaller").shownEvent)
     }
 }

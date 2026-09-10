@@ -32,6 +32,7 @@
     <queries>
         <package android:name="com.google.android.apps.messaging" />
         <package android:name="com.samsung.android.messaging" />
+        <package android:name="com.truecaller" />
         <package android:name="com.whatsapp" />
         <package android:name="com.instagram.android" />
         <package android:name="com.instagram.lite" />

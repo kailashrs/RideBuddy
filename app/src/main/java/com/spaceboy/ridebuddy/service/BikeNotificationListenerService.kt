@@ -2,10 +2,12 @@ package com.spaceboy.ridebuddy.service
 
 import com.spaceboy.ridebuddy.appContainer
 
+import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.spaceboy.ridebuddy.AppContainer
-import com.spaceboy.ridebuddy.core.calls.isRideBuddyCallNotification
+import com.spaceboy.ridebuddy.data.acceptsNotificationPayload
+import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.NotificationAlertCategory
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
@@ -47,14 +49,16 @@ class BikeNotificationListenerService : NotificationListenerService() {
         val notifications = activeNotifications.orEmpty().toList()
         container.callNotificationBridge.reconcileActiveNotifications(notifications)
         val (callNotifications, regularNotifications) = notifications.partition { notification ->
-            notification.notification.isRideBuddyCallNotification()
+            container.callNotificationBridge.isCallNotification(notification)
         }
         callNotifications.forEach(::onNotificationPosted)
 
         val settings = container.appSettings.settings.value
-        val eligibleKeys = if (container.tftPriorityCoordinator.canPresentNotification()) {
+        val eligibleKeys = if (container.bikeConnection.connectionState.value is BikeConnectionState.Connected &&
+            container.tftPriorityCoordinator.canPresentNotification()) {
             regularNotifications.mapNotNull { notification ->
                 val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return@mapNotNull null
+                if (!notification.acceptsIcon()) return@mapNotNull null
                 if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) {
                     return@mapNotNull null
                 }
@@ -81,6 +85,11 @@ class BikeNotificationListenerService : NotificationListenerService() {
             return
         }
         mapping ?: return
+        if (!notification.acceptsIcon()) {
+            removeTrackedEvent(mapping, notification.key, container)
+            return
+        }
+        if (container.bikeConnection.connectionState.value !is BikeConnectionState.Connected) return
         if (!container.tftPriorityCoordinator.canPresentNotification()) return
         val settings = container.appSettings.settings.value
         if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) return
@@ -114,6 +123,13 @@ class BikeNotificationListenerService : NotificationListenerService() {
         NotificationAlertCategory.Social -> settings.socialAlerts
         NotificationAlertCategory.Email -> settings.emailAlerts
     }
+
+    private fun StatusBarNotification.acceptsIcon(): Boolean = acceptsNotificationPayload(
+        packageName = packageName,
+        isMessage = notification.category == Notification.CATEGORY_MESSAGE ||
+            notification.extras.containsKey(Notification.EXTRA_MESSAGES),
+        isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+    )
 }
 
 /** Notification-icon packet: `[0x0B, event, phone battery percent, 0x00]`. */

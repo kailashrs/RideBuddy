@@ -30,6 +30,7 @@ internal data class SupportedNotificationApp(
 internal val SupportedNotificationApps = listOf(
     SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
     SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
+    SupportedNotificationApp("com.truecaller", "Truecaller messages", 6, 7, NotificationAlertCategory.Messages),
     SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
     SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
     SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
@@ -44,3 +45,10 @@ internal val SupportedNotificationAppsByPackage = SupportedNotificationApps.asso
 
 /** Every supported app is enabled by default; the feature as a whole is what is opt-in. */
 internal val DefaultNotificationPackages = SupportedNotificationAppsByPackage.keys
+
+/** Truecaller also posts caller-ID, missed-call, and promotional cards; only messages get SMS icons. */
+internal fun acceptsNotificationPayload(
+    packageName: String,
+    isMessage: Boolean,
+    isGroupSummary: Boolean,
+): Boolean = !isGroupSummary && (packageName != "com.truecaller" || isMessage)

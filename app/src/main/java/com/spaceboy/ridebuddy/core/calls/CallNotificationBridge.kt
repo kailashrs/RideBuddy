@@ -94,11 +94,17 @@ internal fun tftCallStateFor(
     else -> TftCallState.Outgoing
 }
 
-internal fun Notification.isRideBuddyCallNotification(): Boolean =
-    category == Notification.CATEGORY_CALL ||
-            extras.containsKey(Notification.EXTRA_ANSWER_INTENT) ||
-            extras.containsKey(Notification.EXTRA_DECLINE_INTENT) ||
-            extras.containsKey(Notification.EXTRA_HANG_UP_INTENT)
+internal fun Notification.isRideBuddyCallNotification(isKnownDialer: Boolean = false): Boolean =
+    isLiveCallNotification(
+        hasCallStyle = extras.getInt(Notification.EXTRA_CALL_TYPE, Notification.CallStyle.CALL_TYPE_UNKNOWN) in
+            Notification.CallStyle.CALL_TYPE_INCOMING..Notification.CallStyle.CALL_TYPE_SCREENING,
+        hasCallIntent = listOf(Notification.EXTRA_ANSWER_INTENT, Notification.EXTRA_DECLINE_INTENT,
+            Notification.EXTRA_HANG_UP_INTENT).any { extras.getParcelable(it, PendingIntent::class.java) != null },
+        isCallCategory = category == Notification.CATEGORY_CALL,
+        isOngoing = flags and Notification.FLAG_ONGOING_EVENT != 0,
+        hasLegacyCallAction = actions.orEmpty().any { it.actionIntent != null && callActionKind(it.title?.toString()) != null },
+        isKnownDialer = isKnownDialer,
+    )
 
 /**
  * Bridges phone calls to the cluster: shows who is calling, and acts on the handlebar
@@ -183,7 +189,11 @@ class CallNotificationBridge(
                 } else {
                     // A cluster that has gone away has to show its side is up again before it is
                     // worth writing a call to.
-                    synchronized(callLock) { clusterAcceptsCallWrites = false }
+                    synchronized(callLock) {
+                        clusterAcceptsCallWrites = false
+                        nextCallWriteGeneration++
+                        while (pendingCallWrites.tryReceive().isSuccess) { /* Discard obsolete transport work. */ }
+                    }
                 }
             }
         }
@@ -219,7 +229,14 @@ class CallNotificationBridge(
     /** Returns true when this is a call notification and should not be handled as a normal app alert. */
     fun onNotificationPosted(sbn: StatusBarNotification): Boolean {
         val notification = sbn.notification
-        if (!notification.isRideBuddyCallNotification()) return false
+        if (!isCallNotification(sbn)) {
+            synchronized(callLock) {
+                if (activeCall.value.notificationKey == sbn.key) clearActiveCallLocked()
+            }
+            return false
+        }
+        val connection = bikeConnection.connectionState.value
+        if (connection !is BikeConnectionState.Connected && connection !is BikeConnectionState.Connecting) return true
         val settings = appSettings.settings.value
         val intents = notification.extractCallIntents(sbn.packageName)
 
@@ -228,10 +245,7 @@ class CallNotificationBridge(
             .ifBlank { notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty() }
             .ifBlank { "Unknown caller" }
         val text = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val candidateNumber = caller?.uri?.removePrefix("tel:").orEmpty().ifBlank { text }
-        val number = candidateNumber.filter { it.isDigit() || it == '+' }
-            .takeIf { it.count(Char::isDigit) >= 5 }
-            .orEmpty()
+        val number = callerPhoneNumber(caller?.uri) ?: callerPhoneNumber(text) ?: callerPhoneNumber(name)
         val callStyleIncoming = notification.extras.getInt(
             Notification.EXTRA_CALL_TYPE,
             Notification.CallStyle.CALL_TYPE_UNKNOWN,
@@ -249,7 +263,7 @@ class CallNotificationBridge(
                 declineIntent = intents.decline,
                 hangUpIntent = intents.hangUp,
                 callerName = name,
-                callerNumber = number.takeIf(String::isNotBlank),
+                callerNumber = number,
                 callState = callState,
                 providerPackage = sbn.packageName,
             )
@@ -266,7 +280,7 @@ class CallNotificationBridge(
     fun onNotificationRemoved(sbn: StatusBarNotification): Boolean {
         synchronized(callLock) {
             val call = activeCall.value
-            if (sbn.key != call.notificationKey) return sbn.notification.isRideBuddyCallNotification()
+            if (sbn.key != call.notificationKey) return isCallNotification(sbn)
             clearActiveCallLocked()
             return true
         }
@@ -275,13 +289,28 @@ class CallNotificationBridge(
     /** Reconciles removals Android could not deliver while the notification listener was offline. */
     fun reconcileActiveNotifications(notifications: Collection<StatusBarNotification>) {
         val activeCallKeys = notifications.asSequence()
-            .filter { notification -> notification.notification.isRideBuddyCallNotification() }
+            .filter(::isCallNotification)
             .map { notification -> notification.key }
             .toSet()
         synchronized(callLock) {
             val activeKey = activeCall.value.notificationKey ?: return
             if (activeKey !in activeCallKeys) clearActiveCallLocked()
         }
+    }
+
+    internal fun isCallNotification(sbn: StatusBarNotification): Boolean = sbn.notification.isRideBuddyCallNotification(
+        isKnownDialer = sbn.packageName == "com.truecaller" ||
+            sbn.packageName == telecomManager?.defaultDialerPackage,
+    )
+
+    /** Ends a bike session without replaying an old caller or retaining actionable intents. */
+    fun clearPendingBikeOutput() = synchronized(callLock) {
+        clusterAcceptsCallWrites = false
+        nextCallWriteGeneration++
+        while (pendingCallWrites.tryReceive().isSuccess) { /* The channel remains usable for the next session. */ }
+        publishedCallActive = false
+        activeCall.value = ActiveCallState()
+        mutableState.value = CallIntegrationState()
     }
 
     private fun send(intent: PendingIntent?): Boolean {
@@ -302,6 +331,7 @@ class CallNotificationBridge(
      */
     private fun armCallWrites(republish: Boolean) {
         val publish = synchronized(callLock) {
+            if (bikeConnection.connectionState.value !is BikeConnectionState.Connected) return
             val wasArmed = clusterAcceptsCallWrites
             clusterAcceptsCallWrites = true
             republish || !wasArmed
@@ -396,7 +426,7 @@ class CallNotificationBridge(
     private fun enqueueCallWrites(writes: List<BikeWrite>) {
         if (writes.isEmpty()) return
         // Every caller holds callLock, so this reads the armed state without racing it.
-        if (!clusterAcceptsCallWrites) return
+        if (!clusterAcceptsCallWrites || bikeConnection.connectionState.value !is BikeConnectionState.Connected) return
         nextCallWriteGeneration++
         pendingCallWrites.trySend(CallWriteRequest(nextCallWriteGeneration, writes))
     }
@@ -454,16 +484,14 @@ class CallNotificationBridge(
             decline = extras.pendingIntent(Notification.EXTRA_DECLINE_INTENT),
             hangUp = extras.pendingIntent(Notification.EXTRA_HANG_UP_INTENT),
         )
-        if (extrasIntents.answer != null || extrasIntents.decline != null || extrasIntents.hangUp != null) return extrasIntents
-
         val availableActions = actions.orEmpty().filter { it.actionIntent != null }
-        fun find(vararg words: String): PendingIntent? = availableActions.firstOrNull { action ->
-            words.any { word -> action.title?.toString()?.contains(word, ignoreCase = true) == true }
+        fun find(kind: CallActionKind): PendingIntent? = availableActions.firstOrNull { action ->
+            callActionKind(action.title?.toString()) == kind
         }?.actionIntent
 
-        val answer = find("answer", "accept", "pick up")
-        val decline = find("decline", "reject")
-        val hangUp = find("hang up", "end call", "disconnect")
+        val answer = extrasIntents.answer ?: find(CallActionKind.Answer)
+        val decline = extrasIntents.decline ?: find(CallActionKind.Decline)
+        val hangUp = extrasIntents.hangUp ?: find(CallActionKind.HangUp)
         if (answer == null && decline == null && hangUp == null) {
             // This search is English-only, and there is no locale-independent way to read a
             // non-CallStyle dialer's buttons. Say so rather than looking like a silent no-op:

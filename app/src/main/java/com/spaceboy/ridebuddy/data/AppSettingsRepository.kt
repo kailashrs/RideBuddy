@@ -128,7 +128,8 @@ class AppSettingsRepository(context: Context) {
             putString(KeyTheme, updated.themeMode.name)
             putBoolean(KeyDynamicColor, updated.dynamicColor)
             putBoolean(KeyHighContrast, updated.highContrast)
-            putStringSet(KeyNotificationPackages, updated.enabledNotificationPackages)
+            putStringSet(KeyNotificationPackagesV2, updated.enabledNotificationPackages)
+            remove(KeyNotificationPackages)
         }
         mutableSettings.value = updated
     }
@@ -175,7 +176,10 @@ class AppSettingsRepository(context: Context) {
             themeMode = preferences.enum(KeyTheme, ThemeMode.System),
             dynamicColor = preferences.getBoolean(KeyDynamicColor, true),
             highContrast = preferences.getBoolean(KeyHighContrast, false),
-            enabledNotificationPackages = preferences.getStringSet(KeyNotificationPackages, DefaultNotificationPackages)?.toSet()
+            enabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesV2, null)?.toSet()
+                // Add newly supported Truecaller once, while preserving every existing app choice.
+                // V2 subsequently preserves an explicit Truecaller opt-out as well.
+                ?: preferences.getStringSet(KeyNotificationPackages, null)?.plus("com.truecaller")
                 ?: DefaultNotificationPackages,
         )
     }
@@ -214,6 +218,7 @@ class AppSettingsRepository(context: Context) {
         const val KeyDynamicColor = "dynamic_color"
         const val KeyHighContrast = "high_contrast"
         const val KeyNotificationPackages = "notification_packages"
+        const val KeyNotificationPackagesV2 = "notification_packages_v2"
     }
 }
 
