@@ -86,6 +86,7 @@ data class MainScreenActions(
     val onStartNavigation: (String) -> Unit,
     val onOpenActiveNavigation: () -> Unit,
     val onStopNavigation: () -> Unit,
+    val onEndRide: () -> Unit,
     val onSharedDestinationHandled: () -> Unit,
     val onCancelNavigationStart: () -> Unit,
     val onInsightPeriodSelected: (InsightPeriod) -> Unit,

@@ -70,6 +70,7 @@ class RideRecorder(
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
     private var stopCandidate: StopCandidate? = null
     private var resumePending = false
+    private var awaitStopBeforeNextRide = false
     /** The most recent finished ride's primary insert, for [finalizeAndAwaitSave] to wait on. */
     private var lastSave: CompletableDeferred<Unit>? = null
     private var lastTelemetryAtMillis: Long? = null
@@ -92,6 +93,9 @@ class RideRecorder(
                     is BikeConnectionState.Failed,
                     -> {
                         if (mutableActiveRide.value != null) finishRide(stopCandidate)
+                        // The next session is a new outing, not a continuation, so a hand-ended
+                        // ride does not go on suppressing recording across it.
+                        awaitStopBeforeNextRide = false
                         clearLiveTelemetryState()
                     }
 
@@ -162,7 +166,15 @@ class RideRecorder(
 
         val current = mutableActiveRide.value
         if (current == null) {
-            if (frame.speedKilometresPerHour >= settingsRepository.settings.value.rideStartSpeedKph) {
+            val thresholds = settingsRepository.settings.value
+            // A ride ended by hand must not restart under the wheels of the rider who ended it.
+            // Recording resumes only once the bike has actually come to a stop; without this the
+            // very next frame opens a second ride and the button looks like it did nothing.
+            if (awaitStopBeforeNextRide) {
+                if (!shouldStopRide(frame.speedKilometresPerHour, thresholds.rideStopSpeedKph)) return
+                awaitStopBeforeNextRide = false
+            }
+            if (frame.speedKilometresPerHour >= thresholds.rideStartSpeedKph) {
                 samples.clear()
                 // Seed with the last few seconds of pre-threshold samples. A standing-start
                 // acceleration time is measured from a stop, and by the time speed crosses
@@ -271,6 +283,21 @@ class RideRecorder(
             } finally {
                 stored.complete(Unit)
             }
+        }
+    }
+
+    /**
+     * Ends the ride at the rider's request.
+     *
+     * Closed at the last telemetry the recorder saw rather than at the moment of the press, for
+     * the same reason an automatic stop is: a ride that ended at the kerb should not have the
+     * walk to the front door counted into it. Does nothing when no ride is running.
+     */
+    fun endRideNow() {
+        scope.launch(RecordingDispatcher) {
+            if (mutableActiveRide.value == null) return@launch
+            awaitStopBeforeNextRide = true
+            finishRide(stopCandidate)
         }
     }
 

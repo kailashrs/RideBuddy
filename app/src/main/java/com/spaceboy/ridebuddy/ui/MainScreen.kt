@@ -280,6 +280,7 @@ internal fun MainScreenContent(
                 onStartNavigation = onStartNavigation,
                 onOpenActiveNavigation = onOpenActiveNavigation,
                 onStopNavigation = onStopNavigation,
+                onEndRide = onEndRide,
                 onSharedDestinationHandled = onSharedDestinationHandled,
                 onCancelNavigationStart = onCancelNavigationStart,
             )

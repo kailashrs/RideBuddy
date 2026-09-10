@@ -333,6 +333,7 @@ class MainActivity : ComponentActivity() {
         onStartNavigation = ::startNavigation,
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,
+        onEndRide = viewModel::endRide,
         onSharedDestinationHandled = viewModel::clearSharedDestination,
         onCancelNavigationStart = ::cancelNavigationStart,
         onInsightPeriodSelected = viewModel::selectInsightPeriod,

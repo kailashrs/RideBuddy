@@ -19,7 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Directions
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -114,6 +114,7 @@ fun LiveScreen(
     onStartNavigation: (String) -> Unit,
     onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
+    onEndRide: () -> Unit,
     onSharedDestinationHandled: () -> Unit,
     onCancelNavigationStart: () -> Unit,
 ) {
@@ -151,6 +152,7 @@ fun LiveScreen(
             connectionState = connectionState,
             units = units,
             onDetails = { showLiveDetails = true },
+            onEndRide = onEndRide,
         )
 
         Text(
@@ -286,8 +288,12 @@ fun LiveScreen(
                             if (sharedDestinationError != null) onSharedDestinationHandled()
                             destination = value.take(MaxDestinationInputLength)
                         },
-                        placeholder = { Text("Destination or Google Maps link") },
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        // Named for what it accepts. There is no place search behind this field —
+                        // a link carries the coordinates, and calling it a destination invited
+                        // riders to type a place name that only a geocoder lookup could resolve.
+                        label = { Text("Google Maps link") },
+                        placeholder = { Text("Paste or share a link from Google Maps") },
+                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = if (destination.isNotBlank()) {
                             {
                                 IconButton(
@@ -417,11 +423,12 @@ private fun TelemetrySection(
     connectionState: BikeConnectionState,
     units: DistanceUnits,
     onDetails: () -> Unit,
+    onEndRide: () -> Unit,
 ) {
     if (connectionState !is BikeConnectionState.Connected) return
     val frame = live.telemetry.collectAsStateWithLifecycle().value ?: return
     val activeRide = live.activeRide.collectAsStateWithLifecycle().value
-    TelemetryCard(frame, activeRide, units, onDetails)
+    TelemetryCard(frame, activeRide, units, onDetails, onEndRide)
 }
 
 @Composable
@@ -537,6 +544,7 @@ private fun TelemetryCard(
     activeRide: ActiveRide?,
     units: DistanceUnits,
     onDetails: () -> Unit,
+    onEndRide: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val displayedSpeed = UnitFormatter.chartSpeed(frame.speedKilometresPerHour, units).roundToInt()
@@ -603,14 +611,26 @@ private fun TelemetryCard(
                 Metric("Mileage", UnitFormatter.mileage(frame.instantaneousMileageKilometresPerLitre, units, locale))
             }
 
-            activeRide?.let {
+            // Recording is automatic, so the only control a rider needs over it is a way out.
+            // It sits next to the distance it ends, and only while there is a ride to end.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)}",
+                    text = activeRide
+                        ?.let { "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)}" }
+                        .orEmpty(),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
                 )
+                if (activeRide != null) {
+                    TextButton(onClick = onEndRide) { Text("End ride") }
+                }
+                TextButton(onClick = onDetails) { Text("Live details") }
             }
-            TextButton(onClick = onDetails, modifier = Modifier.align(Alignment.End)) { Text("Live details") }
         }
     }
 }

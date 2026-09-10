@@ -272,6 +272,17 @@ class MainViewModel internal constructor(
         insightPeriod.value = period
     }
 
+    /**
+     * Ends the ride in progress at the rider's request.
+     *
+     * Not a destructive action: the ride is saved exactly as an automatic stop would save it,
+     * and a new one begins the next time the bike sets off. That is why nothing confirms first.
+     */
+    fun endRide() {
+        rideRecorder.endRideNow()
+        showMessage("Ride ended and saved")
+    }
+
     /** Deletes all stored rides. Irreversible; the UI confirms before calling this. */
     fun clearRideHistory() {
         viewModelScope.launch {
