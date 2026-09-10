@@ -30,11 +30,11 @@ Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under CC B
 
 ## Toolchain
 
-- Android Gradle Plugin 9.3.1
+- Android Gradle Plugin 9.4.0
 - Gradle 9.7.1
-- Kotlin / Compose compiler 2.4.10
-- Jetpack Compose BOM 2026.06.01
-- compile SDK 36.1, target SDK 36, minimum SDK 36 (Android 16); pairing requires `FEATURE_COMPANION_DEVICE_SETUP`
+- Kotlin / Compose compiler 2.4.20
+- Jetpack Compose BOM 2026.09.00
+- compile and target SDK 37, minimum SDK 36 (Android 16); pairing requires `FEATURE_COMPANION_DEVICE_SETUP`
 - Google Navigation SDK 7.9.0
 
 The checked-in Gradle wrapper remains the authoritative build entry point.
@@ -74,7 +74,7 @@ verification never receives release secrets or builds a signed release.
 1. Create a Google Cloud project and enable Navigation SDK for Android.
 2. Create an Android-restricted API key for package `com.spaceboy.ridebuddy` and the signing certificate used for the build.
 3. In the app, open **Settings → Navigation** and paste the key.
-4. Share a Google Maps destination to RideBuddy, or paste a link/address into **Live → Navigate**.
+4. Share a Google Maps destination to RideBuddy, or paste a **Google Maps link** into **Live → Navigate**. Review the calculated route, then tap **Go** on the phone or use the bike's **GO** action. **Start shared destinations** can start guidance immediately after routing succeeds.
 5. Optionally set Location to **Allow all the time** under **Settings → Navigation with screen off** for the most accurate guidance when the app is backgrounded. Foreground navigation remains available without this optional grant.
 
 ## Bike and call setup
@@ -85,6 +85,17 @@ verification never receives release secrets or builds a signed release.
 4. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
+
+Truecaller is supported as a notification source for calls and messages. Structured Android
+CallStyle controls take precedence; legacy call controls use explicit English action labels.
+Message icons only accept message notifications, excluding missed-call, caller-ID, and
+promotional cards. The installed Truecaller version must expose notification actions for
+handlebar answer/end controls; real-phone validation is still required.
+
+**End ride** finishes and saves the ride in progress without ending the session: the bike stays
+connected, and recording resumes once the bike has come to a stop and sets off again. Automatic
+connection attempts are limited to three per cycle; failure saves the ongoing ride and clears
+pending display output. Tap **Connect** to deliberately start another session.
 
 ## Project references
 

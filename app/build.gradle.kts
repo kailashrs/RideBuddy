@@ -23,8 +23,8 @@ android {
         // CDM-only pairing path requires Android 16+ on every supported phone.
         minSdk = 36
         targetSdk = 37
-        versionCode = 105
-        versionName = "0.2.5"
+        versionCode = 106
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
