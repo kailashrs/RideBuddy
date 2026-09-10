@@ -10,6 +10,7 @@ import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnection
+import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -34,6 +35,12 @@ class RidingAlertMonitor(
     private val appContext = context.applicationContext
     private val notifications = appContext.getSystemService(NotificationManager::class.java)
     private val lastAlertAt = mutableMapOf<String, Long>()
+
+    /** Ends the session's phone alerts and cooldowns along with its pending bike output. */
+    fun clearPendingBikeOutput() = synchronized(lastAlertAt) {
+        lastAlertAt.keys.forEach { notifications.cancel(it.hashCode()) }
+        lastAlertAt.clear()
+    }
 
     /** Creates the notification channel and starts watching every alert source. */
     fun start() {
@@ -86,26 +93,26 @@ class RidingAlertMonitor(
      */
     private fun alert(key: String, title: String, message: String): Boolean {
         val now = System.currentTimeMillis()
-        val canAlert = synchronized(lastAlertAt) {
-            if (now - (lastAlertAt[key] ?: 0L) < AlertCooldownMillis) false
-            else {
-                lastAlertAt[key] = now
-                true
+        return synchronized(lastAlertAt) {
+            // A weather request or buffered telemetry event may finish after the link ends.
+            // Check and publish under the cleanup lock so it cannot recreate an ended alert.
+            if (connection.connectionState.value !is BikeConnectionState.Connected) return false
+            if (now - (lastAlertAt[key] ?: 0L) < AlertCooldownMillis) return false
+            lastAlertAt[key] = now
+            if (NotificationManagerCompat.from(appContext).areNotificationsEnabled()) {
+                notifications.notify(
+                    key.hashCode(),
+                    NotificationCompat.Builder(appContext, ChannelId)
+                        .setSmallIcon(R.drawable.ic_launcher)
+                        .setContentTitle(title)
+                        .setContentText(message)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setAutoCancel(true)
+                        .build(),
+                )
             }
+            true
         }
-        if (!canAlert) return false
-        if (!NotificationManagerCompat.from(appContext).areNotificationsEnabled()) return true
-        notifications.notify(
-            key.hashCode(),
-            NotificationCompat.Builder(appContext, ChannelId)
-                .setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .build(),
-        )
-        return true
     }
 
     private fun createChannel() {

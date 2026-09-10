@@ -96,4 +96,19 @@ class NotificationIconWriterTest {
         assertEquals(setOf(mapping.shownEvent), takenDown)
         assertEquals(listOf(mapping.hiddenEvent), events())
     }
+
+    @Test
+    fun `ending a bike session discards icons without replaying or writing a stale clear`() {
+        writer.posted(mapping.shownEvent, "old-message")
+        writes.clear()
+
+        writer.clearPendingBikeOutput()
+        assertEquals(emptyList<Int>(), events())
+        assertEquals(false, writer.removedLast(mapping.shownEvent, mapping.hiddenEvent, "old-message"))
+        writer.clearAndReplay()
+        assertEquals(listOf(ClearAppEventsEvent), events())
+
+        assertEquals(true, writer.posted(mapping.shownEvent, "new-message"))
+        assertEquals(listOf(ClearAppEventsEvent, mapping.shownEvent), events())
+    }
 }

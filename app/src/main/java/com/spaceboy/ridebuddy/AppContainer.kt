@@ -1,10 +1,7 @@
 package com.spaceboy.ridebuddy
 
 import android.app.Application
-import android.app.ActivityOptions
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.ble.BikeIdentityRepository
@@ -38,17 +35,12 @@ import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
-import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -94,6 +86,7 @@ class AppContainer(context: Context) {
         protectionAcceptanceStore,
         connectionEventJournal,
         bikeIdentityRepository,
+        onAttemptsExhausted = bikeConnectionDemand::onConnectionAttemptsExhausted,
     )
     val rideLocationTracker = RideLocationTracker(context)
     val rideRepository = RideRepository(context)
@@ -136,37 +129,6 @@ class AppContainer(context: Context) {
             runCatching(tftNavigationBridge::stop)
         },
     )
-    /**
-     * A destination the rider has chosen but not started. While one is set the cluster shows GO,
-     * and the handlebar can start it without them touching the phone.
-     */
-    private val mutableStagedDestination = MutableStateFlow<StagedDestination?>(null)
-    val stagedDestination: StateFlow<StagedDestination?> = mutableStagedDestination.asStateFlow()
-    private val stagingIds = AtomicLong()
-
-    /**
-     * Stages a destination, or clears it when null or blank.
-     *
-     * Re-staging the same text keeps the existing identity. The UI calls this from an effect
-     * keyed on the destination string, so minting a fresh id each time would invalidate a GO
-     * press that was already in flight.
-     */
-    fun stageDestination(destination: String?) {
-        val value = destination?.trim()?.takeIf { it.isNotEmpty() && it.length <= MaxDestinationInputLength }
-        mutableStagedDestination.update { current ->
-            when {
-                value == null -> null
-                current?.destination == value -> current
-                else -> StagedDestination(stagingIds.incrementAndGet(), value)
-            }
-        }
-    }
-
-    /** Clears the staged destination unless a newer staging has already replaced it. */
-    fun clearStagedDestination(requestId: Long) {
-        mutableStagedDestination.update { current -> current?.takeIf { it.requestId != requestId } }
-    }
-
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     internal val notificationIconWriter = NotificationIconWriter(
         batteryPercent = {
@@ -241,15 +203,6 @@ class AppContainer(context: Context) {
                     // one is dismissed and replaced.
                     notificationIconWriter.clearAndReplay()
                 }
-                if (event is BikeControlEvent.StartNavigation) {
-                    val staged = mutableStagedDestination.value
-                    if (staged == null) {
-                        connectionEventJournal.record("Handlebar GO ignored; no destination is staged")
-                    } else {
-                        connectionEventJournal.record("Handlebar GO; starting the staged destination")
-                        bringNavigationHostForward(staged)
-                    }
-                }
                 if (event is BikeControlEvent.ExitNavigation) {
                     connectionEventJournal.record("Handlebar exit; stopping navigation")
                     navigationStopController.stop { result ->
@@ -259,30 +212,31 @@ class AppContainer(context: Context) {
             }
         }
         applicationScope.launch {
-            // Reconnection giving up ends the route as well as the link. Guidance exists to be
-            // read off the motorcycle, and the app has just concluded it cannot reach one — so
-            // leaving a route running would keep the SDK, its foreground service and the phone's
-            // GPS alive for a display nobody is looking at.
-            //
-            // Only the transition into the state acts. Failed is republished for other reasons,
-            // and stopping an already-stopped route on each of them would fill the journal with
-            // AlreadyStopping for no gain.
-            bikeConnection.connectionState
-                .map { state -> state is BikeConnectionState.Failed && state.retriesExhausted }
-                .distinctUntilChanged()
-                .collect { gaveUp ->
-                    if (!gaveUp) return@collect
-                    connectionEventJournal.record("Reconnection gave up; ending navigation")
-                    navigationStopController.stop { result ->
-                        connectionEventJournal.record("Navigation stopped after giving up: $result")
-                    }
+            var hadConnectionSession = false
+            var terminalHandled = false
+            bikeConnection.connectionState.collect { state ->
+                val terminal = state is BikeConnectionState.Failed ||
+                    (state is BikeConnectionState.Disconnected && hadConnectionSession)
+                if (state !is BikeConnectionState.Disconnected) hadConnectionSession = true
+                if (!terminal) {
+                    terminalHandled = false
+                    return@collect
                 }
-        }
-        // Mirror the staged destination onto the cluster, so GO appears and disappears with
-        // it rather than every staging call site having to remember to draw it.
-        applicationScope.launch {
-            stagedDestination.collect { staged ->
-                tftNavigationBridge.previewDestination(staged?.destination.orEmpty())
+                if (terminalHandled) return@collect
+                terminalHandled = true
+                hadConnectionSession = false
+                // Brief reconnection attempts preserve the ride. A terminal session discards
+                // every app-side queue, including timers that could otherwise replay old alerts.
+                callNotificationBridge.clearPendingBikeOutput()
+                notificationIconWriter.clearPendingBikeOutput()
+                tftPriorityCoordinator.clearPendingBikeOutput()
+                ridingAlertMonitor.clearPendingBikeOutput()
+                navigationFeed.clear()
+                tftNavigationBridge.clearPendingBikeOutput()
+                connectionEventJournal.record("Connection ended; clearing pending output and navigation")
+                navigationStopController.stop { result ->
+                    connectionEventJournal.record("Navigation stopped after connection ended: $result")
+                }
             }
         }
         rideRecorder.start()
@@ -290,64 +244,7 @@ class AppContainer(context: Context) {
         weatherAlertProvider.start()
     }
 
-    /**
-     * Brings the app forward so something is there to take the queued GO press.
-     *
-     * Android blocks background activity launches, and this runs from a BLE callback with the
-     * phone stowed — the definition of a background launch. The exemption has to be opted into on
-     * *both* sides of the pending intent: creator mode says this app permits its intent to start
-     * an activity from the background, sender mode says this send is exercising that permission.
-     * Setting only one of them is silently refused.
-     *
-     * `MainActivity` is `singleTask`, so this brings an existing instance forward rather than
-     * stacking another, and starts one when the task is gone.
-     */
-    private fun bringNavigationHostForward(staged: StagedDestination) {
-        val creatorOptions = ActivityOptions.makeBasic()
-            .setPendingIntentCreatorBackgroundActivityStartMode(
-                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS,
-            )
-            .toBundle()
-        val senderOptions = ActivityOptions.makeBasic()
-            .setPendingIntentBackgroundActivityStartMode(
-                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS,
-            )
-            .toBundle()
-        val pendingIntent = PendingIntent.getActivity(
-            appContext,
-            HandlebarStartPendingIntentRequestCode,
-            Intent(appContext, MainActivity::class.java)
-                .setAction(ActionStartStagedNavigation)
-                .putExtra(ExtraStagedDestinationId, staged.requestId)
-                .putExtra(ExtraStagedDestination, staged.destination)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            creatorOptions,
-        )
-        runCatching { pendingIntent.send(appContext, 0, null, null, null, null, senderOptions) }
-            .onFailure { error ->
-                connectionEventJournal.record("Handlebar GO could not bring the app forward: ${error.message}")
-            }
-    }
-
-    private companion object {
-        const val HandlebarStartPendingIntentRequestCode = 2
-    }
 }
-
-/**
- * A destination staged for the handlebar, tagged with the staging that produced it.
- *
- * The id travels inside a handlebar request and is checked when that request starts. That is the
- * difference between clearing the destination the rider selected and accidentally clearing a
- * newer one they staged while the Activity was coming forward.
- */
-data class StagedDestination(val requestId: Long, val destination: String)
-
-internal const val ActionStartStagedNavigation =
-    "com.spaceboy.ridebuddy.action.START_STAGED_NAVIGATION"
-internal const val ExtraStagedDestinationId = "staged_destination_id"
-internal const val ExtraStagedDestination = "staged_destination"
 
 /** Convenience for reaching the [AppContainer] from any [Context] without
  *  the repetitive `(application as RideBuddyApplication).container` cast. */

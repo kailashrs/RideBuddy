@@ -23,7 +23,12 @@ internal class NotificationIconWriter(
     private val write: (ByteArray) -> Unit,
 ) {
     private val lock = Any()
-    private val tracker = NotificationEventTracker()
+    private var tracker = NotificationEventTracker()
+
+    /** A finished session cannot replay its notification icons on a later connection. */
+    fun clearPendingBikeOutput() = synchronized(lock) {
+        tracker = NotificationEventTracker()
+    }
 
     /** Records a notification, lighting its icon if it was not already lit. */
     fun posted(shownEvent: Int, key: String): Boolean = synchronized(lock) {

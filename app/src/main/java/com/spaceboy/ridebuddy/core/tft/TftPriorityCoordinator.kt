@@ -58,6 +58,14 @@ class TftPriorityCoordinator(
     private val activeAlerts = mutableMapOf<String, ActiveAlert>()
     private var callWasActive = calls.state.value.active
 
+    /** Discards session alerts without callbacks that would redraw expired bike output. */
+    fun clearPendingBikeOutput() {
+        val alerts = synchronized(activeAlerts) {
+            activeAlerts.values.toList().also { activeAlerts.clear() }
+        }
+        alerts.forEach { it.job.cancel() }
+    }
+
     init {
         // A call arriving takes the display immediately, so outstanding alerts are expired
         // rather than left to time out over the top of it. When it ends, guidance is
