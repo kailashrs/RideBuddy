@@ -16,16 +16,13 @@ val releaseSigningConfigured = listOf(releaseStoreFile, releaseStorePassword, re
 
 android {
     namespace = "com.spaceboy.ridebuddy"
-    compileSdk = 36
-    compileSdkMinor = 1
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.spaceboy.ridebuddy"
         // CDM-only pairing path requires Android 16+ on every supported phone.
         minSdk = 36
-        // Navigation SDK 7.9.0 requires the 36.1 compile toolchain.
-        //noinspection OldTargetApi
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 105
         versionName = "0.2.5"
 
@@ -70,11 +67,6 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 
-    lint {
-        // Updated to AGP 9.3.1 and Navigation SDK 7.9.0.
-        disable += "AndroidGradlePluginVersion"
-    }
-
     testOptions {
         animationsDisabled = true
         managedDevices {
@@ -91,18 +83,14 @@ android {
 
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
-    // These AndroidX versions are the set validated with the pinned Navigation SDK toolchain.
-    //noinspection GradleDependency
-    implementation("androidx.core:core-ktx:1.18.0")
-    //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-    //noinspection GradleDependency
+    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
