@@ -1,5 +1,13 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,8 +51,6 @@ import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.ui.components.LineChart
-import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,7 +149,7 @@ fun InsightsScreen(
             )
         }
         Text(
-            "Fuel and mileage values are estimates derived from the bike's instantaneous telemetry.",
+            "Fuel estimates use mileage reported while moving and exclude idling. Incomplete fuel estimates are unavailable; averages exclude telemetry gaps.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -162,31 +168,45 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
     }
     val hasData = values.any { it > 0.0 }
     val color = MaterialTheme.colorScheme.primary
+    val locale = LocalConfiguration.current.locales[0]
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Recent distance trend", style = MaterialTheme.typography.titleMedium)
+            Text("Distance per ride", style = MaterialTheme.typography.titleMedium)
             Text(
-                if (hasData) "Last ${values.size} rides" else "No ride data recorded in this period",
+                if (hasData) "${values.size} ${if (values.size == 1) "ride" else "rides"} · oldest to newest" else "No ride data recorded in this period",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (hasData) {
-                LineChart(
-                    values = values,
-                    height = 100.dp,
-                    topPadding = 12.dp,
-                    color = color,
-                    contentDescription = "Distance chart for the last ${values.size} rides",
-                    scalePolicy = LineChartScalePolicy.ZeroBased,
-                    clampNegativeValues = false,
-                    smooth = true,
-                    strokeWidth = 3f,
-                    fillAlpha = 0.4f,
-                )
+                val maximum = values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    values.forEachIndexed { index, distance ->
+                        Column(
+                            modifier = Modifier.width(60.dp).semantics(mergeDescendants = true) {
+                                contentDescription = "Ride ${index + 1}: ${UnitFormatter.distance(distancesKilometres[index], units, locale)}"
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("%.1f".format(locale, distance), style = MaterialTheme.typography.labelSmall)
+                            Box(Modifier.height(100.dp).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                                Box(
+                                    Modifier.width(32.dp).height((distance / maximum * 100).coerceAtLeast(2.0).dp)
+                                        .background(color, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)),
+                                )
+                            }
+                            Text("${index + 1}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
+                }
+                Text(UnitFormatter.distanceUnit(units), style = MaterialTheme.typography.labelSmall)
             }
         }
     }

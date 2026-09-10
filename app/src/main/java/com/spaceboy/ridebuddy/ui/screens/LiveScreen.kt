@@ -19,7 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Directions
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -66,14 +66,14 @@ import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.Ride
-import com.spaceboy.ridebuddy.data.RideSample
+import com.spaceboy.ridebuddy.data.TelemetryChartData
+import com.spaceboy.ridebuddy.data.telemetryChartData
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
 import com.spaceboy.ridebuddy.ui.theme.TelemetryHero
 import com.spaceboy.ridebuddy.ui.theme.statusColors
 import com.spaceboy.ridebuddy.ui.components.LineChart
-import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.components.Metric
 import kotlin.math.roundToInt
 
@@ -111,6 +111,8 @@ fun LiveScreen(
     units: DistanceUnits,
     onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
+    onEndRide: () -> Unit,
+    onRetryRideSave: () -> Unit,
     onStartNavigation: (String) -> Unit,
     onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
@@ -152,6 +154,26 @@ fun LiveScreen(
             units = units,
             onDetails = { showLiveDetails = true },
         )
+
+        val saveFailed = live.saveFailed.collectAsStateWithLifecycle().value
+        if (saveFailed) {
+            OutlinedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Ride not saved", style = MaterialTheme.typography.titleMedium)
+                    Text("Storage could not save the ride. Free some space, then retry. Keep RideBuddy open until it is saved.", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = onRetryRideSave, modifier = Modifier.fillMaxWidth()) { Text("Retry save") }
+                }
+            }
+        }
+        val activeRide = live.activeRide.collectAsStateWithLifecycle().value
+        if (activeRide != null) {
+            OutlinedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Finish and save this ride now. The bike stays connected, and recording starts again on your next ride.", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = onEndRide, modifier = Modifier.fillMaxWidth()) { Text("End ride") }
+                }
+            }
+        }
 
         Text(
             text = "Navigate",
@@ -286,8 +308,9 @@ fun LiveScreen(
                             if (sharedDestinationError != null) onSharedDestinationHandled()
                             destination = value.take(MaxDestinationInputLength)
                         },
-                        placeholder = { Text("Destination or Google Maps link") },
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        label = { Text("Google Maps link") },
+                        placeholder = { Text("Paste a link from Google Maps") },
+                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = if (destination.isNotBlank()) {
                             {
                                 IconButton(
@@ -498,8 +521,8 @@ private fun ConnectionCard(
             Spacer(Modifier.height(8.dp))
             Text(
                 // The retry count is deliberately not shown. It is the app's own bookkeeping, and
-                // a rider waiting for their bike cannot act differently on attempt four than on
-                // attempt two.
+                // a rider waiting for their bike can simply wait until the connection succeeds
+                // or the app offers a retry.
                 text = when (state) {
                     is BikeConnectionState.Connecting -> "Connecting…"
                     is BikeConnectionState.Authenticating -> "Connecting…"
@@ -605,7 +628,7 @@ private fun TelemetryCard(
 
             activeRide?.let {
                 Text(
-                    "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)}",
+                    "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -631,7 +654,6 @@ private fun LiveDetailsSheet(
     val metrics = live.rideMetrics.collectAsStateWithLifecycle().value
     val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
     val locale = LocalConfiguration.current.locales[0]
-    val chartSamples = remember(samples) { samples.downsampleForChart() }
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -661,20 +683,20 @@ private fun LiveDetailsSheet(
         )
         if (level != LiveDetailLevel.Glance) {
             activeRide?.let {
-                Text("Current ride • ${UnitFormatter.distance(it.distanceKilometres, units, locale, 2)} • ${formatDuration(System.currentTimeMillis() - it.startedAtMillis)}")
+                Text("Current ride • ${UnitFormatter.distance(it.distanceKilometres, units, locale)} • ${formatDuration(it.lastSampleAtElapsedRealtime - it.startedAtElapsedRealtime)}")
             } ?: Text("Recording starts when you set off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             SignalStrength(diagnostics.rssi)
             Text(
                 "${metrics.hardAccelerationEvents} hard ${"acceleration".pluralised(metrics.hardAccelerationEvents)} " +
-                    "• ${metrics.hardBrakingEvents} hard ${"brake".pluralised(metrics.hardBrakingEvents)}",
+                    "• ${metrics.hardBrakingEvents} hard ${"brake".pluralised(metrics.hardBrakingEvents)} in recent telemetry",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (level == LiveDetailLevel.Charts) {
             Text("Statistics", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-            val speedData = remember(chartSamples, units) { chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) } }
-            val rpmData = remember(chartSamples) { chartSamples.map { it.rpm.toDouble() } }
-            val throttleData = remember(chartSamples) { chartSamples.map { it.throttlePercent.toDouble() } }
+            val speedData = remember(samples, units) { telemetryChartData(samples, 120) { UnitFormatter.chartSpeed(it.speedKph, units) } }
+            val rpmData = remember(samples) { telemetryChartData(samples, 120) { it.rpm.toDouble() } }
+            val throttleData = remember(samples) { telemetryChartData(samples, 120) { it.throttlePercent.toDouble() } }
             LiveChart("Speed", speedData, UnitFormatter.speedUnit(units))
             LiveChart("RPM", rpmData, "rpm")
             LiveChart("Throttle", throttleData, "%")
@@ -702,27 +724,33 @@ private fun SignalStrength(rssi: Int?) {
 }
 
 @Composable
-private fun LiveChart(title: String, values: List<Double?>, unit: String) {
+private fun LiveChart(title: String, series: TelemetryChartData, unit: String) {
+    val values = series.values
     val color = MaterialTheme.colorScheme.primary
+    val locale = LocalConfiguration.current.locales[0]
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
-                values.lastOrNull { it != null }?.let { "Latest %.1f %s".format(it, unit) } ?: "No data yet",
+                values.lastOrNull { it != null }?.let { "Latest %.0f %s".format(locale, it, unit) } ?: "No data yet",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LineChart(
                 values = values,
+                timestampsMillis = series.timestampsMillis,
                 height = 100.dp,
                 topPadding = 8.dp,
                 color = color,
                 contentDescription = "$title over the last few minutes",
-                scalePolicy = LineChartScalePolicy.AutoRange,
-                clampNegativeValues = false,
-                smooth = true,
                 strokeWidth = 3f,
                 fillAlpha = 0.3f,
             )
+            if (series.timestampsMillis.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(UnitFormatter.formatTime(series.timestampsMillis.first()), style = MaterialTheme.typography.labelSmall)
+                    Text(UnitFormatter.formatTime(series.timestampsMillis.last()), style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }
@@ -739,10 +767,3 @@ private fun String.pluralised(count: Int): String = if (count == 1) this else th
 
 /** Where the RS 457 tachometer turns red; the gauge fill and its warning colour key off this. */
 private const val RedlineRpm = 10_500
-
-/** Limits a live chart to a drawable amount of data without losing its beginning or latest sample. */
-private fun List<RideSample>.downsampleForChart(maxPoints: Int = 120): List<RideSample> {
-    if (size <= maxPoints) return this
-    val lastIndex = lastIndex
-    return List(maxPoints) { index -> this[index * lastIndex / (maxPoints - 1)] }
-}

@@ -19,18 +19,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** How a chart's vertical axis is scaled. */
-internal enum class LineChartScalePolicy {
-    /**
-     * Baseline at zero. Right for magnitudes like speed or RPM, where the distance from
-     * zero is the point and an auto-ranged axis would exaggerate small variation.
-     */
-    ZeroBased,
-
-    /** Fits the data's own range. Right for values that vary within a narrow band. */
-    AutoRange,
-}
-
 /** A point in normalised chart space: both axes in 0..1, independent of pixel size. */
 internal data class LineChartPoint(
     val x: Float,
@@ -45,40 +33,27 @@ internal data class LineChartPoint(
  * reading that was never recorded.
  *
  * The geometry is pure and separated from drawing so it can be unit-tested, and so it is
- * recomputed only when the data changes rather than on every layout pass. Degenerate inputs
- * are handled explicitly: a single point is centred, since it has no range to scale within.
+ * recomputed only when the data changes rather than on every layout pass. A single sample
+ * is horizontally centred; its height still follows the zero-based scale.
  */
 internal fun lineChartSegments(
     values: List<Double?>,
     width: Float,
     height: Float,
-    scalePolicy: LineChartScalePolicy,
-    clampNegativeValues: Boolean,
+    timestampsMillis: List<Long>? = null,
 ): List<List<LineChartPoint>> {
+    require(timestampsMillis == null || timestampsMillis.size == values.size)
     val validValues = values.mapNotNull { it?.takeIf(Double::isFinite) }
     if (validValues.isEmpty()) return emptyList()
 
-    val valueToY: (Double) -> Float = when (scalePolicy) {
-        LineChartScalePolicy.ZeroBased -> {
-            val maximum = validValues.maxOrNull()?.takeIf { it > 0.0 }
-                ?: if (validValues.size == 1) 1.0 else return emptyList()
-            val transform: (Double) -> Float = { value ->
-                val plottedValue = if (clampNegativeValues) value.coerceAtLeast(0.0) else value
-                height - (plottedValue / maximum * height).toFloat()
-            }
-            transform
-        }
-        LineChartScalePolicy.AutoRange -> {
-            val minimum = validValues.minOrNull() ?: return emptyList()
-            val maximum = validValues.maxOrNull() ?: return emptyList()
-            val range = (maximum - minimum).takeIf { it > 0.0 } ?: 1.0
-            val transform: (Double) -> Float = { value ->
-                height - ((value - minimum) / range * height).toFloat()
-            }
-            transform
-        }
+    // Every consumer plots a nonnegative magnitude: speed, RPM or throttle.
+    val maximum = validValues.maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
+    val valueToY: (Double) -> Float = { value ->
+        height - (value.coerceAtLeast(0.0) / maximum * height).toFloat()
     }
     val dx = if (values.size == 1) 0f else width / values.lastIndex
+    val timeStart = timestampsMillis?.firstOrNull()
+    val timeSpan = if (timeStart != null) (requireNotNull(timestampsMillis).last() - timeStart).takeIf { it > 0 } else null
     val segments = mutableListOf<List<LineChartPoint>>()
     var segment = mutableListOf<LineChartPoint>()
     values.forEachIndexed { index, nullableValue ->
@@ -88,8 +63,10 @@ internal fun lineChartSegments(
             segment = mutableListOf()
         } else {
             segment += LineChartPoint(
-                x = if (values.size == 1) width / 2f else index * dx,
-                y = if (validValues.size == 1) height / 2f else valueToY(value),
+                x = if (timeSpan != null && timeStart != null) {
+                    ((requireNotNull(timestampsMillis)[index] - timeStart).toDouble() / timeSpan * width).toFloat().coerceIn(0f, width)
+                } else if (values.size == 1) width / 2f else index * dx,
+                y = valueToY(value),
             )
         }
     }
@@ -101,13 +78,11 @@ internal fun lineChartSegments(
 internal fun LineChart(
     values: List<Double?>,
     modifier: Modifier = Modifier,
+    timestampsMillis: List<Long>? = null,
     height: Dp = 100.dp,
     topPadding: Dp = 0.dp,
     color: Color = MaterialTheme.colorScheme.primary,
     contentDescription: String = "Line chart",
-    scalePolicy: LineChartScalePolicy = LineChartScalePolicy.AutoRange,
-    clampNegativeValues: Boolean = false,
-    smooth: Boolean = true,
     strokeWidth: Float = 3f,
     fillAlpha: Float? = 0.3f,
     drawBaseline: Boolean = false,
@@ -115,13 +90,12 @@ internal fun LineChart(
 ) {
     // Geometry is normalized once per data change and shared with the unit-tested geometry path.
     // drawWithCache then scales it and builds Paths only when data, style, or size changes.
-    val normalizedSegments = remember(values, scalePolicy, clampNegativeValues) {
+    val normalizedSegments = remember(values, timestampsMillis) {
         lineChartSegments(
             values = values,
             width = 1f,
             height = 1f,
-            scalePolicy = scalePolicy,
-            clampNegativeValues = clampNegativeValues,
+            timestampsMillis = timestampsMillis,
         )
     }
 
@@ -132,11 +106,17 @@ internal fun LineChart(
             .padding(top = topPadding)
             .semantics { this.contentDescription = contentDescription }
             .drawWithCache {
+                // Inset every extremum and endpoint so thick strokes and dots are never clipped.
+                val inset = (strokeWidth.coerceAtLeast(3f) + 1f).coerceAtMost(minOf(size.width, size.height) / 2f)
                 val renderedSegments = normalizedSegments.mapNotNull { points ->
-                    points.takeIf { it.isNotEmpty() }?.toRenderedSegment(
+                    points.takeIf { it.isNotEmpty() }?.map { point ->
+                        LineChartPoint(
+                            (inset + point.x * (size.width - 2 * inset)) / size.width.coerceAtLeast(1f),
+                            (inset + point.y * (size.height - 2 * inset)) / size.height.coerceAtLeast(1f),
+                        )
+                    }?.toRenderedSegment(
                         width = size.width,
                         height = size.height,
-                        smooth = smooth,
                         includeFill = fillAlpha != null,
                     )
                 }
@@ -155,10 +135,10 @@ internal fun LineChart(
                         segment.point?.let { point ->
                             drawCircle(color, radius = strokeWidth.coerceAtLeast(3f), center = point)
                         }
-                        segment.linePath?.let { path -> drawPath(path, color, style = Stroke(strokeWidth)) }
                         if (fillBrush != null) {
                             segment.fillPath?.let { path -> drawPath(path, fillBrush) }
                         }
+                        segment.linePath?.let { path -> drawPath(path, color, style = Stroke(strokeWidth)) }
                     }
                 }
             },
@@ -172,17 +152,10 @@ private data class RenderedLineChartSegment(
     val fillPath: Path? = null,
 )
 
-/**
- * Scales a normalised segment to pixels and builds its paths.
- *
- * Smoothing uses cubic curves with control points at the horizontal midpoint between
- * samples, which rounds the line without letting it overshoot past the values it connects —
- * important for telemetry, where an overshoot would imply a speed that was never reached.
- */
+/** Straight segments show only the changes measured between samples. */
 private fun List<LineChartPoint>.toRenderedSegment(
     width: Float,
     height: Float,
-    smooth: Boolean,
     includeFill: Boolean,
 ): RenderedLineChartSegment {
     val first = first().scaled(width, height)
@@ -192,12 +165,7 @@ private fun List<LineChartPoint>.toRenderedSegment(
     val linePath = Path().apply { moveTo(first.x, first.y) }
     for (index in 1..lastIndex) {
         val current = this[index].scaled(width, height)
-        if (smooth) {
-            val controlX = previous.x + (current.x - previous.x) / 2f
-            linePath.cubicTo(controlX, previous.y, controlX, current.y, current.x, current.y)
-        } else {
-            linePath.lineTo(current.x, current.y)
-        }
+        linePath.lineTo(current.x, current.y)
         previous = current
     }
     val fillPath = if (includeFill) {

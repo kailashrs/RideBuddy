@@ -20,10 +20,14 @@ import kotlin.math.roundToInt
  */
 object UnitFormatter {
     fun distance(kilometres: Double, units: DistanceUnits, locale: Locale, decimals: Int = 1): String =
-        "%.${decimals}f %s".format(locale, distanceValue(kilometres, units), distanceUnit(units))
+        kilometres.takeIf { it.isFinite() && it >= 0.0 }?.let {
+            "%.${decimals.coerceIn(0, 2)}f %s".format(locale, distanceValue(it, units), distanceUnit(units))
+        } ?: "— ${distanceUnit(units)}"
 
     fun speed(kph: Double, units: DistanceUnits, locale: Locale, decimals: Int = 0): String =
-        "%.${decimals}f %s".format(locale, chartSpeed(kph, units), speedUnit(units))
+        kph.takeIf { it.isFinite() && it >= 0.0 }?.let {
+            "%.${decimals.coerceIn(0, 2)}f %s".format(locale, chartSpeed(it, units), speedUnit(units))
+        } ?: "— ${speedUnit(units)}"
 
     /** The numeric distance in the rider's units, for charts that format their own labels. */
     fun distanceValue(kilometres: Double, units: DistanceUnits): Double =

@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,12 +38,17 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -58,11 +64,12 @@ import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideEvent
 import com.spaceboy.ridebuddy.data.RideEventType
 import com.spaceboy.ridebuddy.data.RideEventDetector
+import com.spaceboy.ridebuddy.data.TelemetryChartData
+import com.spaceboy.ridebuddy.data.telemetryChartData
 import com.spaceboy.ridebuddy.data.RideSample
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.ui.components.LineChart
-import com.spaceboy.ridebuddy.ui.components.LineChartScalePolicy
 import com.spaceboy.ridebuddy.ui.screens.formatDuration
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.time.Instant
@@ -303,9 +310,9 @@ private data class RideDetailUiData(
     val hasSamples: Boolean,
     val hasLocations: Boolean,
     val routePoints: List<Pair<Double, Double>>,
-    val speedValues: List<Double>,
-    val rpmValues: List<Double>,
-    val throttleValues: List<Double>,
+    val speedValues: TelemetryChartData,
+    val rpmValues: TelemetryChartData,
+    val throttleValues: TelemetryChartData,
     val events: List<RideEvent>,
 )
 
@@ -322,20 +329,19 @@ private fun buildRideDetailUiData(
     samples: List<RideSample>,
     units: DistanceUnits,
 ): RideDetailUiData {
-    val chartSamples = samples.downsampled(MaxChartPoints)
     val routePoints = samples.mapNotNull { sample ->
         sample.latitude?.let { latitude ->
-            sample.longitude?.let { longitude -> latitude to longitude }
+            sample.longitude?.takeIf { latitude.isFinite() && latitude in -90.0..90.0 && it.isFinite() && it in -180.0..180.0 }?.let { longitude -> latitude to longitude }
         }
     }
     return RideDetailUiData(
         ride = ride,
         hasSamples = samples.isNotEmpty(),
         hasLocations = routePoints.isNotEmpty(),
-        routePoints = routePoints.downsampled(MaxRoutePoints),
-        speedValues = chartSamples.map { UnitFormatter.chartSpeed(it.speedKph, units) },
-        rpmValues = chartSamples.map { it.rpm.toDouble() },
-        throttleValues = chartSamples.map { it.throttlePercent.toDouble() },
+        routePoints = routePoints.ifEmpty { ride.routePreview.filter { it.isValid }.map { it.latitude to it.longitude } }.downsampled(MaxRoutePoints),
+        speedValues = telemetryChartData(samples, MaxChartPoints) { UnitFormatter.chartSpeed(it.speedKph, units) },
+        rpmValues = telemetryChartData(samples, MaxChartPoints) { it.rpm.toDouble() },
+        throttleValues = telemetryChartData(samples, MaxChartPoints) { it.throttlePercent.toDouble() },
         events = RideEventDetector.detect(samples).take(MaxVisibleEvents),
     )
 }
@@ -424,6 +430,10 @@ private fun RideDetailContent(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride summary", style = MaterialTheme.typography.titleMedium)
                     Text("Estimated fuel ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}", style = MaterialTheme.typography.bodyMedium)
+                    if (ride.estimatedFuelLitres == null) Text("Fuel estimate unavailable: mileage was not reported throughout the ride.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (ride.telemetryDurationMillis != null && ride.durationMillis - ride.telemetryDurationMillis > 2_500L) {
+                        Text("Telemetry gaps are excluded from distance and averages.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text("Peak ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${ride.maximumRpm} rpm", style = MaterialTheme.typography.bodyMedium)
                     ride.zeroToSixtyMillis?.let { Text("0–60 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
                     ride.zeroToHundredMillis?.let { Text("0–100 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
@@ -447,7 +457,7 @@ private fun RideDetailContent(
                     if (data.events.isEmpty()) Text("No hard acceleration or braking events detected", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     data.events.forEach { event ->
                         val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
-                        Text("$label • ${UnitFormatter.formatTime(event.timestampMillis)} • %+.1f m/s²".format(event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
+                        Text("%s • %s • %+.1f m/s²".format(locale, label, UnitFormatter.formatTime(event.timestampMillis), event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -473,102 +483,105 @@ private fun RideDetailContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RouteCard(points: List<Pair<Double, Double>>) {
-    if (points.size < 2) return
-
-    val routeColor = MaterialTheme.colorScheme.primary
-    val cameraPaddingPx = with(LocalDensity.current) { 64.dp.toPx().toInt() }
-
-    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
-    val bounds = remember(route) {
-        LatLngBounds.builder().apply { route.forEach(::include) }.build()
-    }
-
-    // Compose key() keeps camera state stable when the LazyColumn recycles this
-    // item, and seeds the camera at the bounds centre so the map doesn't flash at
-    // (0, 0) before onMapLoaded fires. Using key() instead of the deprecated
-    // rememberCameraPositionState(key = …) parameter silences the deprecation.
-    val cameraPositionState = androidx.compose.runtime.key(bounds) {
-        rememberCameraPositionState {
-            position = CameraPosition.fromLatLngZoom(bounds.center, 12f)
+    var exploring by rememberSaveable { mutableStateOf(false) }
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Recorded route", style = MaterialTheme.typography.titleMedium)
+            if (!exploring) RecordedRouteMap(points, Modifier.fillMaxWidth().height(240.dp), interactive = false)
+            TextButton(onClick = { exploring = true }, modifier = Modifier.fillMaxWidth()) { Text("Explore route") }
         }
     }
-    val scope = rememberCoroutineScope()
-
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp)) {
-            Text("Recorded route", style = MaterialTheme.typography.titleMedium)
-            GoogleMap(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(240.dp)
-                    .padding(top = 12.dp)
-                    .semantics { contentDescription = "Map of the recorded ride" },
-                cameraPositionState = cameraPositionState,
-                // The Maps SDK shipped via the Navigation SDK is the compile-time
-                // stub; Lite mode throws UnsupportedOperationException there. The
-                // surrounding uiSettings disables every gesture anyway, so the
-                // default full GoogleMap renders statically inside LazyColumn.
-                properties = MapProperties(isMyLocationEnabled = false),
-                uiSettings = MapUiSettings(
-                    zoomControlsEnabled = false,
-                    mapToolbarEnabled = false,
-                    compassEnabled = false,
-                    myLocationButtonEnabled = false,
-                    scrollGesturesEnabled = false,
-                    zoomGesturesEnabled = false,
-                    rotationGesturesEnabled = false,
-                    tiltGesturesEnabled = false,
-                ),
-                onMapLoaded = {
-                    // onMapLoaded only fires once the MapView is measured and the
-                    // Maps SDK is ready, so newLatLngBounds is guaranteed safe.
-                    // Fall back to newLatLngZoom when bounds collapse to a point
-                    // (zero-area bounds can throw IllegalArgumentException).
-                    scope.launch {
-                        val update = if (bounds.southwest == bounds.northeast) {
-                            CameraUpdateFactory.newLatLngZoom(bounds.center, 15f)
-                        } else {
-                            CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx)
-                        }
-                        cameraPositionState.move(update)
-                    }
+    if (exploring) {
+        Dialog(onDismissRequest = { exploring = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Recorded route") },
+                        navigationIcon = {
+                            IconButton(onClick = { exploring = false }) {
+                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back to ride details")
+                            }
+                        },
+                    )
                 },
-            ) {
-                Polyline(
-                    points = route,
-                    color = routeColor,
-                    width = 7f,
-                )
-                // rememberMarkerState with key is deprecated in Maps Compose 7.0.0 but still required
-                // for proper state management in LazyColumn (rememberUpdatedMarkerState doesn't exist in 7.0.0)
-                @Suppress("DEPRECATION")
-                Marker(
-                    state = rememberMarkerState(key = "start_${route.first()}", position = route.first()),
-                    title = "Start",
-                )
-                @Suppress("DEPRECATION")
-                Marker(
-                    state = rememberMarkerState(key = "end_${route.last()}", position = route.last()),
-                    title = "Parking location",
-                )
+            ) { padding ->
+                RecordedRouteMap(points, Modifier.fillMaxSize().padding(padding), interactive = true)
             }
         }
     }
 }
 
+/** The full-screen map owns gestures, so panning never competes with the details list. */
 @Composable
-private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
+private fun RecordedRouteMap(points: List<Pair<Double, Double>>, modifier: Modifier, interactive: Boolean) {
+    val routeColor = MaterialTheme.colorScheme.primary
+    val cameraPaddingPx = with(LocalDensity.current) { 48.dp.toPx().toInt() }
+    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
+    val bounds = remember(route) { LatLngBounds.builder().apply { route.forEach(::include) }.build() }
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(bounds.center, 12f)
+    }
+    val scope = rememberCoroutineScope()
+    var loaded by remember { mutableStateOf(false) }
+    val fitRoute: () -> Unit = {
+        scope.launch {
+            cameraPositionState.move(
+                if (bounds.southwest == bounds.northeast) CameraUpdateFactory.newLatLngZoom(bounds.center, 15f)
+                else CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx),
+            )
+        }
+    }
+    Box(modifier) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize().semantics { contentDescription = "Recorded ride map with start and parking markers" },
+            cameraPositionState = cameraPositionState,
+            properties = MapProperties(isMyLocationEnabled = false),
+            uiSettings = MapUiSettings(
+                zoomControlsEnabled = interactive,
+                mapToolbarEnabled = interactive,
+                compassEnabled = interactive,
+                myLocationButtonEnabled = false,
+                scrollGesturesEnabled = interactive,
+                zoomGesturesEnabled = interactive,
+                rotationGesturesEnabled = interactive,
+                tiltGesturesEnabled = false,
+            ),
+            onMapLoaded = { loaded = true; fitRoute() },
+        ) {
+            Polyline(points = route, color = routeColor, width = 7f)
+            @Suppress("DEPRECATION")
+            Marker(state = rememberMarkerState(position = route.first()), title = "Start")
+            @Suppress("DEPRECATION")
+            Marker(state = rememberMarkerState(position = route.last()), title = "Parking location")
+        }
+        if (interactive) {
+            Button(
+                onClick = fitRoute,
+                enabled = loaded,
+                modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
+            ) { Text("Show whole route") }
+        }
+    }
+}
+
+@Composable
+private fun TelemetryChart(title: String, unit: String, series: TelemetryChartData) {
+    val values = series.values
+    val locale = LocalConfiguration.current.locales[0]
     val color = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp)) {
             val maximum = values.filterNotNull().maxOrNull()
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(maximum?.let { "Peak %.1f %s".format(it, unit) } ?: "No data", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(maximum?.let { "Peak %.0f %s".format(locale, it, unit) } ?: "No data", color = MaterialTheme.colorScheme.onSurfaceVariant)
             LineChart(
                 values = values,
+                timestampsMillis = series.timestampsMillis,
                 height = 140.dp,
                 topPadding = 12.dp,
                 color = color,
@@ -576,17 +589,20 @@ private fun TelemetryChart(title: String, unit: String, values: List<Double?>) {
                 // the throttle chart's "%" produced a format string ending in a bare percent,
                 // which String.format rejects — crashing on any ride that had throttle data.
                 contentDescription = maximum?.let {
-                    "%s over the duration of the ride; peak %.1f %s".format(title, it, unit)
+                    "%s over the duration of the ride; peak %.0f %s".format(locale, title, it, unit)
                 }
                     ?: "$title data unavailable",
-                scalePolicy = LineChartScalePolicy.ZeroBased,
-                clampNegativeValues = true,
-                smooth = false,
                 strokeWidth = 5f,
                 fillAlpha = null,
                 drawBaseline = true,
                 baselineColor = grid,
             )
+            if (series.timestampsMillis.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(UnitFormatter.formatTime(series.timestampsMillis.first()), style = MaterialTheme.typography.labelSmall)
+                    Text(UnitFormatter.formatTime(series.timestampsMillis.last()), style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }
@@ -617,8 +633,9 @@ private fun Writer.writeGpx(ride: Ride, samples: List<RideSample>) {
     samples.forEach { sample ->
         val lat = sample.latitude ?: return@forEach
         val lon = sample.longitude ?: return@forEach
+        if (!lat.isFinite() || lat !in -90.0..90.0 || !lon.isFinite() || lon !in -180.0..180.0) return@forEach
         append(String.format(Locale.US, "<trkpt lat=\"%.7f\" lon=\"%.7f\">", lat, lon))
-        sample.altitudeMetres?.let { append(String.format(Locale.US, "<ele>%.2f</ele>", it)) }
+        sample.altitudeMetres?.takeIf(Double::isFinite)?.let { append(String.format(Locale.US, "<ele>%.2f</ele>", it)) }
         append("<time>").append(Instant.ofEpochMilli(sample.timestampMillis).toString()).append("</time></trkpt>")
     }
     append("</trkseg></trk></gpx>")
