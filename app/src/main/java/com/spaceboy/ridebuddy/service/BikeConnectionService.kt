@@ -19,11 +19,12 @@ import com.spaceboy.ridebuddy.core.companion.AssociatedBikeStore
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -126,12 +127,20 @@ class BikeConnectionService : Service() {
         receivedStartCommand = true
         when (intent?.action) {
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
+            ActionRetryRideSave -> {
+                // Flushes directly, because a ride ended by hand fails while the service is
+                // still connected and so never reaches the shutdown pass below.
+                container.rideRecorder.retrySave()
+                // An old notification action must never end a newly connected session.
+                handleConnectionState(container.bikeConnection.connectionState.value)
+                return START_NOT_STICKY
+            }
             ActionRestartConnect -> {
                 val trigger = intent.connectionTriggerExtra()
                 val automatic = trigger.isAutomatic()
                 if (automatic && !container.bikeConnectionDemand.canStartAutomaticConnection()) {
                     container.connectionEventJournal.record(
-                        "Automatic connection request ignored after manual disconnect",
+                        "Automatic connection request ignored while paused",
                     )
                     stopForegroundAndSelf()
                     return START_NOT_STICKY
@@ -287,27 +296,26 @@ class BikeConnectionService : Service() {
      * foreground notification first hands the OS a killable process holding an unwritten ride,
      * which is exactly the ride a rider most expects to find afterwards.
      *
-     * The wait is bounded so a stuck write cannot leave a foreground notification up for ever.
+     * A disk error keeps the ride in memory and the foreground notification offers Retry save.
+     * Stopping after an arbitrary timeout would make an unwritten ride killable again.
      */
     private fun stopForegroundAndSelf() {
         if (shuttingDown) return
         shuttingDown = true
         val stopId = latestStartId
+        notifications.publish("Saving ride")
         shutdownJob = scope.launch {
-            val saved = withTimeoutOrNull(PendingRideWriteTimeoutMillis) {
-                container.rideRecorder.finalizeAndAwaitSave()
-                true
+            val saved = stopConnectionServiceAfterSave(
+                stopId = stopId,
+                saveRide = container.rideRecorder::finalizeAndAwaitSave,
+                stopIfCurrent = ::stopSelfResult,
+                removeForeground = ::removeForegroundNotification,
+            )
+            if (!saved) {
+                shuttingDown = false
+                container.connectionEventJournal.record("Ride save failed; retained for Retry save")
+                notifications.publish("Ride not saved. Check free storage, then retry.", retrySave = true)
             }
-            if (saved == null) {
-                container.connectionEventJournal.record(
-                    "Gave up waiting for the ride to be stored after " +
-                        "${PendingRideWriteTimeoutMillis / 1_000}s; stopping anyway",
-                )
-            }
-            removeForegroundNotification()
-            // stopSelfResult, not stopSelf: a connection requested while this was waiting has
-            // already claimed a newer start id, and must not be torn down by this one.
-            stopSelfResult(stopId)
         }
     }
 
@@ -352,14 +360,9 @@ class BikeConnectionService : Service() {
         } ?: ConnectionAttemptTrigger.UserRequest
 
     companion object {
-        /**
-         * How long the service stays up waiting for a finished ride to be written. Generous
-         * against a slow disk, short enough that a wedged write cannot strand the notification.
-         */
-        private const val PendingRideWriteTimeoutMillis = 5_000L
-
         internal const val NotificationId = 457
         internal const val ActionDisconnect = "com.spaceboy.ridebuddy.action.DISCONNECT_BIKE"
+        internal const val ActionRetryRideSave = "com.spaceboy.ridebuddy.action.RETRY_RIDE_SAVE"
         private const val ActionEnableLocation = "enable_location"
         private const val ActionRestartConnect = "restart_connect"
         private const val ExtraAddressBytes = "address_bytes"
@@ -379,12 +382,30 @@ class BikeConnectionService : Service() {
             val appContainer = appContext.appContainer
             appContainer.bikeConnectionDemand.suppressAutomaticConnections()
             appContainer.connectionEventJournal.record("Manual disconnect requested")
+            appContainer.navigationStopController.stop()
             appContainer.bikeConnection.disconnect()
             // Deliberately no stopService() and no notification cancel here. The Disconnected
             // state reaches the service's own collector, which stops through the path that first
             // waits for a ride finished by that same disconnect to reach the disk. Tearing the
             // service down from outside would skip exactly that wait — which is how a rider ends
             // a ride, so it is the last path that should be missing it.
+        }
+
+        /**
+         * Ends the ride in progress and saves it, leaving the link up.
+         *
+         * Deliberately not a disconnect. Guidance and cluster notifications are separate
+         * features, and suppressing automatic connection here would strand a rider who ended a
+         * ride at a stop with no reconnect until the motorcycle left BLE range and came back.
+         */
+        fun endRide(context: Context) {
+            context.applicationContext.appContainer.rideRecorder.endRideNow()
+        }
+
+        /** The failed-save notification keeps the service alive, so this is a normal command. */
+        fun retryRideSave(context: Context) {
+            val intent = Intent(context, BikeConnectionService::class.java).setAction(ActionRetryRideSave)
+            startSafely(intent) { context.startService(intent) }
         }
 
         /**
@@ -404,7 +425,7 @@ class BikeConnectionService : Service() {
             val appContainer = context.applicationContext.appContainer
             if (trigger.isAutomatic() && !appContainer.bikeConnectionDemand.canStartAutomaticConnection()) {
                 appContainer.connectionEventJournal.record(
-                    "Automatic connection request ignored after manual disconnect",
+                    "Automatic connection request ignored while paused",
                 )
                 return true
             }
@@ -429,6 +450,24 @@ class BikeConnectionService : Service() {
             startSafely(intent) { context.startService(intent) }
         }
     }
+}
+
+/**
+ * Keeps foreground protection through the ride save and any newer start command.
+ * Android may already know about a newer start before delivering its onStartCommand: removing
+ * foreground status before stopSelfResult accepts this id would demote that new session.
+ */
+internal suspend fun stopConnectionServiceAfterSave(
+    stopId: Int,
+    saveRide: suspend () -> Boolean,
+    stopIfCurrent: (Int) -> Boolean,
+    removeForeground: () -> Unit,
+): Boolean {
+    val saved = saveRide()
+    currentCoroutineContext().ensureActive()
+    if (!saved) return false
+    if (stopIfCurrent(stopId)) removeForeground()
+    return true
 }
 
 /**

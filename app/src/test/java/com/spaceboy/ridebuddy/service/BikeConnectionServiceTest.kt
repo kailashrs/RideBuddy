@@ -2,12 +2,95 @@ package com.spaceboy.ridebuddy.service
 
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BikeConnectionServiceTest {
+    @Test
+    fun `foreground stays until ride save completes and Android accepts the stop`() = runBlocking {
+        val saved = CompletableDeferred<Unit>()
+        val actions = mutableListOf<String>()
+        val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
+            stopConnectionServiceAfterSave(
+                stopId = 7,
+                saveRide = { saved.await(); actions += "saved"; true },
+                stopIfCurrent = { id -> actions += "stop:$id"; true },
+                removeForeground = { actions += "foreground removed" },
+            )
+        }
+        assertTrue(actions.isEmpty())
+
+        saved.complete(Unit)
+        shutdown.join()
+
+        assertEquals(listOf("saved", "stop:7", "foreground removed"), actions)
+    }
+
+    @Test
+    fun `new start known to Android keeps foreground even before onStartCommand can cancel old shutdown`() = runBlocking {
+        val saved = CompletableDeferred<Unit>()
+        var newestStartId = 7
+        var foregroundRemoved = false
+        var attemptedStopId: Int? = null
+        val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
+            stopConnectionServiceAfterSave(
+                stopId = 7,
+                saveRide = { saved.await(); true },
+                stopIfCurrent = { id -> attemptedStopId = id; id == newestStartId },
+                removeForeground = { foregroundRemoved = true },
+            )
+        }
+        newestStartId = 8
+        saved.complete(Unit)
+        shutdown.join()
+
+        assertEquals(7, attemptedStopId)
+        assertFalse(foregroundRemoved)
+    }
+
+    @Test
+    fun `cancelled shutdown cannot stop the newer session or remove its foreground`() = runBlocking {
+        val saved = CompletableDeferred<Unit>()
+        var stopRequested = false
+        var foregroundRemoved = false
+        val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
+            stopConnectionServiceAfterSave(
+                stopId = 7,
+                saveRide = { saved.await(); true },
+                stopIfCurrent = { stopRequested = true; true },
+                removeForeground = { foregroundRemoved = true },
+            )
+        }
+        shutdown.cancelAndJoin()
+        saved.complete(Unit)
+
+        assertFalse(stopRequested)
+        assertFalse(foregroundRemoved)
+    }
+
+    @Test
+    fun `save failure retains foreground protection and never asks Android to stop`() = runBlocking {
+        var stopRequested = false
+        var foregroundRemoved = false
+        val saved = stopConnectionServiceAfterSave(
+            stopId = 7,
+            saveRide = { false },
+            stopIfCurrent = { stopRequested = true; true },
+            removeForeground = { foregroundRemoved = true },
+        )
+
+        assertFalse(saved)
+        assertFalse(stopRequested)
+        assertFalse(foregroundRemoved)
+    }
+
     @Test
     fun `location runs only for a ride or navigation under a location foreground service`() {
         assertFalse(shouldTrackRideLocation(false, hasActiveRide = false, hasActiveNavigation = false))

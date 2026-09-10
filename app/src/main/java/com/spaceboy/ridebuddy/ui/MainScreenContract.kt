@@ -35,6 +35,7 @@ data class LiveTelemetryStreams(
     val telemetry: StateFlow<TelemetryFrame?>,
     val diagnostics: StateFlow<BleDiagnostics>,
     val activeRide: StateFlow<ActiveRide?>,
+    val saveFailed: StateFlow<Boolean>,
     val rideSamples: StateFlow<List<RideSample>>,
     val rideMetrics: StateFlow<LiveRideMetrics>,
 )
@@ -83,6 +84,8 @@ data class MainScreenActions(
     val onRemoveNavigationApiKey: () -> Unit,
     val onTestNavigationApiKey: () -> Unit,
     val onDisconnectBike: () -> Unit,
+    val onEndRide: () -> Unit,
+    val onRetryRideSave: () -> Unit,
     val onStartNavigation: (String) -> Unit,
     val onOpenActiveNavigation: () -> Unit,
     val onStopNavigation: () -> Unit,

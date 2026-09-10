@@ -91,6 +91,7 @@ class MainViewModel internal constructor(
     val diagnostics = bikeConnection.diagnostics
     val bleCapture = bleCaptureRecorder.state
     val activeRide = rideRecorder.activeRide
+    val rideSaveFailed = rideRecorder.saveFailed
     val liveRideSamples = rideRecorder.liveSamples
     // Derived flows are computed off the main thread and shared with a stop timeout, so a
     // configuration change does not discard and immediately recompute them.

@@ -277,6 +277,8 @@ internal fun MainScreenContent(
                 units = settings.distanceUnits,
                 onConnectBike = onAssociateBike,
                 onDisconnectBike = onDisconnectBike,
+                onEndRide = onEndRide,
+                onRetryRideSave = onRetryRideSave,
                 onStartNavigation = onStartNavigation,
                 onOpenActiveNavigation = onOpenActiveNavigation,
                 onStopNavigation = onStopNavigation,

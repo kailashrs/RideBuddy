@@ -13,8 +13,9 @@ import android.content.Intent
  */
 class BikeConnectionActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == BikeConnectionService.ActionDisconnect) {
-            BikeConnectionService.disconnect(context)
+        when (intent.action) {
+            BikeConnectionService.ActionDisconnect -> BikeConnectionService.disconnect(context)
+            BikeConnectionService.ActionRetryRideSave -> BikeConnectionService.retryRideSave(context)
         }
     }
 }
