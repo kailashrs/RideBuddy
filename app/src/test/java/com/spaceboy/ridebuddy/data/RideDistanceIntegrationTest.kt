@@ -2,7 +2,9 @@ package com.spaceboy.ridebuddy.data
 
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RideDistanceIntegrationTest {
@@ -37,15 +39,29 @@ class RideDistanceIntegrationTest {
         assertEquals(0.6, requireNotNull(fuelDeltaLitres(10.0, 10.0, 20.0, 20.0, 80.0)), 0.000_001)
     }
 
-    @Test fun `missing moving mileage makes the entire fuel estimate unavailable`() {
-        val ride = ActiveRide.started(0L, 0L, frame())
+    /**
+     * The bike encodes 0 km/L on every closed-throttle overrun, which parses to "no reading".
+     * Voiding the ride on that threw the estimate away on every real ride, so an unmeasured
+     * interval now contributes nothing instead.
+     */
+    @Test fun `a missing mileage interval contributes nothing but keeps the fuel estimate`() {
+        val withGap = ActiveRide.started(0L, 0L, frame())
             .add(frame(), 1_000L)
             .add(frame(mileage = null), 2_000L)
             .add(frame(), 3_000L)
             .add(frame(), 4_000L)
             .toRide()
-        assertNull(ride.estimatedFuelLitres)
-        assertNull(ride.averageMileageKilometresPerLitre)
+        val unbroken = ActiveRide.started(0L, 0L, frame())
+            .add(frame(), 1_000L)
+            .add(frame(), 2_000L)
+            .add(frame(), 3_000L)
+            .add(frame(), 4_000L)
+            .toRide()
+        val gapFuel = requireNotNull(withGap.estimatedFuelLitres)
+        val fullFuel = requireNotNull(unbroken.estimatedFuelLitres)
+        assertNotNull(withGap.averageMileageKilometresPerLitre)
+        // Two of the four intervals had no reading on one endpoint, so the total is lower.
+        assertTrue(gapFuel > 0.0 && gapFuel < fullFuel)
     }
 
     @Test fun `averages follow elapsed time instead of the number of notifications`() {

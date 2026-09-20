@@ -430,7 +430,6 @@ private fun RideDetailContent(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride summary", style = MaterialTheme.typography.titleMedium)
                     Text("Estimated fuel ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}", style = MaterialTheme.typography.bodyMedium)
-                    if (ride.estimatedFuelLitres == null) Text("Fuel estimate unavailable: mileage was not reported throughout the ride.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (ride.telemetryDurationMillis != null && ride.durationMillis - ride.telemetryDurationMillis > 2_500L) {
                         Text("Telemetry gaps are excluded from distance and averages.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

@@ -550,16 +550,14 @@ data class ActiveRide(
     val throttleMillis: Double,
     val lastMileageKilometresPerLitre: Double?,
     val estimatedFuelLitres: Double?,
-    val fuelCoverageComplete: Boolean,
 ) {
-    /** Integrates only measured intervals; a missing fuel interval makes the total unavailable. */
+    /** Integrates only measured intervals. */
     fun add(frame: TelemetryFrame, receivedAtElapsedRealtime: Long): ActiveRide {
         val elapsed = (receivedAtElapsedRealtime - lastSampleAtElapsedRealtime)
             .takeIf { it in 1..MaxDistanceIntegrationGapMillis } ?: 0L
         val distanceDelta = distanceDeltaKilometres(lastSpeedKph, frame.speedKilometresPerHour, elapsed)
         val currentMileage = frame.instantaneousMileageKilometresPerLitre
         val fuelDelta = fuelDeltaLitres(distanceDelta, lastMileageKilometresPerLitre, currentMileage, lastSpeedKph, frame.speedKilometresPerHour)
-        val completeFuel = fuelCoverageComplete && (distanceDelta <= 0.0 || fuelDelta != null)
         return copy(
             lastSampleAtElapsedRealtime = receivedAtElapsedRealtime,
             lastSpeedKph = frame.speedKilometresPerHour,
@@ -572,9 +570,12 @@ data class ActiveRide(
             maximumRpm = maxOf(maximumRpm, frame.engineRpm),
             throttleMillis = throttleMillis + (lastThrottlePercent / 2.0 + frame.throttlePercent / 2.0) * elapsed,
             lastMileageKilometresPerLitre = currentMileage,
-            estimatedFuelLitres = if (completeFuel) fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
-                ?: estimatedFuelLitres else null,
-            fuelCoverageComplete = completeFuel,
+            // An interval without a mileage reading contributes nothing rather than voiding
+            // the total. The bike encodes 0 km/L on every closed-throttle overrun, which parses
+            // to "no reading", so demanding unbroken coverage threw the estimate away on every
+            // real ride -- and those are the intervals burning least fuel anyway.
+            estimatedFuelLitres = fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
+                ?: estimatedFuelLitres,
         )
     }
 
@@ -612,7 +613,6 @@ data class ActiveRide(
             throttleMillis = 0.0,
             lastMileageKilometresPerLitre = frame.instantaneousMileageKilometresPerLitre,
             estimatedFuelLitres = null,
-            fuelCoverageComplete = true,
         )
     }
 }

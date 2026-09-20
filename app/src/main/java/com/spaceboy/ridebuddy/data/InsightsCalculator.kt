@@ -88,7 +88,7 @@ object InsightsCalculator {
             rideCount = current.size,
             totalDistanceKilometres = current.sumOf(Ride::distanceKilometres),
             totalDurationMillis = totalDuration,
-            estimatedFuelLitres = fuelEstimates.sum().takeIf { fuelEstimates.size == current.size },
+            estimatedFuelLitres = fuelEstimates.sum().takeIf { fuelEstimates.isNotEmpty() },
             averageRideDistanceKilometres = current.map(Ride::distanceKilometres).average(),
             averageRideDurationMillis = totalDuration / current.size,
             averageSpeedKph = weightedSeconds?.let { seconds -> current.sumOf { it.averageSpeedKph * it.averagingDurationMillis / 1_000.0 } / seconds }

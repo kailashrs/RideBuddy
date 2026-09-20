@@ -108,7 +108,9 @@ class InsightsCalculatorTest {
 
         val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
 
-        assertNull(result.estimatedFuelLitres)
+        // The ride that did report fuel still counts; requiring every ride to report meant one
+        // gap hid the whole period's figure.
+        assertEquals(0.5, requireNotNull(result.estimatedFuelLitres), 0.0)
         assertEquals(20.0, requireNotNull(result.averageMileageKilometresPerLitre), 0.0)
     }
 
