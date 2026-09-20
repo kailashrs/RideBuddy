@@ -177,9 +177,6 @@ class NavigationActivity : ComponentActivity() {
                                         Spacer(Modifier.width(8.dp))
                                         Text(if (routeReadyState.value) "Go" else "Finding route…")
                                     }
-                                    if (routeReadyState.value && settings.tftNavigationOutputEnabled) {
-                                        Text("You can also press GO on the bike.", style = MaterialTheme.typography.bodySmall)
-                                    }
                                 }
                             }
                         }

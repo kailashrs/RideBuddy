@@ -344,12 +344,6 @@ class MainViewModel internal constructor(
         sharedDestinationStateStore.persist(mutableUiState.value)
     }
 
-    /** A destination for the rider to review and start themselves. */
-    fun acceptSharedDestination(value: String) {
-        val destination = value.normalizedDestinationInput() ?: return
-        updateSharedDestinationState { it.withManualSharedDestination(destination) }
-    }
-
     /**
      * A destination to start navigating without further input. Only reached when the rider
      * has opted into automatic starts. Each request gets a fresh id so a late result cannot

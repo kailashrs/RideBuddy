@@ -542,11 +542,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         navigationStartJob?.cancel()
-        if (viewModel.settings.value.autoStartSharedDestinations) {
-            viewModel.queueAutoStartSharedDestination(destination)
-        } else {
-            viewModel.acceptSharedDestination(destination)
-        }
+        // Always queued, never parked in the field behind a confirmation sheet: the route
+        // preview is now the prompt, so a second one before it would ask twice. The setting
+        // decides whether that preview is skipped too, at the launch below.
+        viewModel.queueAutoStartSharedDestination(destination)
     }
 
     private fun requiredNearbyDevicePermissions(): Array<String> =
@@ -602,7 +601,10 @@ class MainActivity : ComponentActivity() {
                     startActivity(
                         NavigationActivity.intent(
                             this, place.latitude, place.longitude, place.title,
-                            autoStartGuidance = autoStartRequestId != null,
+                            // A share only skips the preview when the rider opted into that;
+                            // otherwise it still stops on the preview for a Go.
+                            autoStartGuidance = autoStartRequestId != null &&
+                                viewModel.settings.value.autoStartSharedDestinations,
                         ),
                     )
                     navigationStartStopGuard.beginStart()

@@ -126,9 +126,6 @@ fun LiveScreen(
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
     var liveDetailLevel by rememberSaveable { mutableStateOf(LiveDetailLevel.Glance) }
-    var showSharedConfirmation by rememberSaveable(sharedDestination, sharedDestinationError) {
-        mutableStateOf(!sharedDestination.isNullOrBlank() && sharedDestinationError == null)
-    }
     // Applies a share that arrives while this screen is already composed; the initial value above
     // covers first composition and state restore. Blank is ignored rather than assigned, so
     // clearing the share leaves the field alone.
@@ -153,6 +150,7 @@ fun LiveScreen(
             connectionState = connectionState,
             units = units,
             onDetails = { showLiveDetails = true },
+            onEndRide = onEndRide,
         )
 
         val saveFailed = live.saveFailed.collectAsStateWithLifecycle().value
@@ -165,16 +163,6 @@ fun LiveScreen(
                 }
             }
         }
-        val activeRide = live.activeRide.collectAsStateWithLifecycle().value
-        if (activeRide != null) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Finish and save this ride now. The bike stays connected, and recording starts again on your next ride.", style = MaterialTheme.typography.bodyMedium)
-                    Button(onClick = onEndRide, modifier = Modifier.fillMaxWidth()) { Text("End ride") }
-                }
-            }
-        }
-
         Text(
             text = "Navigate",
             style = MaterialTheme.typography.titleMedium,
@@ -369,7 +357,7 @@ fun LiveScreen(
         Spacer(Modifier.height(8.dp))
     }
 
-    if (showLiveDetails && !showSharedConfirmation) {
+    if (showLiveDetails) {
         ModalBottomSheet(
             onDismissRequest = { showLiveDetails = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -382,29 +370,6 @@ fun LiveScreen(
             )
         }
     }
-    if (showSharedConfirmation && !sharedDestination.isNullOrBlank()) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                showSharedConfirmation = false
-                onSharedDestinationHandled()
-            },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Navigate to?", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-                Text(sharedDestination, maxLines = 3, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(
-                    onClick = {
-                        showSharedConfirmation = false
-                        onSharedDestinationHandled()
-                        onStartNavigation(sharedDestination)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Start navigation") }
-            }
-        }
-    }
-
     if (isNavigationStarting) {
         Dialog(onDismissRequest = onCancelNavigationStart) {
             Card {
@@ -440,11 +405,12 @@ private fun TelemetrySection(
     connectionState: BikeConnectionState,
     units: DistanceUnits,
     onDetails: () -> Unit,
+    onEndRide: () -> Unit,
 ) {
     if (connectionState !is BikeConnectionState.Connected) return
     val frame = live.telemetry.collectAsStateWithLifecycle().value ?: return
     val activeRide = live.activeRide.collectAsStateWithLifecycle().value
-    TelemetryCard(frame, activeRide, units, onDetails)
+    TelemetryCard(frame, activeRide, units, onDetails, onEndRide)
 }
 
 @Composable
@@ -560,6 +526,7 @@ private fun TelemetryCard(
     activeRide: ActiveRide?,
     units: DistanceUnits,
     onDetails: () -> Unit,
+    onEndRide: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val displayedSpeed = UnitFormatter.chartSpeed(frame.speedKilometresPerHour, units).roundToInt()
@@ -626,14 +593,23 @@ private fun TelemetryCard(
                 Metric("Mileage", UnitFormatter.mileage(frame.instantaneousMileageKilometresPerLitre, units, locale))
             }
 
-            activeRide?.let {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}",
+                    activeRide?.let { "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}" }.orEmpty(),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (activeRide != null) {
+                        TextButton(onClick = onEndRide) { Text("End ride") }
+                    }
+                    TextButton(onClick = onDetails) { Text("Live details") }
+                }
             }
-            TextButton(onClick = onDetails, modifier = Modifier.align(Alignment.End)) { Text("Live details") }
         }
     }
 }
