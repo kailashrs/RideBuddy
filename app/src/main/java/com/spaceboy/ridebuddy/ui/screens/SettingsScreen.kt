@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.ui.screens
 
 import android.content.pm.PackageManager
+import android.provider.Telephony
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -93,6 +94,7 @@ import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationApps
+import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
@@ -133,9 +135,6 @@ fun SettingsScreen(
     settings: AppSettings,
     onDistanceUnitsChanged: (DistanceUnits) -> Unit,
     onAutoStartSharedChanged: (Boolean) -> Unit,
-    onMessageAlertsChanged: (Boolean) -> Unit,
-    onSocialAlertsChanged: (Boolean) -> Unit,
-    onEmailAlertsChanged: (Boolean) -> Unit,
     settingsActions: MoreSettingsActions,
     onResetOnboarding: () -> Unit,
     onExportDiagnostics: () -> Unit,
@@ -164,7 +163,24 @@ fun SettingsScreen(
         installedAppsRefresh,
     ) {
         value = withContext(Dispatchers.IO) {
-            SupportedNotificationApps.filter { app ->
+            // The default SMS app is resolved rather than listed, and is installed by
+            // definition, so it is prepended instead of being filtered for presence.
+            val defaultSms = runCatching {
+                val packageName = Telephony.Sms.getDefaultSmsPackage(context)
+                defaultSmsNotificationApp(
+                    packageName,
+                    packageName?.let {
+                        context.packageManager.getApplicationLabel(
+                            context.packageManager.getApplicationInfo(
+                                it,
+                                PackageManager.ApplicationInfoFlags.of(0),
+                            ),
+                        ).toString()
+                    },
+                )
+            }.getOrNull()
+            listOfNotNull(defaultSms) + SupportedNotificationApps.filter { app ->
+                app.packageName != defaultSms?.packageName &&
                 try {
                     context.packageManager.getPackageInfo(
                         app.packageName,
@@ -211,7 +227,7 @@ fun SettingsScreen(
     if (showSupportedAppsDialog) {
         SupportedAppsDialog(
             installedSupportedApps = installedSupportedApps,
-            enabledPackages = settings.enabledNotificationPackages,
+            disabledPackages = settings.disabledNotificationPackages,
             onPackageChanged = settingsActions.onNotificationPackageChanged,
             onDismiss = { showSupportedAppsDialog = false },
         )
@@ -250,9 +266,6 @@ fun SettingsScreen(
                 onEnableCallControls = onEnableCallControls,
                 onDistanceUnitsChanged = onDistanceUnitsChanged,
                 onAutoStartSharedChanged = onAutoStartSharedChanged,
-                onMessageAlertsChanged = onMessageAlertsChanged,
-                onSocialAlertsChanged = onSocialAlertsChanged,
-                onEmailAlertsChanged = onEmailAlertsChanged,
                 onManageSupportedApps = { showSupportedAppsDialog = true },
             )
         }
@@ -371,9 +384,6 @@ private fun NavigationAndCallsSection(
     onEnableCallControls: () -> Unit,
     onDistanceUnitsChanged: (DistanceUnits) -> Unit,
     onAutoStartSharedChanged: (Boolean) -> Unit,
-    onMessageAlertsChanged: (Boolean) -> Unit,
-    onSocialAlertsChanged: (Boolean) -> Unit,
-    onEmailAlertsChanged: (Boolean) -> Unit,
     onManageSupportedApps: () -> Unit,
 ) {
     SettingsSection("Navigation & Calls") {
@@ -422,32 +432,8 @@ private fun NavigationAndCallsSection(
             onClick = onOpenNotificationAccess,
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Message alerts",
-            "Messages and WhatsApp icons on the TFT",
-            settings.messageAlerts,
-            icon = Icons.AutoMirrored.Outlined.Chat,
-            onCheckedChange = onMessageAlertsChanged
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Social alerts",
-            "Instagram, Facebook and X icons on the TFT",
-            settings.socialAlerts,
-            icon = Icons.Outlined.Public,
-            onCheckedChange = onSocialAlertsChanged
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Email alerts",
-            "Gmail and Outlook icons on the TFT",
-            settings.emailAlerts,
-            icon = Icons.Outlined.Mail,
-            onCheckedChange = onEmailAlertsChanged
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
         val enabledInstalledCount =
-            installedSupportedApps.count { it.packageName in settings.enabledNotificationPackages }
+            installedSupportedApps.count { it.packageName !in settings.disabledNotificationPackages }
         SettingsRow(
             icon = Icons.Outlined.Apps,
             title = "Supported apps",
@@ -931,7 +917,7 @@ private fun AboutDialog(
 @Composable
 private fun SupportedAppsDialog(
     installedSupportedApps: List<SupportedNotificationApp>,
-    enabledPackages: Set<String>,
+    disabledPackages: Set<String>,
     onPackageChanged: (String, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -973,7 +959,7 @@ private fun SupportedAppsDialog(
                         )
                     } else {
                         installedSupportedApps.forEach { app ->
-                            val enabled = app.packageName in enabledPackages
+                            val enabled = app.packageName !in disabledPackages
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()

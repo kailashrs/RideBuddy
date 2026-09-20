@@ -45,9 +45,6 @@ data class AppSettings(
     val avoidHighways: Boolean = false,
     val avoidFerries: Boolean = false,
     val autoStartSharedDestinations: Boolean = false,
-    val messageAlerts: Boolean = true,
-    val socialAlerts: Boolean = true,
-    val emailAlerts: Boolean = true,
     val callerDisplay: Boolean = false,
     val tftCallControls: Boolean = false,
     val tftNavigationOutputEnabled: Boolean = false,
@@ -69,7 +66,14 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val dynamicColor: Boolean = true,
     val highContrast: Boolean = false,
-    val enabledNotificationPackages: Set<String> = DefaultNotificationPackages,
+    /**
+     * Apps whose icon the rider has switched off.
+     *
+     * Stored as the exclusions rather than the inclusions so an app that is resolved at
+     * runtime — the default SMS app — is on by default like every listed one, instead of
+     * being invisible until something remembers to add it.
+     */
+    val disabledNotificationPackages: Set<String> = emptySet(),
 )
 
 /**
@@ -102,9 +106,6 @@ class AppSettingsRepository(context: Context) {
             putBoolean(KeyHighways, updated.avoidHighways)
             putBoolean(KeyFerries, updated.avoidFerries)
             putBoolean(KeyAutoStartV2, updated.autoStartSharedDestinations)
-            putBoolean(KeyMessages, updated.messageAlerts)
-            putBoolean(KeySocial, updated.socialAlerts)
-            putBoolean(KeyEmail, updated.emailAlerts)
             putBoolean(KeyCallerDisplay, updated.callerDisplay)
             putBoolean(KeyTftCallControls, updated.tftCallControls)
             putBoolean(KeyTftNavigationOutput, updated.tftNavigationOutputEnabled)
@@ -126,8 +127,9 @@ class AppSettingsRepository(context: Context) {
             putString(KeyTheme, updated.themeMode.name)
             putBoolean(KeyDynamicColor, updated.dynamicColor)
             putBoolean(KeyHighContrast, updated.highContrast)
-            putStringSet(KeyNotificationPackagesV2, updated.enabledNotificationPackages)
+            putStringSet(KeyNotificationPackagesDisabled, updated.disabledNotificationPackages)
             remove(KeyNotificationPackages)
+            remove(KeyNotificationPackagesV2)
         }
         mutableSettings.value = updated
     }
@@ -149,9 +151,6 @@ class AppSettingsRepository(context: Context) {
             // V2 is intentionally opt-in. The previous key defaulted to automatic launch, so it
             // cannot distinguish an explicit user choice from the legacy implicit default.
             autoStartSharedDestinations = preferences.getBoolean(KeyAutoStartV2, false),
-            messageAlerts = preferences.getBoolean(KeyMessages, true),
-            socialAlerts = preferences.getBoolean(KeySocial, true),
-            emailAlerts = preferences.getBoolean(KeyEmail, true),
             callerDisplay = preferences.getBoolean(KeyCallerDisplay, false),
             tftCallControls = preferences.getBoolean(KeyTftCallControls, false),
             tftNavigationOutputEnabled = preferences.getBoolean(KeyTftNavigationOutput, false),
@@ -173,11 +172,14 @@ class AppSettingsRepository(context: Context) {
             themeMode = preferences.enum(KeyTheme, ThemeMode.System),
             dynamicColor = preferences.getBoolean(KeyDynamicColor, true),
             highContrast = preferences.getBoolean(KeyHighContrast, false),
-            enabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesV2, null)?.toSet()
-                // Add newly supported Truecaller once, while preserving every existing app choice.
-                // V2 subsequently preserves an explicit Truecaller opt-out as well.
-                ?: preferences.getStringSet(KeyNotificationPackages, null)?.plus("com.truecaller")
-                ?: DefaultNotificationPackages,
+            disabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesDisabled, null)?.toSet()
+                // Carried over from the enabled-set key: anything a rider had turned off
+                // stays off, and anything not listed there was never theirs to exclude.
+                ?: preferences.getStringSet(KeyNotificationPackagesV2, null)
+                    ?.let { enabled -> DefaultNotificationPackages - enabled }
+                ?: preferences.getStringSet(KeyNotificationPackages, null)
+                    ?.let { enabled -> DefaultNotificationPackages - enabled }
+                ?: emptySet(),
         )
     }
 
@@ -189,9 +191,6 @@ class AppSettingsRepository(context: Context) {
         const val KeyHighways = "avoid_highways"
         const val KeyFerries = "avoid_ferries"
         const val KeyAutoStartV2 = "auto_start_shared_v2"
-        const val KeyMessages = "message_alerts"
-        const val KeySocial = "social_alerts"
-        const val KeyEmail = "email_alerts"
         const val KeyCallerDisplay = "caller_display"
         const val KeyTftCallControls = "tft_call_controls"
         const val KeyTftNavigationOutput = "tft_navigation_output"
@@ -215,6 +214,7 @@ class AppSettingsRepository(context: Context) {
         const val KeyHighContrast = "high_contrast"
         const val KeyNotificationPackages = "notification_packages"
         const val KeyNotificationPackagesV2 = "notification_packages_v2"
+        const val KeyNotificationPackagesDisabled = "notification_packages_disabled"
     }
 }
 

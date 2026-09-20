@@ -34,9 +34,12 @@
         tools:ignore="ScopedStorage"
         tools:node="remove" />
     <queries>
-        <package android:name="com.google.android.apps.messaging" />
-        <package android:name="com.samsung.android.messaging" />
-        <package android:name="com.truecaller" />
+        <!-- The default SMS app is resolved at runtime, so it is matched by capability
+             rather than named; the rest are the packages the cluster has icons for. -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
         <package android:name="com.whatsapp" />
         <package android:name="com.instagram.android" />
         <package android:name="com.instagram.lite" />
@@ -44,7 +47,6 @@
         <package android:name="com.facebook.lite" />
         <package android:name="com.twitter.android" />
         <package android:name="com.google.android.gm" />
-        <package android:name="com.microsoft.office.outlook" />
     </queries>
 
     <application

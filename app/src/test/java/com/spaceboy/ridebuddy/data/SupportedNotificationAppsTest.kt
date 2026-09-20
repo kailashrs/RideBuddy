@@ -5,13 +5,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SupportedNotificationAppsTest {
+    private val SmsCapablePackages = setOf(
+        "com.google.android.apps.messaging",
+        "com.samsung.android.messaging",
+        "com.truecaller",
+    )
+
     @Test
     fun `registry preserves the established TFT event mappings`() {
         assertEquals(
             listOf(
-                SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
-                SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
-                SupportedNotificationApp("com.truecaller", "Truecaller", 6, 7, NotificationAlertCategory.Messages, messagesOnly = true),
                 SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
                 SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
@@ -19,10 +22,36 @@ class SupportedNotificationAppsTest {
                 SupportedNotificationApp("com.facebook.lite", "Facebook Lite", 10, 11, NotificationAlertCategory.Social),
                 SupportedNotificationApp("com.twitter.android", "X", 32, 33, NotificationAlertCategory.Social),
                 SupportedNotificationApp("com.google.android.gm", "Gmail", 14, 15, NotificationAlertCategory.Email),
-                SupportedNotificationApp("com.microsoft.office.outlook", "Outlook", 14, 15, NotificationAlertCategory.Email),
             ),
             SupportedNotificationApps,
         )
+    }
+
+    /** No SMS app is named: whichever holds the role is resolved instead. */
+    @Test
+    fun `the registry names no SMS app`() {
+        assertTrue(
+            SupportedNotificationApps.none { it.packageName in SmsCapablePackages },
+        )
+    }
+
+    @Test
+    fun `the default SMS app becomes a messages entry on the shared icon`() {
+        val app = requireNotNull(defaultSmsNotificationApp("com.truecaller", "Truecaller"))
+        assertEquals("com.truecaller", app.packageName)
+        assertEquals("Truecaller", app.label)
+        assertEquals(NotificationAlertCategory.Messages, app.category)
+        assertEquals(7, app.shownEvent)
+        assertEquals(6, app.hiddenEvent)
+        // A role holder is routinely a dialler too, so its non-message cards stay off.
+        assertTrue(app.messagesOnly)
+    }
+
+    @Test
+    fun `no default SMS app means no entry, and a missing label still names something`() {
+        org.junit.Assert.assertNull(defaultSmsNotificationApp(null, null))
+        org.junit.Assert.assertNull(defaultSmsNotificationApp("  ", "x"))
+        assertTrue(requireNotNull(defaultSmsNotificationApp("com.example.sms", null)).label.isNotBlank())
     }
 
     @Test
@@ -62,13 +91,11 @@ class SupportedNotificationAppsTest {
 
     @Test
     fun `a messages-only app lights its icon for messages alone`() {
-        val truecaller = SupportedNotificationAppsByPackage.getValue("com.truecaller")
-        assertTrue(truecaller.messagesOnly)
-        assertTrue(truecaller.acceptsNotification(isMessage = true, isGroupSummary = false))
+        val sms = requireNotNull(defaultSmsNotificationApp("com.truecaller", "Truecaller"))
+        assertTrue(sms.acceptsNotification(isMessage = true, isGroupSummary = false))
         // Caller ID, missed-call and promotional cards all arrive as non-messages.
-        org.junit.Assert.assertFalse(truecaller.acceptsNotification(isMessage = false, isGroupSummary = false))
-        org.junit.Assert.assertFalse(truecaller.acceptsNotification(isMessage = true, isGroupSummary = true))
-        assertEquals(7, truecaller.shownEvent)
+        org.junit.Assert.assertFalse(sms.acceptsNotification(isMessage = false, isGroupSummary = false))
+        org.junit.Assert.assertFalse(sms.acceptsNotification(isMessage = true, isGroupSummary = true))
     }
 
     @Test

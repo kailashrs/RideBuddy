@@ -3,12 +3,14 @@ package com.spaceboy.ridebuddy.service
 import com.spaceboy.ridebuddy.appContainer
 
 import android.app.Notification
+import android.content.pm.PackageManager
+import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.spaceboy.ridebuddy.AppContainer
 import com.spaceboy.ridebuddy.data.acceptsNotification
+import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
-import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.NotificationAlertCategory
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationAppsByPackage
@@ -46,16 +48,15 @@ class BikeNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         val container = appContainer
+        refreshDefaultSmsApp()
         val regularNotifications = activeNotifications.orEmpty().toList()
         val settings = container.appSettings.settings.value
         val eligibleKeys = if (container.bikeConnection.connectionState.value is BikeConnectionState.Connected &&
             container.tftPriorityCoordinator.canPresentNotification()) {
             regularNotifications.mapNotNull { notification ->
-                val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return@mapNotNull null
+                val mapping = notificationApp(notification.packageName) ?: return@mapNotNull null
                 if (!notification.acceptsIcon(mapping)) return@mapNotNull null
-                if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) {
-                    return@mapNotNull null
-                }
+                if (notification.packageName in settings.disabledNotificationPackages) return@mapNotNull null
                 mapping.shownEvent to notification.key
             }
         } else {
@@ -72,7 +73,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
         val container = appContainer
         // Calls no longer come through here at all: Telecom reports them to the call bridge.
         // This service owns one thing, the per-app icon on the cluster.
-        val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return
+        val mapping = notificationApp(notification.packageName) ?: return
         if (!notification.acceptsIcon(mapping)) {
             removeTrackedEvent(mapping, notification.key, container)
             return
@@ -80,7 +81,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
         if (container.bikeConnection.connectionState.value !is BikeConnectionState.Connected) return
         if (!container.tftPriorityCoordinator.canPresentNotification()) return
         val settings = container.appSettings.settings.value
-        if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) return
+        if (notification.packageName in settings.disabledNotificationPackages) return
 
         if (container.notificationIconWriter.posted(mapping.shownEvent, notification.key)) {
             container.tftPriorityCoordinator.notificationPresented(mapping.shownEvent) {
@@ -91,7 +92,7 @@ class BikeNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(notification: StatusBarNotification) {
         val container = appContainer
-        val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return
+        val mapping = notificationApp(notification.packageName) ?: return
         removeTrackedEvent(mapping, notification.key, container)
     }
 
@@ -105,10 +106,33 @@ class BikeNotificationListenerService : NotificationListenerService() {
         if (groupEnded) container.tftPriorityCoordinator.notificationRemoved(mapping.shownEvent)
     }
 
-    private fun NotificationAlertCategory.enabled(settings: AppSettings): Boolean = when (this) {
-        NotificationAlertCategory.Messages -> settings.messageAlerts
-        NotificationAlertCategory.Social -> settings.socialAlerts
-        NotificationAlertCategory.Email -> settings.emailAlerts
+
+    /**
+     * The cluster icon for a package, if it has one.
+     *
+     * The default SMS app is resolved rather than listed, so it is checked first: an app can
+     * hold that role and also appear in the table, and the role is the more specific fact.
+     */
+    private fun notificationApp(packageName: String): SupportedNotificationApp? =
+        defaultSmsApp?.takeIf { it.packageName == packageName }
+            ?: SupportedNotificationAppsByPackage[packageName]
+
+    /**
+     * Re-read on each listener connection rather than per notification: changing the default
+     * SMS app is a deliberate, rare act, and resolving it is a binder call.
+     */
+    private var defaultSmsApp: SupportedNotificationApp? = null
+
+    private fun refreshDefaultSmsApp() {
+        val packageName = runCatching { Telephony.Sms.getDefaultSmsPackage(this) }.getOrNull()
+        val label = packageName?.let {
+            runCatching {
+                packageManager.getApplicationLabel(
+                    packageManager.getApplicationInfo(it, PackageManager.ApplicationInfoFlags.of(0)),
+                ).toString()
+            }.getOrNull()
+        }
+        defaultSmsApp = defaultSmsNotificationApp(packageName, label)
     }
 
     private fun StatusBarNotification.acceptsIcon(mapping: SupportedNotificationApp): Boolean =

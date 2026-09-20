@@ -293,15 +293,12 @@ class MainViewModel internal constructor(
     fun setAvoidHighways(value: Boolean) = updateSettings { it.copy(avoidHighways = value) }
     fun setAvoidFerries(value: Boolean) = updateSettings { it.copy(avoidFerries = value) }
     fun setAutoStartSharedDestinations(value: Boolean) = updateSettings { it.copy(autoStartSharedDestinations = value) }
-    fun setMessageAlerts(value: Boolean) = updateSettings { it.copy(messageAlerts = value) }
-    fun setSocialAlerts(value: Boolean) = updateSettings { it.copy(socialAlerts = value) }
-    fun setEmailAlerts(value: Boolean) = updateSettings { it.copy(emailAlerts = value) }
     fun setNotificationPackageEnabled(packageName: String, enabled: Boolean) = updateSettings { settings ->
         settings.copy(
-            enabledNotificationPackages = if (enabled) {
-                settings.enabledNotificationPackages + packageName
+            disabledNotificationPackages = if (enabled) {
+                settings.disabledNotificationPackages - packageName
             } else {
-                settings.enabledNotificationPackages - packageName
+                settings.disabledNotificationPackages + packageName
             },
         )
     }
