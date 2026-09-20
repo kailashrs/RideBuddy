@@ -305,7 +305,6 @@ class MainViewModel internal constructor(
             },
         )
     }
-    fun setLegacyCallControls(value: Boolean) = updateSettings { it.copy(legacyCallControls = value) }
     fun setCallerDisplay(value: Boolean) = updateSettings { it.copy(callerDisplay = value) }
     fun setTftCallControls(value: Boolean) = updateSettings { it.copy(tftCallControls = value) }
     fun setTftNavigationOutput(value: Boolean) = updateSettings { it.copy(tftNavigationOutputEnabled = value) }

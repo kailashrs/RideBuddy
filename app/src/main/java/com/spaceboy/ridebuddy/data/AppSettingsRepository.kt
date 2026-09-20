@@ -48,7 +48,6 @@ data class AppSettings(
     val messageAlerts: Boolean = true,
     val socialAlerts: Boolean = true,
     val emailAlerts: Boolean = true,
-    val legacyCallControls: Boolean = false,
     val callerDisplay: Boolean = false,
     val tftCallControls: Boolean = false,
     val tftNavigationOutputEnabled: Boolean = false,
@@ -106,7 +105,6 @@ class AppSettingsRepository(context: Context) {
             putBoolean(KeyMessages, updated.messageAlerts)
             putBoolean(KeySocial, updated.socialAlerts)
             putBoolean(KeyEmail, updated.emailAlerts)
-            putBoolean(KeyLegacyCalls, updated.legacyCallControls)
             putBoolean(KeyCallerDisplay, updated.callerDisplay)
             putBoolean(KeyTftCallControls, updated.tftCallControls)
             putBoolean(KeyTftNavigationOutput, updated.tftNavigationOutputEnabled)
@@ -154,7 +152,6 @@ class AppSettingsRepository(context: Context) {
             messageAlerts = preferences.getBoolean(KeyMessages, true),
             socialAlerts = preferences.getBoolean(KeySocial, true),
             emailAlerts = preferences.getBoolean(KeyEmail, true),
-            legacyCallControls = preferences.getBoolean(KeyLegacyCalls, false),
             callerDisplay = preferences.getBoolean(KeyCallerDisplay, false),
             tftCallControls = preferences.getBoolean(KeyTftCallControls, false),
             tftNavigationOutputEnabled = preferences.getBoolean(KeyTftNavigationOutput, false),
@@ -195,7 +192,6 @@ class AppSettingsRepository(context: Context) {
         const val KeyMessages = "message_alerts"
         const val KeySocial = "social_alerts"
         const val KeyEmail = "email_alerts"
-        const val KeyLegacyCalls = "legacy_call_controls"
         const val KeyCallerDisplay = "caller_display"
         const val KeyTftCallControls = "tft_call_controls"
         const val KeyTftNavigationOutput = "tft_navigation_output"

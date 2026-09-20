@@ -61,7 +61,6 @@ fun OnboardingScreen(
     preciseLocationGranted: Boolean,
     notificationAccessEnabled: Boolean,
     appNotificationPermissionGranted: Boolean,
-    legacyCallPermissionGranted: Boolean,
     telemetryReceiving: Boolean,
     authenticated: Boolean,
     navigationConfigured: Boolean,
@@ -70,7 +69,6 @@ fun OnboardingScreen(
     onAssociateBike: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onRequestAppNotificationPermission: () -> Unit,
-    onEnableLegacyCalls: () -> Unit,
     onSetUpNavigation: () -> Unit,
     onComplete: () -> Unit,
 ) {
@@ -132,7 +130,6 @@ fun OnboardingScreen(
                     actions = buildList {
                         if (!notificationAccessEnabled) add("Allow notification access" to onOpenNotificationAccess)
                         if (!appNotificationPermissionGranted) add("Enable riding alerts" to onRequestAppNotificationPermission)
-                        if (!legacyCallPermissionGranted) add("Allow answering calls" to onEnableLegacyCalls)
                     },
                     status = when {
                         notificationAccessEnabled && appNotificationPermissionGranted -> "Standard call actions and riding alerts are ready"

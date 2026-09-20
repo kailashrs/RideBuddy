@@ -4,12 +4,14 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattConnectionSettings
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -376,6 +378,40 @@ internal class AndroidBikeConnection(
     }
 
     /**
+     * Opens the GATT client, on whichever form of `connectGatt` the platform offers.
+     *
+     * API 37 deprecated every `Context`/`Handler` overload in favour of a settings object and
+     * an `Executor`. `minSdk` is 36, so the older call is still reachable and is kept behind a
+     * version check rather than suppressed.
+     *
+     * `mainHandler` is on the main looper, so `mainExecutor` dispatches callbacks to exactly
+     * the same thread the old overload did. The settings builder exposes no PHY preference;
+     * dropping the 1M mask lets the stack choose, which is what it already did whenever the
+     * peer disagreed with the request.
+     */
+    private fun BluetoothDevice.connectGattCompat(): BluetoothGatt? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
+            connectGatt(
+                BluetoothGattConnectionSettings.Builder()
+                    .setAutoConnectEnabled(false)
+                    .setTransport(BluetoothDevice.TRANSPORT_LE)
+                    .build(),
+                appContext.mainExecutor,
+                callback,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            connectGatt(
+                appContext,
+                false,
+                callback,
+                BluetoothDevice.TRANSPORT_LE,
+                BluetoothDevice.PHY_LE_1M_MASK,
+                mainHandler,
+            )
+        }
+
+    /**
      * Opens the GATT link on a bonded device and arms the overall connection timeout.
      *
      * The generation is captured before the framework call and rechecked after it: opening
@@ -395,14 +431,7 @@ internal class AndroidBikeConnection(
                 "bonded=true, generation=$requestedGeneration",
         )
         val newGatt = try {
-            device.connectGatt(
-                appContext,
-                false,
-                callback,
-                BluetoothDevice.TRANSPORT_LE,
-                BluetoothDevice.PHY_LE_1M_MASK,
-                mainHandler,
-            )
+            device.connectGattCompat()
         } catch (error: RuntimeException) {
             log("GATT start failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
             failLocally("Android could not start the Bluetooth connection")

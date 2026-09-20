@@ -2,14 +2,8 @@ package com.spaceboy.ridebuddy.core.calls
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Notification
-import android.app.PendingIntent
-import android.app.Person
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Bundle
-import android.service.notification.StatusBarNotification
-import android.telecom.TelecomManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
@@ -31,18 +25,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * What the UI shows about call integration.
+ * Whether a call currently owns the cluster display.
  *
- * [actionsAvailable] is false when the dialler in use publishes no usable answer or
- * decline control, which is worth surfacing: the handlebar buttons will do nothing, and
- * that looks like a bug rather than a limitation of the phone app.
+ * Read by [com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator], which has to know when
+ * guidance may take the screen back. Telecom is the authority on the call itself, so there
+ * is nothing else worth publishing here.
  */
-data class CallIntegrationState(
-    val active: Boolean = false,
-    val actionsAvailable: Boolean = false,
-    val legacyFallbackAvailable: Boolean = false,
-    val providerPackage: String? = null,
-)
+data class CallIntegrationState(val active: Boolean = false)
 
 /**
  * Either opt-in feature needs the call state on the cluster: showing the caller needs it
@@ -62,85 +51,39 @@ internal fun shouldClearPublishedCall(
     tftCallControls: Boolean,
 ): Boolean = published && !shouldPublishCallState(callerDisplay, tftCallControls)
 
-/** The deprecated Telecom path is opt-in *and* permission-gated; neither alone is enough. */
-internal fun canUseLegacyCallFallback(enabled: Boolean, permissionGranted: Boolean): Boolean =
-    enabled && permissionGranted
-
 /** The three call states the cluster can be told about. */
 internal enum class TftCallState { Ringing, Answered, Outgoing }
-
-/**
- * Android publishes an answered incoming call and an outgoing call identically, both as
- * `CALL_TYPE_ONGOING`, so the notification alone cannot separate them. What does is whether this
- * key was already on record as ringing: a call that rang here was incoming, and one first seen
- * already in progress was dialled from this phone.
- *
- * A call already running when the listener connects is therefore reported as outgoing. That is
- * unknowable from the notification and only changes which of two states the cluster shows for a
- * call that is already up.
- */
-internal fun tftCallStateFor(
-    callStyleIncoming: Boolean,
-    hasAnswerIntent: Boolean,
-    previousState: TftCallState?,
-): TftCallState = when {
-    callStyleIncoming || hasAnswerIntent -> TftCallState.Ringing
-    // Only a call that was ringing here can become answered. Android reposts the same
-    // notification key as a call runs — the duration ticks, the audio route changes — and
-    // treating any repost as an answer turned every outgoing call into "Answered" on its
-    // first update, whether or not anyone had picked up.
-    previousState == TftCallState.Ringing -> TftCallState.Answered
-    previousState != null -> previousState
-    else -> TftCallState.Outgoing
-}
-
-internal fun Notification.isRideBuddyCallNotification(isKnownDialer: Boolean = false): Boolean =
-    isLiveCallNotification(
-        hasCallStyle = extras.getInt(Notification.EXTRA_CALL_TYPE, Notification.CallStyle.CALL_TYPE_UNKNOWN) in
-            Notification.CallStyle.CALL_TYPE_INCOMING..Notification.CallStyle.CALL_TYPE_SCREENING,
-        hasCallIntent = listOf(Notification.EXTRA_ANSWER_INTENT, Notification.EXTRA_DECLINE_INTENT,
-            Notification.EXTRA_HANG_UP_INTENT).any { extras.getParcelable(it, PendingIntent::class.java) != null },
-        isCallCategory = category == Notification.CATEGORY_CALL,
-        isOngoing = flags and Notification.FLAG_ONGOING_EVENT != 0,
-        hasLegacyCallAction = actions.orEmpty().any { it.actionIntent != null && callActionKind(it.title?.toString()) != null },
-        isKnownDialer = isKnownDialer,
-    )
 
 /**
  * Bridges phone calls to the cluster: shows who is calling, and acts on the handlebar
  * answer and decline buttons.
  *
- * Calls are observed through notifications rather than through Telecom, because reading
- * call state directly would make this app the default dialler. The consequence is that
- * every fact about a call has to be recovered from a notification: the caller's name and
- * number from its extras, and the answer/decline actions from its `CallStyle` intents,
- * falling back to matching action labels for diallers that publish none.
+ * Calls arrive from Telecom through [com.spaceboy.ridebuddy.service.RideBuddyInCallService],
+ * so this owns only the cluster's side of a call — what to write and when it is safe to.
+ * What a call *is* belongs to Telecom, not to this.
  *
  * Outbound writes are gated twice over. Both features are opt-in, and separately, nothing
  * is written until the cluster has shown its side is up — see [armCallWrites]. Writes go
  * through a conflated channel with a generation counter, so a call that changes state
  * faster than the link can carry it sends only the newest state, never a stale one.
  */
-class CallNotificationBridge(
+class CallBridge(
     context: Context,
     private val bikeConnection: BikeConnection,
     private val appSettings: AppSettingsRepository,
     scope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
-    private val telecomManager = appContext.getSystemService(TelecomManager::class.java)
     private val mutableState = MutableStateFlow(CallIntegrationState())
     val state: StateFlow<CallIntegrationState> = mutableState.asStateFlow()
 
     private data class ActiveCallState(
-        val notificationKey: String? = null,
-        val answerIntent: PendingIntent? = null,
-        val declineIntent: PendingIntent? = null,
-        val hangUpIntent: PendingIntent? = null,
+        val callId: String? = null,
         val callerName: String? = null,
         val callerNumber: String? = null,
         val callState: TftCallState = TftCallState.Ringing,
-        val providerPackage: String? = null,
+        val answer: () -> Unit = {},
+        val hangUp: () -> Unit = {},
     )
 
     private data class CallFeatureSettings(
@@ -172,12 +115,11 @@ class CallNotificationBridge(
                     val call = synchronized(callLock) { activeCall.value }
                     // Act on a handlebar press only while a call is actually tracked here. A
                     // press without one is stale — the call ended just as the rider reached
-                    // for the bar — and falling through to Telecom anyway would hang up
-                    // whatever call came next.
-                    if (call.notificationKey == null) return@collect
+                    // for the bar — and acting anyway would hang up whatever came next.
+                    if (call.callId == null) return@collect
                     when (event.code) {
-                        1 -> if (!send(call.answerIntent)) useLegacyTelecom(answer = true)
-                        0 -> if (!send(call.declineIntent ?: call.hangUpIntent)) useLegacyTelecom(answer = false)
+                        1 -> call.answer()
+                        0 -> call.hangUp()
                     }
                 }
             }
@@ -226,82 +168,35 @@ class CallNotificationBridge(
         }
     }
 
-    /** Returns true when this is a call notification and should not be handled as a normal app alert. */
-    fun onNotificationPosted(sbn: StatusBarNotification): Boolean {
-        val notification = sbn.notification
-        if (!isCallNotification(sbn)) {
-            synchronized(callLock) {
-                if (activeCall.value.notificationKey == sbn.key) clearActiveCallLocked()
-            }
-            return false
-        }
-        val connection = bikeConnection.connectionState.value
-        if (connection !is BikeConnectionState.Connected && connection !is BikeConnectionState.Connecting) return true
+    /**
+     * The call Telecom is reporting, or null when there is none.
+     *
+     * This is the only way a call reaches the cluster. It is driven by
+     * [com.spaceboy.ridebuddy.service.RideBuddyInCallService], so the state is the call's own
+     * rather than an inference from which notification a dialler happened to post.
+     */
+    internal fun onTelecomCallChanged(call: TrackedCall?) {
         val settings = appSettings.settings.value
-        val intents = notification.extractCallIntents(sbn.packageName)
-
-        val caller = notification.extras.person(Notification.EXTRA_CALL_PERSON)
-        val name = caller?.name?.toString().orEmpty()
-            .ifBlank { notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty() }
-            .ifBlank { "Unknown caller" }
-        val text = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val number = callerPhoneNumber(caller?.uri) ?: callerPhoneNumber(text) ?: callerPhoneNumber(name)
-        val callStyleIncoming = notification.extras.getInt(
-            Notification.EXTRA_CALL_TYPE,
-            Notification.CallStyle.CALL_TYPE_UNKNOWN,
-        ) == Notification.CallStyle.CALL_TYPE_INCOMING
         synchronized(callLock) {
             applyFeatureSettingsLocked(settings.callFeatureSettings())
-            val callState = tftCallStateFor(
-                callStyleIncoming = callStyleIncoming,
-                hasAnswerIntent = intents.answer != null,
-                previousState = activeCall.value.takeIf { it.notificationKey == sbn.key }?.callState,
-            )
+            if (call == null) {
+                if (activeCall.value.callId != null) clearActiveCallLocked()
+                return
+            }
             activeCall.value = ActiveCallState(
-                notificationKey = sbn.key,
-                answerIntent = intents.answer,
-                declineIntent = intents.decline,
-                hangUpIntent = intents.hangUp,
-                callerName = name,
-                callerNumber = number,
-                callState = callState,
-                providerPackage = sbn.packageName,
+                callId = call.id,
+                // The cluster needs something on the name row to show a call at all. A withheld
+                // or unresolved number still gets a call screen rather than nothing.
+                callerName = call.callerName ?: call.callerNumber ?: "Unknown caller",
+                callerNumber = call.callerNumber,
+                callState = call.state,
+                answer = call.answer,
+                hangUp = call.hangUp,
             )
             if (featureSettings.enabled) publishActiveCallLocked(featureSettings)
             else mutableState.value = CallIntegrationState()
         }
-        return true
     }
-
-    /**
-     * Handles a notification going away. Returns true when it was a call notification, so
-     * the caller does not also treat it as an ordinary app alert being dismissed.
-     */
-    fun onNotificationRemoved(sbn: StatusBarNotification): Boolean {
-        synchronized(callLock) {
-            val call = activeCall.value
-            if (sbn.key != call.notificationKey) return isCallNotification(sbn)
-            clearActiveCallLocked()
-            return true
-        }
-    }
-
-    /** Reconciles removals Android could not deliver while the notification listener was offline. */
-    fun reconcileActiveNotifications(notifications: Collection<StatusBarNotification>) {
-        val activeCallKeys = notifications.asSequence()
-            .filter(::isCallNotification)
-            .map { notification -> notification.key }
-            .toSet()
-        synchronized(callLock) {
-            val activeKey = activeCall.value.notificationKey ?: return
-            if (activeKey !in activeCallKeys) clearActiveCallLocked()
-        }
-    }
-
-    internal fun isCallNotification(sbn: StatusBarNotification): Boolean = sbn.notification.isRideBuddyCallNotification(
-        isKnownDialer = sbn.packageName == "com.truecaller" ||
-            sbn.packageName == telecomManager?.defaultDialerPackage,
-    )
 
     /** Ends a bike session without replaying an old caller or retaining actionable intents. */
     fun clearPendingBikeOutput() = synchronized(callLock) {
@@ -311,11 +206,6 @@ class CallNotificationBridge(
         publishedCallActive = false
         activeCall.value = ActiveCallState()
         mutableState.value = CallIntegrationState()
-    }
-
-    private fun send(intent: PendingIntent?): Boolean {
-        if (intent == null) return false
-        return runCatching { intent.send() }.isSuccess
     }
 
     /**
@@ -433,89 +323,11 @@ class CallNotificationBridge(
 
     private fun endedWrite(): BikeWrite = BikeWrite(BleCharacteristics.CallState, TftCallEncoder.ended())
 
-    private fun ActiveCallState.integrationState(): CallIntegrationState = CallIntegrationState(
-        active = true,
-        actionsAvailable = answerIntent != null || declineIntent != null || hangUpIntent != null,
-        legacyFallbackAvailable = legacyTelecomAvailable(),
-        providerPackage = providerPackage,
-    )
-
-    /**
-     * Opt-in fallback for diallers that publish no usable notification actions.
-     *
-     * Uses deprecated Telecom controls and needs a runtime permission, which is why it is
-     * off by default and tried only after the notification intents have failed. It does not
-     * make this app the default dialler.
-     */
-    @SuppressLint("MissingPermission")
-    @Suppress("DEPRECATION")
-    private fun useLegacyTelecom(answer: Boolean): Boolean {
-        if (!legacyTelecomAvailable()) return false
-        return runCatching {
-            if (answer) {
-                telecomManager.acceptRingingCall()
-                true
-            } else {
-                telecomManager.endCall()
-            }
-        }.getOrDefault(false)
-    }
-
-    private fun legacyTelecomAvailable(): Boolean = canUseLegacyCallFallback(
-        enabled = appSettings.settings.value.legacyCallControls,
-        permissionGranted = ContextCompat.checkSelfPermission(appContext, Manifest.permission.ANSWER_PHONE_CALLS) ==
-                PackageManager.PERMISSION_GRANTED,
-    )
+    private fun ActiveCallState.integrationState(): CallIntegrationState =
+        CallIntegrationState(active = callId != null)
 
     private fun AppSettings.callFeatureSettings(): CallFeatureSettings =
         CallFeatureSettings(callerDisplay, tftCallControls)
-
-    /**
-     * Recovers answer, decline and hang-up actions from a call notification.
-     *
-     * `CallStyle` publishes them as named extras, which is exact and is tried first. A
-     * dialler that does not use `CallStyle` leaves only its action buttons, which have to
-     * be matched by label — inexact, English-only, and logged when it finds nothing so the
-     * gap is visible rather than silent.
-     */
-    private fun Notification.extractCallIntents(packageName: String): CallIntents {
-        val extrasIntents = CallIntents(
-            answer = extras.pendingIntent(Notification.EXTRA_ANSWER_INTENT),
-            decline = extras.pendingIntent(Notification.EXTRA_DECLINE_INTENT),
-            hangUp = extras.pendingIntent(Notification.EXTRA_HANG_UP_INTENT),
-        )
-        val availableActions = actions.orEmpty().filter { it.actionIntent != null }
-        fun find(kind: CallActionKind): PendingIntent? = availableActions.firstOrNull { action ->
-            callActionKind(action.title?.toString()) == kind
-        }?.actionIntent
-
-        val answer = extrasIntents.answer ?: find(CallActionKind.Answer)
-        val decline = extrasIntents.decline ?: find(CallActionKind.Decline)
-        val hangUp = extrasIntents.hangUp ?: find(CallActionKind.HangUp)
-        if (answer == null && decline == null && hangUp == null) {
-            // This search is English-only, and there is no locale-independent way to read a
-            // non-CallStyle dialer's buttons. Say so rather than looking like a silent no-op:
-            // handlebar controls will fall through to the opt-in Telecom path, or do nothing.
-            Log.w(
-                LogTag,
-                "No call actions found for $packageName; it publishes neither CallStyle intents " +
-                    "nor recognisable action labels",
-            )
-        }
-        return CallIntents(answer, decline, hangUp)
-    }
-
-    private fun Bundle.pendingIntent(key: String): PendingIntent? =
-        getParcelable(key, PendingIntent::class.java)
-
-    private fun Bundle.person(key: String): Person? =
-        getParcelable(key, Person::class.java)
-
-    private data class CallIntents(
-        val answer: PendingIntent? = null,
-        val decline: PendingIntent? = null,
-        val hangUp: PendingIntent? = null,
-    )
 
     /**
      * One conflated unit of outbound call writes. The generation is what lets the drain
@@ -524,6 +336,6 @@ class CallNotificationBridge(
     private data class CallWriteRequest(val generation: Long, val writes: List<BikeWrite>)
 
     private companion object {
-        const val LogTag = "CallNotificationBridge"
+        const val LogTag = "CallBridge"
     }
 }

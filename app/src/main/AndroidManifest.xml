@@ -21,7 +21,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <!-- Lets Telecom bind our InCallService as a companion-device app. A normal permission:
+         it is granted at install, does not make RideBuddy the default dialler, and does not
+         take calls away from whichever app is. This replaces ANSWER_PHONE_CALLS, which only
+         ever existed for the deprecated TelecomManager answer/end path. -->
+    <uses-permission android:name="android.permission.CALL_COMPANION_APP" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
@@ -87,6 +91,19 @@
             <property
                 android:name="android.companion.PROPERTY_PRIMARY_COMPANION_DEVICE_SERVICE"
                 android:value="true" />
+        </service>
+
+        <!-- The cluster's view of a call comes from Telecom, not from notifications. -->
+        <service
+            android:name=".service.RideBuddyInCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_UI"
+                android:value="false" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
         </service>
 
         <service

@@ -6,7 +6,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.spaceboy.ridebuddy.AppContainer
-import com.spaceboy.ridebuddy.data.acceptsNotificationPayload
+import com.spaceboy.ridebuddy.data.acceptsNotification
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.NotificationAlertCategory
@@ -46,19 +46,13 @@ class BikeNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         val container = appContainer
-        val notifications = activeNotifications.orEmpty().toList()
-        container.callNotificationBridge.reconcileActiveNotifications(notifications)
-        val (callNotifications, regularNotifications) = notifications.partition { notification ->
-            container.callNotificationBridge.isCallNotification(notification)
-        }
-        callNotifications.forEach(::onNotificationPosted)
-
+        val regularNotifications = activeNotifications.orEmpty().toList()
         val settings = container.appSettings.settings.value
         val eligibleKeys = if (container.bikeConnection.connectionState.value is BikeConnectionState.Connected &&
             container.tftPriorityCoordinator.canPresentNotification()) {
             regularNotifications.mapNotNull { notification ->
                 val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return@mapNotNull null
-                if (!notification.acceptsIcon()) return@mapNotNull null
+                if (!notification.acceptsIcon(mapping)) return@mapNotNull null
                 if (!mapping.category.enabled(settings) || notification.packageName !in settings.enabledNotificationPackages) {
                     return@mapNotNull null
                 }
@@ -76,16 +70,10 @@ class BikeNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(notification: StatusBarNotification) {
         val container = appContainer
-        val mapping = SupportedNotificationAppsByPackage[notification.packageName]
-        // Calls are handled by the call bridge, never as an icon. A messaging app's call
-        // notification would otherwise also light that app's icon; drop any tracked icon
-        // for it so the call screen is not competing with a stale glyph.
-        if (container.callNotificationBridge.onNotificationPosted(notification)) {
-            mapping?.let { removeTrackedEvent(it, notification.key, container) }
-            return
-        }
-        mapping ?: return
-        if (!notification.acceptsIcon()) {
+        // Calls no longer come through here at all: Telecom reports them to the call bridge.
+        // This service owns one thing, the per-app icon on the cluster.
+        val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return
+        if (!notification.acceptsIcon(mapping)) {
             removeTrackedEvent(mapping, notification.key, container)
             return
         }
@@ -103,7 +91,6 @@ class BikeNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(notification: StatusBarNotification) {
         val container = appContainer
-        if (container.callNotificationBridge.onNotificationRemoved(notification)) return
         val mapping = SupportedNotificationAppsByPackage[notification.packageName] ?: return
         removeTrackedEvent(mapping, notification.key, container)
     }
@@ -124,12 +111,12 @@ class BikeNotificationListenerService : NotificationListenerService() {
         NotificationAlertCategory.Email -> settings.emailAlerts
     }
 
-    private fun StatusBarNotification.acceptsIcon(): Boolean = acceptsNotificationPayload(
-        packageName = packageName,
-        isMessage = notification.category == Notification.CATEGORY_MESSAGE ||
-            notification.extras.containsKey(Notification.EXTRA_MESSAGES),
-        isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
-    )
+    private fun StatusBarNotification.acceptsIcon(mapping: SupportedNotificationApp): Boolean =
+        mapping.acceptsNotification(
+            isMessage = notification.category == Notification.CATEGORY_MESSAGE ||
+                notification.extras.containsKey(Notification.EXTRA_MESSAGES),
+            isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+        )
 }
 
 /** Notification-icon packet: `[0x0B, event, phone battery percent, 0x00]`. */

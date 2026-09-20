@@ -11,7 +11,7 @@ class SupportedNotificationAppsTest {
             listOf(
                 SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
-                SupportedNotificationApp("com.truecaller", "Truecaller messages", 6, 7, NotificationAlertCategory.Messages),
+                SupportedNotificationApp("com.truecaller", "Truecaller", 6, 7, NotificationAlertCategory.Messages, messagesOnly = true),
                 SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
                 SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
                 SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
@@ -61,10 +61,21 @@ class SupportedNotificationAppsTest {
     }
 
     @Test
-    fun `truecaller messages use SMS icons but other Truecaller cards and summaries do not`() {
-        assertTrue(acceptsNotificationPayload("com.truecaller", isMessage = true, isGroupSummary = false))
-        org.junit.Assert.assertFalse(acceptsNotificationPayload("com.truecaller", isMessage = false, isGroupSummary = false))
-        org.junit.Assert.assertFalse(acceptsNotificationPayload("com.truecaller", isMessage = true, isGroupSummary = true))
-        assertEquals(7, SupportedNotificationAppsByPackage.getValue("com.truecaller").shownEvent)
+    fun `a messages-only app lights its icon for messages alone`() {
+        val truecaller = SupportedNotificationAppsByPackage.getValue("com.truecaller")
+        assertTrue(truecaller.messagesOnly)
+        assertTrue(truecaller.acceptsNotification(isMessage = true, isGroupSummary = false))
+        // Caller ID, missed-call and promotional cards all arrive as non-messages.
+        org.junit.Assert.assertFalse(truecaller.acceptsNotification(isMessage = false, isGroupSummary = false))
+        org.junit.Assert.assertFalse(truecaller.acceptsNotification(isMessage = true, isGroupSummary = true))
+        assertEquals(7, truecaller.shownEvent)
+    }
+
+    @Test
+    fun `an ordinary messaging app is not restricted to message-shaped notifications`() {
+        val whatsapp = SupportedNotificationAppsByPackage.getValue("com.whatsapp")
+        org.junit.Assert.assertFalse(whatsapp.messagesOnly)
+        assertTrue(whatsapp.acceptsNotification(isMessage = false, isGroupSummary = false))
+        org.junit.Assert.assertFalse(whatsapp.acceptsNotification(isMessage = true, isGroupSummary = true))
     }
 }

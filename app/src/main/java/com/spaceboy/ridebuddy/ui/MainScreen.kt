@@ -331,8 +331,6 @@ internal fun MainScreenContent(
                 onOpenDiagnostics = onOpenDiagnostics,
                 onRunStationaryTest = onRunStationaryTest,
                 notificationAccessEnabled = notificationAccessEnabled,
-                legacyCallPermissionGranted = legacyCallPermissionGranted,
-                onLegacyCallControlsChanged = onLegacyCallControlsChanged,
                 backgroundLocationGranted = backgroundLocationGranted,
                 onOpenBackgroundLocationSettings = onOpenBackgroundLocationSettings,
                 onOpenAppPermissions = onOpenAppPermissions,

@@ -63,7 +63,6 @@ data class MainScreenState(
     val settings: AppSettings,
     val bikeAssociation: BikeAssociationState,
     val notificationAccessEnabled: Boolean,
-    val legacyCallPermissionGranted: Boolean,
     val backgroundLocationGranted: Boolean,
 )
 
@@ -114,7 +113,6 @@ data class MainScreenActions(
     val onExportBleCapture: () -> Unit,
     val onClearBleCapture: () -> Unit,
     val onRunStationaryTest: () -> Unit,
-    val onLegacyCallControlsChanged: (Boolean) -> Unit,
     val onOpenBackgroundLocationSettings: () -> Unit,
     val onOpenAppPermissions: () -> Unit,
     val onMessageShown: () -> Unit,

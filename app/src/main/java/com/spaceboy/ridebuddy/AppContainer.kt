@@ -19,7 +19,7 @@ import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.core.tft.TftNavigationBridge
 import com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator
 import com.spaceboy.ridebuddy.core.tft.StationaryTftValidator
-import com.spaceboy.ridebuddy.core.calls.CallNotificationBridge
+import com.spaceboy.ridebuddy.core.calls.CallBridge
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
@@ -139,9 +139,9 @@ class AppContainer(context: Context) {
         },
         write = { payload -> bikeConnection.enqueueWrite(BleCharacteristics.AppEvent, payload) },
     )
-    val callNotificationBridge = CallNotificationBridge(context, bikeConnection, appSettings, applicationScope)
+    val callBridge = CallBridge(context, bikeConnection, appSettings, applicationScope)
     val tftPriorityCoordinator =
-        TftPriorityCoordinator(navigationFeed, callNotificationBridge, tftNavigationBridge, applicationScope)
+        TftPriorityCoordinator(navigationFeed, callBridge, tftNavigationBridge, applicationScope)
     val ridingAlertMonitor = RidingAlertMonitor(context, bikeConnection, rideRecorder, appSettings, applicationScope)
     val weatherAlertProvider = WeatherAlertProvider(
         rideLocationTracker,
@@ -227,7 +227,7 @@ class AppContainer(context: Context) {
                 hadConnectionSession = false
                 // Brief reconnection attempts preserve the ride. A terminal session discards
                 // every app-side queue, including timers that could otherwise replay old alerts.
-                callNotificationBridge.clearPendingBikeOutput()
+                callBridge.clearPendingBikeOutput()
                 notificationIconWriter.clearPendingBikeOutput()
                 tftPriorityCoordinator.clearPendingBikeOutput()
                 ridingAlertMonitor.clearPendingBikeOutput()

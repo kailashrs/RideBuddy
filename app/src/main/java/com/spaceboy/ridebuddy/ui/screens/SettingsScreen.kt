@@ -144,8 +144,6 @@ fun SettingsScreen(
     onOpenDiagnostics: () -> Unit,
     onRunStationaryTest: () -> Unit,
     notificationAccessEnabled: Boolean,
-    legacyCallPermissionGranted: Boolean,
-    onLegacyCallControlsChanged: (Boolean) -> Unit,
     backgroundLocationGranted: Boolean,
     onOpenBackgroundLocationSettings: () -> Unit,
     onOpenAppPermissions: () -> Unit,
@@ -244,7 +242,6 @@ fun SettingsScreen(
                 settingsActions = settingsActions,
                 navigationKey = navigationKey,
                 notificationAccessEnabled = notificationAccessEnabled,
-                legacyCallPermissionGranted = legacyCallPermissionGranted,
                 backgroundLocationGranted = backgroundLocationGranted,
                 installedSupportedApps = installedSupportedApps,
                 onOpenNavigationSettings = onOpenNavigationSettings,
@@ -256,7 +253,6 @@ fun SettingsScreen(
                 onMessageAlertsChanged = onMessageAlertsChanged,
                 onSocialAlertsChanged = onSocialAlertsChanged,
                 onEmailAlertsChanged = onEmailAlertsChanged,
-                onLegacyCallControlsChanged = onLegacyCallControlsChanged,
                 onManageSupportedApps = { showSupportedAppsDialog = true },
             )
         }
@@ -367,7 +363,6 @@ private fun NavigationAndCallsSection(
     settingsActions: MoreSettingsActions,
     navigationKey: NavigationKeyUiState,
     notificationAccessEnabled: Boolean,
-    legacyCallPermissionGranted: Boolean,
     backgroundLocationGranted: Boolean,
     installedSupportedApps: List<SupportedNotificationApp>,
     onOpenNavigationSettings: () -> Unit,
@@ -379,7 +374,6 @@ private fun NavigationAndCallsSection(
     onMessageAlertsChanged: (Boolean) -> Unit,
     onSocialAlertsChanged: (Boolean) -> Unit,
     onEmailAlertsChanged: (Boolean) -> Unit,
-    onLegacyCallControlsChanged: (Boolean) -> Unit,
     onManageSupportedApps: () -> Unit,
 ) {
     SettingsSection("Navigation & Calls") {
@@ -490,18 +484,6 @@ private fun NavigationAndCallsSection(
         ) {
             settingsActions.onTftCallControlsChanged(it)
         }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            title = "Legacy call compatibility",
-            supportingText = when {
-                settings.legacyCallControls && legacyCallPermissionGranted -> "Fallback for dialers that do not publish standard call actions"
-                settings.legacyCallControls -> "Phone-call permission must be restored"
-                else -> "Legacy mode for non-standard phone dialer apps"
-            },
-            checked = settings.legacyCallControls && legacyCallPermissionGranted,
-            icon = Icons.AutoMirrored.Outlined.PhoneCallback,
-            onCheckedChange = onLegacyCallControlsChanged,
-        )
     }
 }
 

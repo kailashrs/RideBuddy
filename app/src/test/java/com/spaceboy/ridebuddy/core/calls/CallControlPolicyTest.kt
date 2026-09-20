@@ -1,8 +1,11 @@
 package com.spaceboy.ridebuddy.core.calls
 
+import android.telecom.Call
+
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CallControlPolicyTest {
@@ -25,105 +28,48 @@ class CallControlPolicyTest {
     }
 
     @Test
-    fun legacyFallbackRequiresExplicitSettingAndPermission() {
-        assertFalse(canUseLegacyCallFallback(enabled = false, permissionGranted = true))
-        assertFalse(canUseLegacyCallFallback(enabled = true, permissionGranted = false))
-        assertTrue(canUseLegacyCallFallback(enabled = true, permissionGranted = true))
-    }
-
-    /**
-     * Android publishes an answered incoming call and an outgoing one identically, so the only
-     * thing separating them is whether the key was already on record as ringing.
-     */
-    @Test
-    fun `an incoming ring is reported as ringing`() {
+    fun `a ringing call is ringing whichever way it rang`() {
+        assertEquals(TftCallState.Ringing, tftCallStateForTelecom(Call.STATE_RINGING, incoming = true))
         assertEquals(
             TftCallState.Ringing,
-            tftCallStateFor(callStyleIncoming = true, hasAnswerIntent = false, previousState = null),
-        )
-    }
-
-    @Test
-    fun `an answer intent alone still means the call is ringing`() {
-        assertEquals(
-            TftCallState.Ringing,
-            tftCallStateFor(
-                callStyleIncoming = false,
-                hasAnswerIntent = true,
-                previousState = TftCallState.Ringing,
-            ),
-        )
-    }
-
-    @Test
-    fun `a call that was ringing here and stops ringing has been answered`() {
-        assertEquals(
-            TftCallState.Answered,
-            tftCallStateFor(
-                callStyleIncoming = false,
-                hasAnswerIntent = false,
-                previousState = TftCallState.Ringing,
-            ),
-        )
-    }
-
-    @Test
-    fun `a call first seen already in progress was dialled from this phone`() {
-        assertEquals(
-            TftCallState.Outgoing,
-            tftCallStateFor(callStyleIncoming = false, hasAnswerIntent = false, previousState = null),
+            tftCallStateForTelecom(Call.STATE_SIMULATED_RINGING, incoming = true),
         )
     }
 
     /**
-     * Android reposts the same notification key as a call runs — the duration ticks, the audio
-     * route changes. Every repost used to be read as an answer, so an outgoing call flipped to
-     * "Answered" on its first update whether or not anyone had picked up.
+     * The distinction notifications could not make. Telecom states it outright, so an
+     * outgoing call that connects never reads as "answered" on the cluster.
      */
     @Test
-    fun `an outgoing call stays outgoing when its notification is updated`() {
-        assertEquals(
-            TftCallState.Outgoing,
-            tftCallStateFor(
-                callStyleIncoming = false,
-                hasAnswerIntent = false,
-                previousState = TftCallState.Outgoing,
-            ),
-        )
+    fun `only an incoming call becomes answered once it is active`() {
+        assertEquals(TftCallState.Answered, tftCallStateForTelecom(Call.STATE_ACTIVE, incoming = true))
+        assertEquals(TftCallState.Outgoing, tftCallStateForTelecom(Call.STATE_ACTIVE, incoming = false))
+        assertEquals(TftCallState.Answered, tftCallStateForTelecom(Call.STATE_HOLDING, incoming = true))
     }
 
     @Test
-    fun `an answered call stays answered across further updates`() {
-        assertEquals(
-            TftCallState.Answered,
-            tftCallStateFor(
-                callStyleIncoming = false,
-                hasAnswerIntent = false,
-                previousState = TftCallState.Answered,
-            ),
-        )
+    fun `a call being dialled reads as outgoing`() {
+        assertEquals(TftCallState.Outgoing, tftCallStateForTelecom(Call.STATE_DIALING, incoming = false))
+        assertEquals(TftCallState.Outgoing, tftCallStateForTelecom(Call.STATE_CONNECTING, incoming = false))
     }
 
-    /**
-     * `8740` is not call-only, and the OEM switches on the whole value rendered as a decimal
-     * string. 3 was reaching the log as unhandled: it is the cluster asserting a call is live,
-     * which in the OEM is what arms its answer and reject handling.
-     */
+    /** Nothing the rider should see: not yet a call, already over, or being screened. */
     @Test
-    fun `the cluster control vocabulary covers all four values`() {
-        assertEquals("reject", callControlLabel(0))
-        assertEquals("answer", callControlLabel(1))
-        assertEquals("cluster ready", callControlLabel(2))
-        assertEquals("call active", callControlLabel(3))
-        assertEquals(null, callControlLabel(4))
+    fun `states with nothing to show produce no call`() {
+        assertNull(tftCallStateForTelecom(Call.STATE_NEW, incoming = true))
+        assertNull(tftCallStateForTelecom(Call.STATE_DISCONNECTED, incoming = true))
+        assertNull(tftCallStateForTelecom(Call.STATE_DISCONNECTING, incoming = true))
+        assertNull(tftCallStateForTelecom(Call.STATE_AUDIO_PROCESSING, incoming = true))
+        assertNull(tftCallStateForTelecom(Call.STATE_SELECT_PHONE_ACCOUNT, incoming = true))
     }
-}
 
-/** Mirrors the read in AndroidBikeConnection.onNotification for CallControl. */
-private fun callControlLabel(value: Int): String? = when (value) {
-    0 -> "reject"
-    1 -> "answer"
-    2 -> "cluster ready"
-    3 -> "call active"
-    else -> null
+    @Test
+    fun `only a tel handle yields a dialable number`() {
+        assertEquals("+919876543210", telecomCallerNumber("tel", "+919876543210"))
+        // A SIP or app call has a handle, but not a phone number.
+        assertNull(telecomCallerNumber("sip", "someone@example.com"))
+        // A withheld number arrives as an empty handle.
+        assertNull(telecomCallerNumber("tel", ""))
+        assertNull(telecomCallerNumber(null, null))
+    }
 }

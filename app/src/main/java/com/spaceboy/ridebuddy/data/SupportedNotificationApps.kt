@@ -21,6 +21,14 @@ internal data class SupportedNotificationApp(
     val hiddenEvent: Int,
     val shownEvent: Int,
     val category: NotificationAlertCategory,
+    /**
+     * Whether only message-shaped notifications from this app may light its icon.
+     *
+     * Set for apps whose traffic is mostly not messages. A dialler that also handles SMS
+     * posts caller ID, missed-call and promotional cards through the same package, and none
+     * of those are a message arriving — but they are indistinguishable by package alone.
+     */
+    val messagesOnly: Boolean = false,
 )
 
 /**
@@ -30,7 +38,7 @@ internal data class SupportedNotificationApp(
 internal val SupportedNotificationApps = listOf(
     SupportedNotificationApp("com.google.android.apps.messaging", "Google Messages", 6, 7, NotificationAlertCategory.Messages),
     SupportedNotificationApp("com.samsung.android.messaging", "Samsung Messages", 6, 7, NotificationAlertCategory.Messages),
-    SupportedNotificationApp("com.truecaller", "Truecaller messages", 6, 7, NotificationAlertCategory.Messages),
+    SupportedNotificationApp("com.truecaller", "Truecaller", 6, 7, NotificationAlertCategory.Messages, messagesOnly = true),
     SupportedNotificationApp("com.whatsapp", "WhatsApp", 6, 7, NotificationAlertCategory.Messages),
     SupportedNotificationApp("com.instagram.android", "Instagram", 12, 13, NotificationAlertCategory.Social),
     SupportedNotificationApp("com.instagram.lite", "Instagram Lite", 12, 13, NotificationAlertCategory.Social),
@@ -46,9 +54,12 @@ internal val SupportedNotificationAppsByPackage = SupportedNotificationApps.asso
 /** Every supported app is enabled by default; the feature as a whole is what is opt-in. */
 internal val DefaultNotificationPackages = SupportedNotificationAppsByPackage.keys
 
-/** Truecaller also posts caller-ID, missed-call, and promotional cards; only messages get SMS icons. */
-internal fun acceptsNotificationPayload(
-    packageName: String,
+/**
+ * Whether a notification from this app should light its cluster icon.
+ *
+ * Group summaries never do: they restate messages already counted individually.
+ */
+internal fun SupportedNotificationApp.acceptsNotification(
     isMessage: Boolean,
     isGroupSummary: Boolean,
-): Boolean = !isGroupSummary && (packageName != "com.truecaller" || isMessage)
+): Boolean = !isGroupSummary && (!messagesOnly || isMessage)

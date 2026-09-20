@@ -80,7 +80,6 @@ class MainActivity : ComponentActivity() {
     private var appNotificationPermissionGranted by mutableStateOf(false)
     private var nearbyDeviceAccessGranted by mutableStateOf(false)
     private var preciseLocationGranted by mutableStateOf(false)
-    private var legacyCallPermissionGranted by mutableStateOf(false)
     private var backgroundLocationGranted by mutableStateOf(false)
     private var lastAssociationConnectionAddress: String? = null
     private var navigationStartJob: Job? = null
@@ -145,16 +144,6 @@ class MainActivity : ComponentActivity() {
         } else if (result.resultCode == Activity.RESULT_CANCELED) {
             viewModel.showMessage("Pairing canceled")
         }
-    }
-
-    private val answerCallsPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        legacyCallPermissionGranted = granted
-        viewModel.setLegacyCallControls(granted)
-        viewModel.showMessage(
-            if (granted) "Legacy call compatibility enabled" else "Legacy call compatibility was not enabled",
-        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -244,7 +233,6 @@ class MainActivity : ComponentActivity() {
             preciseLocationGranted = preciseLocationGranted,
             notificationAccessEnabled = notificationAccessEnabled,
             appNotificationPermissionGranted = appNotificationPermissionGranted,
-            legacyCallPermissionGranted = legacyCallPermissionGranted,
             telemetryReceiving = telemetryReceiving,
             authenticated = authenticated,
             navigationConfigured = uiState.navigationKey.isConfigured,
@@ -253,7 +241,6 @@ class MainActivity : ComponentActivity() {
             onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
             onOpenNotificationAccess = ::openNotificationAccessSettings,
             onRequestAppNotificationPermission = ::requestAppNotificationPermission,
-            onEnableLegacyCalls = { setLegacyCallControls(true) },
             onSetUpNavigation = {
                 viewModel.completeOnboarding()
                 viewModel.openNavigationSettings()
@@ -308,7 +295,6 @@ class MainActivity : ComponentActivity() {
                 settings = settings,
                 bikeAssociation = bikeAssociation,
                 notificationAccessEnabled = notificationAccessEnabled,
-                legacyCallPermissionGranted = legacyCallPermissionGranted,
                 backgroundLocationGranted = backgroundLocationGranted,
             ),
             actions = actions,
@@ -358,7 +344,6 @@ class MainActivity : ComponentActivity() {
         onExportBleCapture = ::exportBleCapture,
         onClearBleCapture = viewModel::clearBleCapture,
         onRunStationaryTest = ::runStationaryTest,
-        onLegacyCallControlsChanged = ::setLegacyCallControls,
         onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
         onOpenAppPermissions = ::openAppPermissionSettings,
         onMessageShown = viewModel::clearTransientMessage,
@@ -407,8 +392,6 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
         }
         preciseLocationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        legacyCallPermissionGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) ==
             PackageManager.PERMISSION_GRANTED
         appNotificationPermissionGranted =
             ContextCompat.checkSelfPermission(this, NotificationPermission) == PackageManager.PERMISSION_GRANTED
@@ -482,18 +465,6 @@ class MainActivity : ComponentActivity() {
             viewModel.showMessage("Bike association removed")
         } else {
             viewModel.showMessage(manager.state.value.errorMessage ?: "Could not remove the motorcycle association")
-        }
-    }
-
-    private fun setLegacyCallControls(enabled: Boolean) {
-        if (!enabled) {
-            viewModel.setLegacyCallControls(false)
-            return
-        }
-        if (legacyCallPermissionGranted) {
-            viewModel.setLegacyCallControls(true)
-        } else {
-            answerCallsPermissionLauncher.launch(Manifest.permission.ANSWER_PHONE_CALLS)
         }
     }
 

@@ -1,6 +1,6 @@
 package com.spaceboy.ridebuddy.core.tft
 
-import com.spaceboy.ridebuddy.core.calls.CallNotificationBridge
+import com.spaceboy.ridebuddy.core.calls.CallBridge
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -51,7 +51,7 @@ internal fun tftNotificationAllowed(
  */
 class TftPriorityCoordinator(
     private val navigationFeed: NavigationFeedRepository,
-    private val calls: CallNotificationBridge,
+    private val calls: CallBridge,
     private val navigationBridge: TftNavigationBridge,
     private val scope: CoroutineScope,
 ) {
