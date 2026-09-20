@@ -237,7 +237,9 @@ class TftNavigationBridge(
                     current = current.maneuver,
                     next = next?.maneuver ?: 0,
                     roundaboutExit = current.roundaboutTurnNumber ?: 0,
-                    distanceMetres = maneuverDistance,
+                    // The step length of the next step is the gap between this maneuver and
+                    // that one, which is what this field means on the wire.
+                    nextManeuverDistanceMetres = next?.distanceFromPrevStepMeters ?: 0,
                 ),
             )
             val destinationSeconds = info.timeToFinalDestinationSeconds ?: 0

@@ -97,7 +97,7 @@ class StationaryTftValidator(
                         current = Maneuver.TURN_RIGHT,
                         next = Maneuver.TURN_LEFT,
                         roundaboutExit = 0,
-                        distanceMetres = 120,
+                        nextManeuverDistanceMetres = 120,
                     ),
                     BikeWriteMode.NoResponsePreferred,
                 ),

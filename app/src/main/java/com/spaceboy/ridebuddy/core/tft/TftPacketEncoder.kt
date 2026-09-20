@@ -29,18 +29,21 @@ object TftPacketEncoder {
 
     /**
      * Maneuver packet from Google maneuver ids, resolving them to cluster pictograms first.
+     *
+     * [nextManeuverDistanceMetres] is the gap between the current maneuver and the one after
+     * it, not the distance to the current one. The OEM builds this packet from its own `g`
+     * field, set by `a0(...)` with the step length, while the distance to the maneuver the
+     * rider is approaching travels in the trip packet instead.
      */
     fun maneuver(
-        current: Int, next: Int, roundaboutExit: Int, distanceMetres: Int,
+        current: Int, next: Int, roundaboutExit: Int, nextManeuverDistanceMetres: Int,
     ): ByteArray =
         pictogram(
             current = clusterManeuver(current),
             next = clusterManeuver(next),
             roundaboutExit = roundaboutExit,
-            // Sent raw. This is the one distance field the cluster does not want rounded —
-            // a capture shows it carrying 277 m while the trip packet's copy of the same
-            // distance, in the same second, carried 280 m. See [trip].
-            distanceMetres = distanceMetres,
+            // Sent raw; the cluster does its own presentation of this one.
+            distanceMetres = nextManeuverDistanceMetres,
         )
 
     /**
@@ -90,13 +93,13 @@ object TftPacketEncoder {
             this[1] = arrival.minute.toByte()
             this[2] = arrival.hour.toByte()
             writeUInt24LittleEndian(offset = 3, value = destinationDistanceMetres)
-            // This copy of the maneuver distance is rounded to the nearest 10 m, while the
-            // one in the maneuver packet is sent raw — a capture shows 280 m here against
-            // 277 m there in the same second. Clamped before rounding because adding 5 to
-            // Int.MAX_VALUE overflows.
+            // The distance to the maneuver the rider is approaching, floored to 10 m exactly
+            // as the OEM does (`Math.round(d / 10) * 10` over an int division). The maneuver
+            // packet carries a different quantity entirely — the gap to the maneuver after
+            // this one — so the two are not copies of each other.
             writeUInt24LittleEndian(
                 offset = 6,
-                value = ((maneuverDistanceMetres.coerceIn(0, MaxUInt24) + 5) / 10) * 10,
+                value = (maneuverDistanceMetres.coerceIn(0, MaxUInt24) / 10) * 10,
             )
             this[9] = End.toByte()
         }

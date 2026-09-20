@@ -15,7 +15,7 @@ class TftPacketEncoderTest {
             current = Maneuver.TURN_LEFT,
             next = Maneuver.TURN_RIGHT,
             roundaboutExit = 0,
-            distanceMetres = 0x01_02_03,
+            nextManeuverDistanceMetres = 0x01_02_03,
         )
 
         assertArrayEquals(
@@ -56,7 +56,7 @@ class TftPacketEncoderTest {
         assertEquals(158, TftPacketEncoder.clusterManeuver(Maneuver.ROUNDABOUT_CLOCKWISE))
         val packet = TftPacketEncoder.maneuver(
             Maneuver.ROUNDABOUT_LEFT_CLOCKWISE, Maneuver.ROUNDABOUT_RIGHT_COUNTERCLOCKWISE,
-            roundaboutExit = 3, distanceMetres = 150,
+            roundaboutExit = 3, nextManeuverDistanceMetres = 150,
         )
         assertEquals(156, packet[1].toInt() and 255)
         assertEquals(3, packet[2].toInt() and 255)
@@ -88,7 +88,7 @@ class TftPacketEncoderTest {
             current = Maneuver.TURN_RIGHT,
             next = 0,
             roundaboutExit = 0,
-            distanceMetres = 500,
+            nextManeuverDistanceMetres = 500,
         )
 
         // 500 == 0x0001F4, so the OEM puts F4 in the first distance byte.
@@ -127,7 +127,7 @@ class TftPacketEncoderTest {
             current = Maneuver.STRAIGHT,
             next = 0,
             roundaboutExit = 0,
-            distanceMetres = Int.MAX_VALUE,
+            nextManeuverDistanceMetres = Int.MAX_VALUE,
         )
 
         assertArrayEquals(
@@ -141,12 +141,17 @@ class TftPacketEncoderTest {
      * shows 277 m on 8210 against 280 m on 8230 in the same second.
      */
     @Test
-    fun onlyTheTripManeuverDistanceIsRoundedToTenMetres() {
+    /**
+     * The two distance fields are different quantities, not copies: the maneuver packet
+     * carries the gap to the maneuver *after* the current one (the OEM's `a0`/`g`), and the
+     * trip packet the distance to the one being approached (`N`/`f`), floored to 10 m.
+     */
+    fun theManeuverAndTripDistancesCarryDifferentQuantities() {
         val maneuver = TftPacketEncoder.maneuver(Maneuver.TURN_RIGHT, 0, 0, 277)
         assertEquals(277, le24(maneuver, 5))
 
         val trip = TftPacketEncoder.trip(0L, destinationDistanceMetres = 0, maneuverDistanceMetres = 277)
-        assertEquals(280, le24(trip, 6))
+        assertEquals(270, le24(trip, 6))
     }
 
     private fun le24(packet: ByteArray, offset: Int): Int =
