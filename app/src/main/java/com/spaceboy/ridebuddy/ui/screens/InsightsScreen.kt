@@ -51,6 +51,7 @@ import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.Metric
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,7 +150,7 @@ fun InsightsScreen(
             )
         }
         Text(
-            "Fuel estimates use mileage reported while moving and exclude idling. Incomplete fuel estimates are unavailable; averages exclude telemetry gaps.",
+            "Fuel and mileage are estimated from the bike's reported mileage while moving; averages exclude telemetry gaps.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -168,6 +169,7 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
     }
     val hasData = values.any { it > 0.0 }
     val color = MaterialTheme.colorScheme.primary
+    val grid = MaterialTheme.colorScheme.outlineVariant
     val locale = LocalConfiguration.current.locales[0]
 
     Card(
@@ -182,31 +184,30 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (hasData) {
-                val maximum = values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    values.forEachIndexed { index, distance ->
-                        Column(
-                            modifier = Modifier.width(60.dp).semantics(mergeDescendants = true) {
-                                contentDescription = "Ride ${index + 1}: ${UnitFormatter.distance(distancesKilometres[index], units, locale)}"
-                            },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text("%.1f".format(locale, distance), style = MaterialTheme.typography.labelSmall)
-                            Box(Modifier.height(100.dp).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                                Box(
-                                    Modifier.width(32.dp).height((distance / maximum * 100).coerceAtLeast(2.0).dp)
-                                        .background(color, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)),
-                                )
-                            }
-                            Text("${index + 1}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
-                        }
-                    }
+                LineChart(
+                    values = values,
+                    height = 120.dp,
+                    topPadding = 12.dp,
+                    color = color,
+                    contentDescription = "Distance for the last ${values.size} rides, oldest to newest",
+                    strokeWidth = 3f,
+                    fillAlpha = 0.4f,
+                    drawBaseline = true,
+                    baselineColor = grid,
+                )
+                // A single ride has no trend to read off the line, so the figures stay in text.
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        "Longest ${UnitFormatter.distance(distancesKilometres.max(), units, locale)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Latest ${UnitFormatter.distance(distancesKilometres.last(), units, locale)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text(UnitFormatter.distanceUnit(units), style = MaterialTheme.typography.labelSmall)
             }
         }
     }
