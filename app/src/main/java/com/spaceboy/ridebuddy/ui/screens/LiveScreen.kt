@@ -275,8 +275,8 @@ fun LiveScreen(
                                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
                             ),
                         ) {
-                            Icon(Icons.Outlined.Close, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                             Text("End route")
                         }
                         Button(
@@ -284,8 +284,8 @@ fun LiveScreen(
                             modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.large,
                         ) {
-                            Icon(Icons.Outlined.Directions, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                             Text(stringResource(R.string.navigation_full_map))
                         }
                     }
@@ -328,8 +328,8 @@ fun LiveScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.large,
                     ) {
-                        Icon(Icons.Outlined.Directions, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                         Text("Start navigation")
                     }
                 }
@@ -511,8 +511,8 @@ private fun ConnectionCard(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             } else {
                 Button(onClick = onConnectBike) {
-                    Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                     Text("Find my bike")
                 }
             }
@@ -593,22 +593,25 @@ private fun TelemetryCard(
                 Metric("Mileage", UnitFormatter.mileage(frame.instantaneousMileageKilometresPerLitre, units, locale))
             }
 
+            // Arrangement.End rather than SpaceBetween: with no ride recording the label is
+            // absent, and SpaceBetween would then push the lone button row back to the start.
+            // The weight keeps the label from crowding the buttons when it is present.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    activeRide?.let { "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}" }.orEmpty(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (activeRide != null) {
-                        TextButton(onClick = onEndRide) { Text("End ride") }
-                    }
-                    TextButton(onClick = onDetails) { Text("Live details") }
+                activeRide?.let {
+                    Text(
+                        "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onEndRide) { Text("End ride") }
+                    Spacer(Modifier.width(8.dp))
                 }
+                TextButton(onClick = onDetails) { Text("Live details") }
             }
         }
     }

@@ -21,11 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -148,7 +148,7 @@ class NavigationActivity : ComponentActivity() {
                                             if (routeReadyState.value) navigator?.let(::showWholeRoute)
                                         }
                                     },
-                                shape = RoundedCornerShape(24.dp),
+                                shape = MaterialTheme.shapes.extraLarge,
                             ) {
                                 Column(
                                     Modifier.fillMaxWidth().padding(20.dp),
@@ -170,11 +170,18 @@ class NavigationActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         if (routeReadyState.value) {
-                                            Icon(Icons.Outlined.Navigation, contentDescription = null)
+                                            Icon(
+                                                Icons.Outlined.Navigation,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(ButtonDefaults.IconSize),
+                                            )
                                         } else {
-                                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                            CircularProgressIndicator(
+                                                Modifier.size(ButtonDefaults.IconSize),
+                                                strokeWidth = 2.dp,
+                                            )
                                         }
-                                        Spacer(Modifier.width(8.dp))
+                                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                                         Text(if (routeReadyState.value) "Go" else "Finding route…")
                                     }
                                 }
@@ -186,7 +193,7 @@ class NavigationActivity : ComponentActivity() {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             ElevatedCard(
                                 modifier = Modifier.padding(32.dp),
-                                shape = RoundedCornerShape(28.dp),
+                                shape = MaterialTheme.shapes.extraLarge,
                                 colors = CardDefaults.elevatedCardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 ),
@@ -223,8 +230,12 @@ class NavigationActivity : ComponentActivity() {
                                             }
                                         },
                                     ) {
-                                        Icon(Icons.Outlined.Refresh, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
+                                        Icon(
+                                            Icons.Outlined.Refresh,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(ButtonDefaults.IconSize),
+                                        )
+                                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                                         Text(getString(R.string.navigation_retry))
                                     }
                                 }

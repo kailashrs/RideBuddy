@@ -23,6 +23,47 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StationaryTftValidatorTest {
+    /**
+     * The phase exists to be watched, so each state the rider is asked about has to stay up
+     * long enough to read. At protocol pacing the whole sequence flickered past in under a
+     * second and a missing screen looked the same as one replaced too fast.
+     */
+    @Test
+    fun `each call state the rider must confirm is held on the display`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val holds = mutableListOf<Long>()
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = { holds += it.inWholeMilliseconds },
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftPhase.Calls)
+
+        // Caller name and number draw nothing on their own, so they keep protocol pacing.
+        assertEquals(listOf(200L, 200L), holds.take(2))
+        // Ringing, answered, ended and outgoing each put a screen up.
+        assertTrue(holds.drop(2).all { it >= 2_000L })
+    }
+
+    @Test
+    fun `the assembled guidance screen is held before it is cleared`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val holds = mutableListOf<Long>()
+        val validator = StationaryTftValidator(
+            connection,
+            pauseBetweenWrites = { holds += it.inWholeMilliseconds },
+            elapsedRealtimeMillis = { now },
+        )
+
+        validator.run(StationaryTftPhase.Navigation)
+
+        // Exactly one pause is long: the one after the screen is complete and before the clear.
+        assertEquals(1, holds.count { it >= 2_000L })
+    }
+
     @Test
     fun `the call surface walks every state and ends with the call cleared`() = runBlocking {
         val now = 10_000L

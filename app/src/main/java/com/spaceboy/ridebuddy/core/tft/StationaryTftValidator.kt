@@ -9,6 +9,7 @@ import com.spaceboy.ridebuddy.domain.BikeWrite
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -28,7 +29,7 @@ enum class StationaryTftPhase { Navigation, Calls }
  */
 class StationaryTftValidator(
     private val connection: BikeConnection,
-    private val pauseBetweenWrites: suspend () -> Unit = { delay(200.milliseconds) },
+    private val pauseBetweenWrites: suspend (Duration) -> Unit = { delay(it) },
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     /**
@@ -53,7 +54,7 @@ class StationaryTftValidator(
             if (!connection.writeAndAwait(BikeWrite(frame.characteristic, frame.payload, frame.mode))) {
                 return StationaryTftTestResult.Failed(frame.characteristic, index)
             }
-            if (index != frames.lastIndex) pauseBetweenWrites()
+            if (index != frames.lastIndex) pauseBetweenWrites(frame.hold)
         }
         return StationaryTftTestResult.Succeeded(frames.size)
     }
@@ -120,6 +121,8 @@ class StationaryTftValidator(
                     BleCharacteristics.NavigationSpeedLimit,
                     TftPacketEncoder.speedLimit(60),
                     BikeWriteMode.NoResponsePreferred,
+                    // The guidance screen is complete at this point; the clear is next.
+                    hold = DisplayHold,
                 ),
             )
             add(Frame(BleCharacteristics.NavigationClear, TftPacketEncoder.clear()))
@@ -146,12 +149,14 @@ class StationaryTftValidator(
      * before the next one is sent.
      */
     private fun callFrames(): List<Frame> = listOf(
+        // Caller identity draws nothing on its own; it is the state that puts a screen up.
         Frame(BleCharacteristics.CallerName, TftCallEncoder.callerName(TestCallerName)),
         Frame(BleCharacteristics.CallerNumber, TftCallEncoder.callerNumber(TestCallerNumber)),
-        Frame(BleCharacteristics.CallState, TftCallEncoder.ringing()),
-        Frame(BleCharacteristics.CallState, TftCallEncoder.accepted()),
-        Frame(BleCharacteristics.CallState, TftCallEncoder.ended()),
-        Frame(BleCharacteristics.CallState, TftCallEncoder.outgoing()),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ringing(), hold = DisplayHold),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.accepted(), hold = DisplayHold),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ended(), hold = DisplayHold),
+        Frame(BleCharacteristics.CallState, TftCallEncoder.outgoing(), hold = DisplayHold),
+        // Last frame: nothing waits on it, and it is the state the phase tidies up to.
         Frame(BleCharacteristics.CallState, TftCallEncoder.ended()),
     )
 
@@ -186,9 +191,28 @@ class StationaryTftValidator(
         val characteristic: UUID,
         val payload: ByteArray,
         val mode: BikeWriteMode = BikeWriteMode.Default,
+        /**
+         * How long to leave this frame on the display before writing the next one.
+         *
+         * [WritePacing] is protocol pacing and is all a frame needs when it is only
+         * assembling state the rider cannot see yet. [DisplayHold] is for the frames that
+         * change what is actually drawn: this test exists to be *looked at*, and at pacing
+         * speed the whole call sequence flickered past in under a second, so a rider could
+         * not tell a missing screen from one that was merely replaced too fast.
+         */
+        val hold: Duration = WritePacing,
     )
 
     private companion object {
+        /** Protocol pacing between writes, matching the OEM's own loop. */
+        val WritePacing = 200.milliseconds
+
+        /**
+         * How long a state the rider is asked to confirm stays up. Long enough to look down
+         * at the cluster and read it, short enough that the whole parked test stays brief.
+         */
+        val DisplayHold = 2_500.milliseconds
+
         // Session and status values; see TftNavigationBridge for the full vocabulary.
         const val RouteRequested = 80
         const val GuidanceActive = 87
