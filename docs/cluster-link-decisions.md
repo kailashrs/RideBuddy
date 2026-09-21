@@ -191,6 +191,16 @@ into a session, until its indication arrives. The reads never shortened that wai
 export recording "cluster software never acquired" is explained by the indication simply not having
 arrived in that window.
 
+**Re-confirmed, and the wait is longer than "minutes".** Nine btsnoop captures covering 118 minutes
+of connected telemetry across eleven sessions — the longest 31 minutes — contain **no `8810`
+indication at all**, while `8910` delivered the VIN twenty times over the same window. The only
+unprompted traffic from the cluster is telemetry, the handlebar control byte, the VIN, and two
+GATT Service Changed indications. So the ten-minute observation is not a period and not a bound:
+whatever prompts `8810` is not elapsed time, and nothing the app sends appears to prompt it. The
+ingestion path needs no change — it already accepts the value whenever it arrives, from either the
+notification or read callback — and adding a read back would reintroduce the `mDeviceBusy` hazard
+above to fetch eight bytes of zeros.
+
 **Reversal criteria.** A capture showing a `READ_RSP` on either characteristic that carries a real
 value. One zero-filled response is not a firmware quirk to design around; a populated one would mean
 the read is worth issuing after all.
@@ -247,12 +257,70 @@ Raised during review and dismissed with reasons. Recorded so they are not re-rai
 | Identity values already arrive via subscriptions | Correct, but not for the reason first given. It was withdrawn as unevidenced structural inference; the stationary capture later established it on the wire — see [D4](#d4) |
 | The identity reads were fixing a real gap | The commit history says so, but the reads return zero-filled buffers. Whatever populated the values was the indication, not the read |
 
+
+<a id="d7"></a>
+
+### D7 — Calls come from Telecom, not from notifications
+
+**Decision.** An `InCallService`, bound because the app declares `CALL_COMPANION_APP`. No call
+state is read from notifications, and the deprecated `TelecomManager.acceptRingingCall()` /
+`endCall()` path and its opt-in toggle are deleted along with `ANSWER_PHONE_CALLS`.
+
+**Evidence.** Notification-derived call state cannot be made correct. A dialler may post the
+ringing call under one notification id and the in-call state under another; Truecaller does exactly
+that, seen in a bugreport as `HeadsUpViewBinder … 0|com.truecaller|2131365434|…` for ringing against
+`OngoingCallVM: InCall(notifKey=0|com.truecaller|2131364602|null|…)` for the call itself. Answering
+therefore *removes* the notification being tracked, which is indistinguishable from the call ending —
+the cluster announced "call ended" at the moment the rider answered.
+
+The platform names this replacement itself: `acceptRingingCall()` carries `@deprecated Companion
+apps for wearable devices should use the InCallService API instead`. `CALL_COMPANION_APP` is
+`prot=normal`, so it is granted at install, needs no runtime prompt, does not make the app the
+default dialler, and does not take calls from one — a net reduction against `ANSWER_PHONE_CALLS`.
+
+**Rejected: keeping the notification path as a fallback.** It has no case left where it is more
+correct, and two sources of truth for one call is how the false "call ended" survived review.
+
+**Rejected: `READ_CALL_LOG` + `CALL_PHONE` for the cluster's last-called list.** That list is PBAP,
+served by Android's own stack over the bike's *classic* bond, and dialling from it needs HFP, which
+the observed pairing has never negotiated. Neither app can substitute: the OEM has no dial path at
+all — no `ACTION_CALL`, no `tel:`, no `placeCall` — and its `CALL_PHONE` permission is declared and
+unused. Two restricted permissions would have bought nothing.
+
+**Reversal criteria.** Telecom failing to bind the service on a supported device, or a call state
+the `Call.STATE_*` vocabulary cannot express that the cluster needs.
+
+<a id="d8"></a>
+
+### D8 — The texting app is resolved by role, and toggled in one place
+
+**Decision.** No SMS app is named in the supported-app table. Whichever app holds Android's
+default-SMS role is resolved at runtime and treated as the Messages entry. The per-category alert
+switches are removed; the per-app list is the only control, with the categories as its headings.
+
+**Rationale.** Only the default-SMS role holder receives texts, so naming candidates was both
+incomplete and redundant — Truecaller was in the table purely because it was one rider's choice, and
+kept a hardcoded package comparison alive in the icon path. A role holder is routinely a dialler
+too, so only message-shaped notifications from it light the icon.
+
+Two switches for one behaviour, either able to veto the other, is a worse control than one. The
+categories still group the list because the firmware's icons *are* per category — every messaging
+app shares `6`/`7` — but grouping is not a control.
+
+**Consequence: the stored set is inverted.** An enabled-set cannot express "on by default" for a
+package discovered at runtime, so exclusions are stored and absence means enabled. Existing choices
+migrate: anything a rider had switched off stays off.
+
+**Reversal criteria.** A cluster icon that distinguishes individual apps rather than kinds, which
+would make per-app control mean something the category headings cannot express.
+
 ---
 
 ## Hardware unknowns
 
 Questions the source cannot answer. Each needs a parked bike.
 
+- What prompts the cluster to emit its software version on `8810`? Not elapsed time — see [D4](#d4).
 - Does the cluster require passing through preview `83` before `87` on a direct start?
 - Does one-control-per-tick session entry behave differently from a batched entry?
 - Do any fields go missing under single-pass writing? (See [D1](#d1) reversal criteria.)

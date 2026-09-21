@@ -15,10 +15,19 @@ diagnostics screen that said "Last error: none" after a link drop.
 | `BikeCompanionDeviceService` | report BLE presence edges | start a second GATT attempt |
 | `MainActivity` | request one launch-time attempt | resume after the retry budget is spent |
 
-The backoff schedule is 1, 2, 4, 8, 16, 30 seconds and then stops. Stopping publishes
-`BikeConnectionState.Failed(retriesExhausted = true)`. Only a fresh `BLE_APPEARED` edge or an
-explicit user retry may start again — `shouldAutoConnectOnLaunch` is what keeps an app relaunch
-from silently handing the stack a new budget.
+A cycle is three attempts in total — the first plus two retries, at 1 s and 2 s — counted by
+`ConnectionAttemptBudget` so the initial `connectGatt()` cannot sit outside the bound that is
+supposed to contain it. Spending the budget publishes
+`BikeConnectionState.Failed(retriesExhausted = true)`, and suppression is persisted *before* that
+state is published so a presence callback already in flight cannot hand the cycle a fresh budget.
+
+Only a fresh `BLE_APPEARED` edge or an explicit user retry may start again —
+`shouldAutoConnectOnLaunch` is what keeps an app relaunch from silently handing the stack a new
+budget, and an unmatched disappearance is remembered so a duplicate appearance cannot reopen a
+spent cycle while a real one still can.
+
+Giving up ends the ride as well as the link: the ride is saved, and every queued display write is
+dropped so nothing from the last outing replays onto the next one.
 
 `EVENT_BT_CONNECTED` is classic-Bluetooth/HID connectivity. It is journaled and otherwise ignored.
 

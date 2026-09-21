@@ -10,7 +10,7 @@ vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 - **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and mileage metrics with automatic ride recording.
 - **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
 - **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities.
-- **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and standard phone app call controls directly to the motorcycle's display.
+- **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and handlebar call controls directly to the motorcycle's display. Calls come from Telecom, so they work with any dialler.
 - **Alerts & Priorities**: Handles competing phone notifications, imminent turns, and weather warnings without obscuring critical driving information.
 
 Vehicle writes are implemented behind opt-in controls and are disabled by
@@ -80,17 +80,22 @@ verification never receives release secrets or builds a signed release.
 ## Bike and call setup
 
 1. Open **Settings → Motorcycle Connection** and associate the motorcycle in Android's system companion-device picker.
-2. Enable notification access under **Settings → Alerts & notifications** for TFT alerts, caller presentation, and standard call actions.
-3. Enable **Legacy call compatibility** only if the installed phone app does not expose working answer/decline actions. This optional fallback uses deprecated Telecom controls and does not make RideBuddy the default dialer.
-4. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
+2. Enable notification access under **Settings → Alerts & notifications** for the per-app icons on the display. Calls do not need it: they arrive through Telecom.
+3. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
 
-Truecaller is supported as a notification source for calls and messages. Structured Android
-CallStyle controls take precedence; legacy call controls use explicit English action labels.
-Message icons only accept message notifications, excluding missed-call, caller-ID, and
-promotional cards. The installed Truecaller version must expose notification actions for
-handlebar answer/end controls; real-phone validation is still required.
+Calls are read from Telecom through an `InCallService`, bound because the app holds the normal
+`CALL_COMPANION_APP` permission. That works with whatever dialler is installed, needs no runtime
+prompt, does not make RideBuddy the default dialler, and does not take calls away from one.
+Caller identity, call state and the handlebar answer/end controls all come from the call itself
+rather than from a notification, so a dialler that posts unusual notifications — or none — makes
+no difference.
+
+Text-message icons follow Android's default-SMS role rather than a list of app names, so whichever
+app the rider uses for texts is covered. Because an app holding that role is routinely a dialler
+too, only message-shaped notifications from it light the icon; its caller-ID, missed-call and
+promotional cards do not.
 
 **End ride** finishes and saves the ride in progress without ending the session: the bike stays
 connected, and recording resumes once the bike has come to a stop and sets off again. Automatic

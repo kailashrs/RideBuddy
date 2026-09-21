@@ -36,7 +36,7 @@ Keep setup linear and explain why each permission is needed.
 1. Welcome: “Your motorcycle, at a glance.”
 2. Bluetooth permission and explanation.
 3. Location permission and explanation for routes and ride recording.
-4. Optional notification access and legacy call-compatibility permission.
+4. Optional notification access, for the per-app icons on the display. Calls need no permission prompt: they arrive through Telecom under the install-time `CALL_COMPANION_APP` permission.
 5. Associate the bike via the system CompanionDeviceManager picker.
 6. Confirm the detected bike name and last four address characters.
 7. Pair and authenticate.
@@ -125,7 +125,6 @@ The phone screen can show the Google Navigation SDK map and guidance UI, while t
 - Distance to maneuver.
 - Road/destination text.
 - ETA and remaining distance.
-- Speed limit when available.
 
 The app should automatically suppress notification and media cards near an imminent turn. Temporary alerts must expire and restore the navigation state.
 
@@ -137,16 +136,26 @@ The primary destination flow is:
 Google Maps → Share → RideBuddy → resolve destination → route → BLE/TFT guidance
 ```
 
-The receiving screen should be a short confirmation sheet:
+The route is calculated first, and the rider confirms against the route rather than against the
+text they shared:
 
 ```text
-Navigate to?
-Koramangala, Bengaluru
+        ( whole route drawn on the map )
 
-[ Start automatically ]
+  Koramangala, Bengaluru
+  12.4 km • 21 min
+  [            Go            ]
 ```
 
-If the product decision remains fully automatic, this sheet should briefly confirm the destination and proceed without requiring another tap. If route calculation fails, show a clear retry state and leave the existing navigation untouched.
+The preview frames every segment of the route — the SDK's own overview stops at 45 minutes — and
+mirrors the destination, distance and ETA to the cluster as session `83`, so **Go** on the phone and
+**GO** on the handlebar start the same prepared navigator.
+
+There is deliberately no second prompt before this one. A confirmation sheet asking "Navigate to?"
+ahead of the preview asked the same question twice, the first time without showing the route.
+**Start shared destinations** now means "skip the preview as well", not "skip the sheet"; a typed
+link always stops at the preview. If route calculation fails, show a clear retry state and leave the
+existing navigation untouched.
 
 ## Live details bottom sheet
 
@@ -238,10 +247,10 @@ Organize settings by user intent:
 - Navigation: Google Navigation API key, units, voice guidance, route preferences, TFT text behavior.
 - Ride recording: automatic start/stop thresholds, storage, export.
 - Alerts: overspeed, RPM, acceleration, braking, weather, hazards.
-- Notifications: supported apps, preview length, priority behavior.
+- Notifications: one toggle per app, grouped by kind. The kinds are headings, not switches — a category switch above per-app switches gave two controls for the same thing, either able to silently veto the other. The text-message entry is whichever app holds the default-SMS role, resolved rather than listed.
 - Calls: caller display and TFT call controls.
 - Appearance: dynamic color, light/dark/system, contrast.
-- Permissions: Bluetooth, location, notification listener, and optional legacy phone-call access.
+- Permissions: Bluetooth, location, and the notification listener. Calls need none: `CALL_COMPANION_APP` is granted at install.
 - Background guidance: disclose and link to the optional "Allow all the time" location setting without blocking foreground navigation.
 - Bike association: Android's generic Companion Device picker and nearby-presence status; never a watch profile.
 - Diagnostics: protocol logs and test mode.

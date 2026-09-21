@@ -70,8 +70,8 @@ The CCCD used for notification/indication subscription is the standard descripto
 | Suffix | Direction in OEM flow | Static-analysis purpose | Notes |
 |---|---|---|---|
 | `8110` | phone → bike | notification/app-event state | Payload is `[0x0B, event, phoneBatteryPercent, 0x00]`, built by `looper.b.l(event, helper)`. Event **0** clears the icons; the OEM sends it three times when the cluster reports ready on `8740`. |
-| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, distanceLE[3], 0x00]` (9 bytes total). This distance is sent as-is — the 10 m rounding applies to `8230`'s maneuver distance, not this one (a capture shows `8210` carrying 277 m while `8230` carried 280 m in the same second). The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
-| `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x00]`. The OEM writes it every cycle, including 0. |
+| `8210` | phone → bike | current/next navigation pictogram | Payload builder is `[0x01, currentIcon, roundaboutExit, 0xFF, nextIcon, nextManeuverDistanceLE[3], 0x00]` (9 bytes total). **This distance is the gap to the maneuver *after* the current one, not the distance to the current one** — see below. The `0xFF` is a fixed wire delimiter separating `roundaboutExit` from `nextIcon`, not a "no next icon" placeholder. The distance is **little-endian** — see "24-bit distance fields" below. |
+| `8220` | phone → bike | navigation speed limit | Payload builder is `[0x02, speedLimit, 0x00]`. The OEM writes it every cycle, including 0, reading the posted limit off the route step. The pinned Google Navigation SDK 7.9.0 exposes no posted limit, so RideBuddy writes only the zeroing value on teardown and never a figure of its own. |
 | `8230` | phone → bike | navigation time/distance | Payload builder is `[0x03, minute, hour, destinationDistanceLE[3], maneuverDistanceLE[3], 0x00]`. Both distances are **little-endian**. `minute`/`hour` are an **arrival wall-clock time**, not a remaining duration: the OEM stores `remainingSeconds * 1000 + System.currentTimeMillis()` and reads `Calendar.get(HOUR_OF_DAY)` and `get(MINUTE)` off it, in the phone's default zone. A capture agrees — with 22.6 km left it sent a value exactly one ETA ahead of the capture clock. |
 | `8240` | phone → bike | navigation text rows | Payload builder is `[0x04, rowId, totalPacketLength, ASCII bytes..., 0x00]` — the same `0x00` terminator every other packet uses, confirmed on the wire (`04 02 14 ...6f6e746f20 00`). `totalPacketLength` is the ASCII byte count plus 4, capped at 20 for the 16-character row limit. Rows 0 and 1 are the two bottom lines and row 2 is the banner across the top. |
 | `8250` | phone → bike | navigation clear/reset | OEM clear packet is `[0xFF, 0x00]`. |
@@ -195,7 +195,7 @@ The OEM applies an exponential moving average with an alpha of `0.2` to this km/
 
 The OEM's navigation state is a set of fixed TFT fields rather than a drawing API:
 
-- `8210`: current and next maneuver icon, roundabout exit, and distance-to-current maneuver.
+- `8210`: current and next maneuver icon, roundabout exit, and distance to the *next* maneuver.
 - `8220`: speed-limit value.
 - `8230`: arrival/time and remaining-distance fields.
 - `8240`: three short text rows. The first two are populated by splitting one string at 16 characters; the third is independently truncated to 16 characters. UTF-8 is used by the app, but ASCII/Latin text is the safest first live-test assumption.
@@ -236,6 +236,34 @@ Rerouting is **not** a session change either. The OEM writes pictogram `203` wit
 on the banner, and pictogram `202` with `SIGNAL LOST` when GPS drops.
 
 ### 24-bit distance fields
+
+### The two distance fields are different quantities
+
+`8210`'s distance and `8230`'s maneuver distance are not two copies of one number, and an earlier
+reading of this document said they were (raw versus 10 m-rounded). The OEM's own packet builders
+settle it:
+
+```java
+public final int[] p() {                       // 8210
+    int i = (int) this.g;                      // g <- a0(), the NEXT step's length
+    int[] iArr = {this.q, this.d, this.e, 255, this.c, 0,0,0, this.N};
+    ... iArr[5..7] = split(i);
+}
+public final int[] f() {                       // 8230
+    int[] iArrQ  = q((int) this.f);            // f <- N(), distance to the CURRENT maneuver
+    int[] iArrQ2 = q((int) this.h);            // h <- P(), distance to the destination
+    ...
+}
+```
+
+`a0()` is called with the current step's own length — the gap between this maneuver and the next —
+while `N()` receives `Math.round(d / 10) * 10` over an int division, i.e. the distance to the
+maneuver being approached, **floored** to 10 m.
+
+Sending the current distance in both is what makes the cluster's next-maneuver panel show the same
+figure twice. It was observed doing exactly that: across 2299 matched packet pairs from live rides,
+1819 differed only by that rounding — `(123, 130)`, `(116, 120)`, `(99, 110)` — because both fields
+were carrying the same quantity.
 
 `8210` and `8230` carry their distances as three bytes, **least-significant byte first**. This is
 easy to misread from the decompiled builder, so the derivation is recorded here rather than
@@ -307,8 +335,9 @@ The OEM never marks an outgoing call answered; direction `2` stands until it end
 
 `8710` caller name is `[0x0A, up to 19 characters, zero-padded to 20]`, filtered to
 `[A-Za-z0-9 ]` with `Unknown Number` as the fallback. The OEM resolves the name by looking the
-number up in Contacts; RideBuddy takes the name the dialer already put in the notification, which
-needs no `READ_CONTACTS`.
+number up in Contacts (`ContactsContract.PhoneLookup`, hence its `READ_CONTACTS`); RideBuddy takes
+`Call.Details.getCallerDisplayName()`, which Telecom has already resolved, and falls back to the
+number from the `tel:` handle. Neither needs `READ_CONTACTS` here.
 
 `8760` caller number is unheadered: up to 20 bytes, zero-padded. The OEM writes `takeLast(10)` of
 the raw number, so an international number reaches the cluster without its country code. RideBuddy
@@ -395,9 +424,39 @@ The bundled `assets/ble_characteristic.json` lists 42 fixed maneuver labels with
 | Gmail | 14 | 15 |
 | Twitter/Lite | 32 | 33 |
 
-It does not carry arbitrary message text. A custom app wanting previews would need to reuse the navigation text rows and must arbitrate them against imminent turns.
+It does not carry arbitrary message text. A custom app wanting previews would need to reuse the
+navigation text rows and must arbitrate them against imminent turns.
 
-The OEM uses a notification listener for notification events and a legacy phone-state receiver for calls. Its call path writes caller name/number and state packets, listens for TFT control events, and invokes deprecated `TelecomManager` answer/end methods. The custom app instead treats the default phone app's `Notification.CallStyle` actions as the primary control contract and offers the OEM-style Telecom path only as an explicit compatibility fallback. It does not declare an `InCallService`, request the default-dialer role, or misclassify the motorcycle as a wearable companion.
+The icon set is therefore the vocabulary, not a curation policy: an event number the firmware does
+not recognise draws nothing rather than a generic icon, and the numbers identify a *kind* of
+notification rather than an app — every messaging app shares `6`/`7`. The OEM keys its own table on
+the app's uppercased display label (`"WHATSAPP"`, `"INSTAGRAM"`, `"GMAIL"`…), which is
+locale-dependent and changes if an app renames itself; RideBuddy keys on package name, and resolves
+the text-message entry from Android's default-SMS role rather than naming candidates.
+
+The OEM uses a notification listener for icon events and a legacy `PHONE_STATE` receiver for calls,
+resolving the caller's number from the broadcast (which is why it requests `READ_CALL_LOG`) and the
+name through `ContactsContract.PhoneLookup`. It answers and ends with the deprecated
+`TelecomManager.acceptRingingCall()` / `endCall()`. It has no dial path at all — no `ACTION_CALL`,
+no `tel:` URI, no `placeCall` — so its `CALL_PHONE` permission is declared and unused.
+
+RideBuddy takes calls from Telecom instead, through an `InCallService` bound because it holds
+`CALL_COMPANION_APP` (a *normal* permission, granted at install). That is the replacement the
+platform itself names: `acceptRingingCall()` carries `@deprecated Companion apps for wearable
+devices should use the InCallService API instead`. Caller identity comes from `Call.Details`, state
+from `Call.STATE_*`, and the handlebar controls act via `Call.answer()` / `Call.disconnect()`.
+
+Reading calls out of notifications was tried and abandoned. It cannot be made correct: a dialler
+may post the ringing call under one notification id and the in-call state under another, and
+Truecaller does exactly that, so answering removes the notification being tracked — indistinguishable
+from the call ending. The cluster said "call ended" at the moment the rider answered.
+
+**The last-called list on the cluster is not this app's traffic.** It arrives over classic
+Bluetooth PBAP, served by Android's own stack: the bike bonds twice, once as an LE device
+(`0x1812`, HID-over-GATT — the companion link) and once as a BR/EDR device of class `0x240418`
+carrying `PBAP=100`. Dialling from that list needs HFP, which the observed pairing has never
+negotiated (`HEADSET=-1`, `isActiveHfpDevice(false)`, and Telecom's `BluetoothDeviceManager` never
+lists the bike). No companion app — the OEM's or this one — can substitute for it.
 
 ## What is not confirmed exposed
 
