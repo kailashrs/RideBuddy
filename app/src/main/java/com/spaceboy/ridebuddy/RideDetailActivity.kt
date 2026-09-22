@@ -73,6 +73,8 @@ import com.spaceboy.ridebuddy.data.RideEventDetector
 import com.spaceboy.ridebuddy.data.TelemetryChartData
 import com.spaceboy.ridebuddy.data.telemetryChartData
 import com.spaceboy.ridebuddy.data.RideSample
+import com.spaceboy.ridebuddy.data.writeGpx
+import com.spaceboy.ridebuddy.data.writeSampleCsv
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.ui.components.LineChart
@@ -145,7 +147,7 @@ class RideDetailActivity : ComponentActivity() {
                     checkNotNull(contentResolver.openOutputStream(uri)) { "Could not open the selected document" }
                         .bufferedWriter().use { writer ->
                             when (format) {
-                                RideExportFormat.Csv -> writer.writeCsv(exportSamples)
+                                RideExportFormat.Csv -> writer.writeSampleCsv(exportSamples)
                                 RideExportFormat.Gpx -> writer.writeGpx(exportRide, exportSamples)
                             }
                         }
@@ -713,37 +715,3 @@ private fun DeleteRideDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
 
 /** CSV for spreadsheets and analysis; GPX for mapping and fitness tools. */
 private enum class RideExportFormat { Csv, Gpx }
-
-/**
- * Full sample series as CSV. Timestamps are ISO-8601 and every value is in SI units,
- * independent of the rider's display preference, so an export is self-describing.
- *
- * The acceleration column is the largest magnitude seen over each stored interval rather
- * than an instantaneous reading, which is what survives thinning — hence its name.
- */
-private fun Writer.writeCsv(samples: List<RideSample>) {
-    appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,mileage_km_per_litre,peak_acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
-    samples.forEach { sample ->
-        appendLine(listOf(Instant.ofEpochMilli(sample.timestampMillis), sample.speedKph, sample.rpm, sample.throttlePercent, sample.mileageKilometresPerLitre ?: "", sample.accelerationMetresPerSecondSquared, sample.latitude ?: "", sample.longitude ?: "", sample.accuracyMetres ?: "", sample.altitudeMetres ?: "").joinToString(","))
-    }
-}
-
-/**
- * The route as a GPX 1.1 track. Samples without a location are skipped rather than emitted
- * as zeroes, which would draw a line through the Gulf of Guinea. Coordinates are formatted
- * with [Locale.US] because GPX requires a dot decimal separator regardless of locale.
- */
-private fun Writer.writeGpx(ride: Ride, samples: List<RideSample>) {
-    append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"RideBuddy\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><name>Ride ")
-    append(ride.id.toString())
-    append("</name><trkseg>")
-    samples.forEach { sample ->
-        val lat = sample.latitude ?: return@forEach
-        val lon = sample.longitude ?: return@forEach
-        if (!lat.isFinite() || lat !in -90.0..90.0 || !lon.isFinite() || lon !in -180.0..180.0) return@forEach
-        append(String.format(Locale.US, "<trkpt lat=\"%.7f\" lon=\"%.7f\">", lat, lon))
-        sample.altitudeMetres?.takeIf(Double::isFinite)?.let { append(String.format(Locale.US, "<ele>%.2f</ele>", it)) }
-        append("<time>").append(Instant.ofEpochMilli(sample.timestampMillis).toString()).append("</time></trkpt>")
-    }
-    append("</trkseg></trk></gpx>")
-}

@@ -6,6 +6,7 @@ import java.time.ZonedDateTime
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import java.util.HexFormat
 import org.junit.Test
 
 class TftPacketEncoderTest {
@@ -276,7 +277,7 @@ class TftPacketEncoderTest {
         }
     }
 
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+    private fun ByteArray.toHex(): String = HexFormat.of().formatHex(this)
 
     private fun rowText(row: ByteArray): String =
         row.copyOfRange(3, 3 + payloadLength(row)).toString(Charsets.UTF_8)

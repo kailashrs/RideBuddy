@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.core.navigation
 
 import com.google.android.libraries.navigation.NavigationApi
 import java.security.MessageDigest
+import java.util.HexFormat
 
 /**
  * Applies the Navigation SDK key, which can only be set once per process.
@@ -39,10 +40,9 @@ class GoogleNavigationSdkGateway {
         }
     }
 
-    private fun String.fingerprint(): String = MessageDigest
-        .getInstance("SHA-256")
-        .digest(toByteArray(Charsets.UTF_8))
-        .joinToString(separator = "") { byte -> "%02x".format(byte) }
+    private fun String.fingerprint(): String = HexFormat.of().formatHex(
+        MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8)),
+    )
 }
 
 sealed interface ConfigureResult {

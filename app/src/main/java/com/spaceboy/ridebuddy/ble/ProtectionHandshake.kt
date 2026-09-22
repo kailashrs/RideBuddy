@@ -32,9 +32,5 @@ object ProtectionHandshake {
 
     /** The response to write back, or null when the challenge is not in the table. */
     fun responseFor(challenge: ByteArray): ByteArray? =
-        responsesByChallenge[challenge.toHex()]?.hexToByteArray()
-
-    private fun String.hexToByteArray(): ByteArray = chunked(2)
-        .map { pair -> pair.toInt(16).toByte() }
-        .toByteArray()
+        responsesByChallenge[challenge.toHex()]?.hexToBytes()
 }

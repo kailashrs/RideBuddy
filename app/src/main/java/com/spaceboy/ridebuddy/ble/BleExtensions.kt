@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ble
 
+import java.util.HexFormat
 import java.util.UUID
 import java.util.regex.Pattern
 
@@ -79,9 +80,22 @@ const val BikeHogpServiceUuidString: String =
 /** True when an advertised name belongs to the RS 457 family (case-insensitive). */
 fun String.isApriliaBikeName(): Boolean = contains(RsFamilyPrefix, ignoreCase = true)
 
-/** Renders bytes as upper-case hex, for log lines and protocol lookup keys. */
-internal fun ByteArray.toHex(separator: String = ""): String =
-    joinToString(separator) { "%02X".format(it.toInt() and 0xFF) }
+// Two formats rather than a separator argument: only these two are used, and a HexFormat is
+// immutable and thread-safe, so they are built once instead of per call. The previous
+// per-byte String.format spun up a Formatter for every byte of every frame.
+
+private val Hex = HexFormat.of().withUpperCase()
+
+private val SpacedHex = HexFormat.ofDelimiter(" ").withUpperCase()
+
+/** Upper-case hex, for protocol lookup keys. */
+internal fun ByteArray.toHex(): String = Hex.formatHex(this)
+
+/** Upper-case hex with the bytes separated, for log lines. */
+internal fun ByteArray.toSpacedHex(): String = SpacedHex.formatHex(this)
+
+/** Bytes from upper- or lower-case hex. Throws on anything that is not valid hex. */
+internal fun String.hexToBytes(): ByteArray = Hex.parseHex(this)
 
 /**
  * The last four hex digits of a UUID — the characteristic suffix (`8410`, `8730`, …)

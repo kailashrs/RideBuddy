@@ -119,6 +119,10 @@ To remove a ride outright rather than just its detail, open it from History and 
 the top bar. That takes its distance and fuel out of your totals and records as well, so it is
 confirmed first.
 
+Exports carry the raw values, not your display units, so a file means the same thing whatever the
+app was set to when you took it. A GPX track is named for where the ride went — "Koramangala to
+Electronic City" — falling back to the ride's number when the geocoder resolved nothing.
+
 **Backup** is Android's own. The app keeps a summary snapshot current and the backup rules name
 that file and the rider's preferences, nothing else — the Navigation API key and everything
 describing the pairing with a specific motorcycle are outside the backup set by construction.

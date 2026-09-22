@@ -709,7 +709,7 @@ internal class AndroidBikeConnection(
         if (!isCurrent(callbackGatt)) return
         captureRecorder.record(BleCaptureDirection.Notification, uuid, value)
         val now = System.currentTimeMillis()
-        val frameLine = "${uuid.shortName()} ${value.toHex(" ")}"
+        val frameLine = "${uuid.shortName()} ${value.toSpacedHex()}"
         if (uuid != BleCharacteristics.Telemetry) {
             diagnosticsRecorder.recordNotification(frameLine, now)
         }
@@ -758,7 +758,7 @@ internal class AndroidBikeConnection(
                     2 -> BikeControlEvent.SkipManeuver
                     3 -> BikeControlEvent.ExitNavigation
                     else -> {
-                        log("Unhandled navigation control ${value.toHex(" ")}")
+                        log("Unhandled navigation control ${value.toSpacedHex()}")
                         null
                     }
                 }?.let(mutableControls::tryEmit)
@@ -773,7 +773,7 @@ internal class AndroidBikeConnection(
                 2 -> BikeControlEvent.ClusterReady
                 3 -> BikeControlEvent.ClusterCallActive
                 else -> {
-                    log("Unhandled call control ${value.toHex(" ")}")
+                    log("Unhandled call control ${value.toSpacedHex()}")
                     null
                 }
             }?.let(mutableControls::tryEmit)

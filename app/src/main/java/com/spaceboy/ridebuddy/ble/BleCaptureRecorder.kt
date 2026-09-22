@@ -145,7 +145,7 @@ data class BleCaptureEntry(
 ) {
     fun format(): String {
         val timestamp = TimestampFormatter.format(Instant.ofEpochMilli(timestampMillis))
-        val bytes = payload.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+        val bytes = payload.toSpacedHex()
         return listOfNotNull(timestamp, direction.label, characteristic, bytes, outcome)
             .joinToString("  ")
     }
