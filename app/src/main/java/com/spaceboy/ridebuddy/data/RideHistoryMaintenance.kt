@@ -65,6 +65,5 @@ internal class RideHistoryMaintenance(
 
     private companion object {
         const val LogTag = "RideHistoryMaintenance"
-        const val MillisPerDay = 86_400_000L
     }
 }

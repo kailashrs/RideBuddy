@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.ble
 
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
+import java.util.HexFormat
 
 /**
  * An immutable 48-bit Bluetooth address, held packed into a `Long`.
@@ -24,23 +25,18 @@ class BluetoothAddress private constructor(private val packed: Long) {
     }
 
     /** Canonical upper-case colon-separated form, e.g. `AA:BB:CC:DD:EE:FF`. */
-    override fun toString(): String = buildString(CanonicalAddressLength) {
-        toByteArray().forEachIndexed { index, byte ->
-            if (index > 0) append(':')
-            val value = byte.toInt() and 0xFF
-            append(HexDigits[value ushr 4])
-            append(HexDigits[value and 0x0F])
-        }
-    }
+    override fun toString(): String = CanonicalHex.formatHex(toByteArray())
 
     override fun equals(other: Any?): Boolean = other is BluetoothAddress && packed == other.packed
 
     override fun hashCode(): Int = packed.hashCode()
 
     companion object {
+        /** Both directions of the canonical `AA:BB:CC:DD:EE:FF` text form. */
+        private val CanonicalHex = HexFormat.ofDelimiter(":").withUpperCase()
+
         private const val AddressSizeBytes = 6
         private const val CanonicalAddressLength = 17
-        private const val HexDigits = "0123456789ABCDEF"
         private const val MaximumPackedAddress = 0xFFFFFFFFFFFFL
 
         /** Reads back a persisted address, rejecting anything wider than 48 bits. */
@@ -54,25 +50,17 @@ class BluetoothAddress private constructor(private val packed: Long) {
             return BluetoothAddress(packed)
         }
 
-        /** Parses text-only platform callback values. Connection code uses [toByteArray], not this text. */
+        /**
+         * Parses text-only platform callback values. Connection code uses [toByteArray], not
+         * this text.
+         *
+         * The length is checked first because [CanonicalHex] validates the separators and the
+         * digits but not how many of them there are — it reads `CC:B3:1E:C1:E1` as a perfectly
+         * good five-byte value. Parsing is case-insensitive whichever case the format writes.
+         */
         fun parse(value: String?): BluetoothAddress? {
             val text = value?.trim()?.takeIf { it.length == CanonicalAddressLength } ?: return null
-            var packed = 0L
-            repeat(AddressSizeBytes) { index ->
-                val offset = index * 3
-                if (index > 0 && text[offset - 1] != ':') return null
-                val high = text[offset].hexValue() ?: return null
-                val low = text[offset + 1].hexValue() ?: return null
-                packed = (packed shl Byte.SIZE_BITS) or ((high shl 4) or low).toLong()
-            }
-            return BluetoothAddress(packed)
-        }
-
-        private fun Char.hexValue(): Int? = when (this) {
-            in '0'..'9' -> code - '0'.code
-            in 'A'..'F' -> code - 'A'.code + 10
-            in 'a'..'f' -> code - 'a'.code + 10
-            else -> null
+            return fromBytes(runCatching { CanonicalHex.parseHex(text) }.getOrNull())
         }
     }
 }

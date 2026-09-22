@@ -3,7 +3,9 @@ package com.spaceboy.ridebuddy.core.alerts
 import com.spaceboy.ridebuddy.core.location.RideLocation
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
+import android.net.Uri
 import java.net.HttpURLConnection
+import java.util.Locale
 import java.net.URL
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -108,12 +110,7 @@ class WeatherAlertProvider(
     }
 
     private suspend fun fetch(location: RideLocation): WeatherSnapshot = withContext(Dispatchers.IO) {
-        val endpoint = URL(
-            "https://api.open-meteo.com/v1/forecast" +
-                "?latitude=${location.latitude}&longitude=${location.longitude}" +
-                "&current=weather_code,precipitation,wind_gusts_10m" +
-                "&hourly=precipitation_probability&forecast_hours=3&timezone=auto",
-        )
+        val endpoint = URL(forecastUrl(location.latitude, location.longitude))
         val connection = endpoint.openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = NetworkTimeoutMillis
@@ -173,3 +170,30 @@ class WeatherAlertProvider(
         const val EarthRadiusKilometres = 6_371.0
     }
 }
+
+/**
+ * The forecast request for one position.
+ *
+ * Built with [Uri.Builder] rather than by concatenation so the values are encoded rather
+ * than trusted to contain nothing that needs it.
+ */
+internal fun forecastUrl(latitude: Double, longitude: Double): String = Uri.Builder()
+    .scheme("https")
+    .authority("api.open-meteo.com")
+    .appendEncodedPath("v1/forecast")
+    .appendQueryParameter("latitude", latitude.asCoordinate())
+    .appendQueryParameter("longitude", longitude.asCoordinate())
+    .appendQueryParameter("current", "weather_code,precipitation,wind_gusts_10m")
+    .appendQueryParameter("hourly", "precipitation_probability")
+    .appendQueryParameter("forecast_hours", "3")
+    .appendQueryParameter("timezone", "auto")
+    .build()
+    .toString()
+
+/**
+ * Fixed point, because `Double.toString` switches to scientific notation below a thousandth:
+ * a position within about a hundred metres of the equator or the prime meridian would have
+ * been sent as `1.0E-5`, and nothing promises the service reads that as a number. Six places
+ * is roughly a tenth of a metre, far finer than a forecast grid.
+ */
+internal fun Double.asCoordinate(): String = String.format(Locale.US, "%.6f", this)

@@ -71,6 +71,9 @@ data class RoutePoint(val latitude: Double, val longitude: Double) {
         longitude.isFinite() && longitude in -180.0..180.0
 }
 
+/** Shared by everything that turns a number of days into a cutoff. */
+internal const val MillisPerDay = 86_400_000L
+
 /** Window the insights screen aggregates over. A null [days] means no lower bound. */
 enum class InsightPeriod(val days: Int?) {
     Today(0),

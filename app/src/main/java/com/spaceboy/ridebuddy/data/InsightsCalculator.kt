@@ -137,7 +137,6 @@ object InsightsCalculator {
         )
     }
 
-    private const val MillisPerDay = 86_400_000L
 
     /** Rides in the trend sparkline. Enough to show a shape, few enough to stay legible. */
     private const val DistanceTrendRides = 14
