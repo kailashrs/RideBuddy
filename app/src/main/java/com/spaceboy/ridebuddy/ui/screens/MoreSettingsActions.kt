@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import com.spaceboy.ridebuddy.data.SampleRetention
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 
@@ -27,6 +28,7 @@ data class MoreSettingsActions(
     val onHazardAlertsChanged: (Boolean) -> Unit,
     val onTftNavigationOutputChanged: (Boolean) -> Unit,
     val onTftTextModeChanged: (TftTextMode) -> Unit,
+    val onSampleRetentionChanged: (SampleRetention) -> Unit,
     val onThemeModeChanged: (ThemeMode) -> Unit,
     val onDynamicColorChanged: (Boolean) -> Unit,
     val onHighContrastChanged: (Boolean) -> Unit,

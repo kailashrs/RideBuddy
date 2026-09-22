@@ -30,9 +30,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -170,6 +172,16 @@ class RideDetailActivity : ComponentActivity() {
         setContent {
             Rs457Theme(themeMode = appSettings.themeMode, dynamicColor = appSettings.dynamicColor, highContrast = appSettings.highContrast) {
                 val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+                var confirmDelete by rememberSaveable { mutableStateOf(false) }
+                if (confirmDelete) {
+                    DeleteRideDialog(
+                        onDismiss = { confirmDelete = false },
+                        onConfirm = {
+                            confirmDelete = false
+                            deleteRide(rideId)
+                        },
+                    )
+                }
                 Scaffold(
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
                     topBar = {
@@ -178,6 +190,16 @@ class RideDetailActivity : ComponentActivity() {
                             navigationIcon = {
                                 IconButton(onClick = ::finish) {
                                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                                }
+                            },
+                            actions = {
+                                // Enabled only once the ride has loaded: there is nothing to
+                                // confirm deleting while the screen still says "Loading".
+                                IconButton(
+                                    onClick = { confirmDelete = true },
+                                    enabled = loadState is RideDetailLoadState.Loaded,
+                                ) {
+                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete ride")
                                 }
                             },
                             scrollBehavior = scrollBehavior,
@@ -247,6 +269,25 @@ class RideDetailActivity : ComponentActivity() {
                 throw cancellation
             } catch (_: Exception) {
                 loadState = RideDetailLoadState.Error("This ride could not be loaded")
+            }
+        }
+    }
+
+    /**
+     * Deletes the ride and leaves the screen.
+     *
+     * There is nothing left to show once it is gone, and the history list this returns to
+     * observes the repository, so it updates without being told.
+     */
+    private fun deleteRide(rideId: Long) {
+        lifecycleScope.launch {
+            try {
+                appContainer.rideRepository.delete(rideId)
+                finish()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                Toast.makeText(this@RideDetailActivity, "This ride could not be deleted", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -444,23 +485,44 @@ private fun RideDetailContent(
                 }
             }
         }
-        item(key = "chart_speed", contentType = "telemetry_chart") {
-            TelemetryChart("Speed", UnitFormatter.speedUnit(units), data.speedValues)
-        }
-        item(key = "chart_rpm", contentType = "telemetry_chart") {
-            TelemetryChart("Engine speed", "rpm", data.rpmValues)
-        }
-        item(key = "chart_throttle", contentType = "telemetry_chart") {
-            TelemetryChart("Throttle", "%", data.throttleValues)
-        }
-        item(key = "ride_events", contentType = "events_card") {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Ride events", style = MaterialTheme.typography.titleMedium)
-                    if (data.events.isEmpty()) Text("No hard acceleration or braking events detected", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    data.events.forEach { event ->
-                        val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
-                        Text("%s • %s • %+.1f m/s²".format(locale, label, UnitFormatter.formatTime(event.timestampMillis), event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
+        // Charts and events need the sample series, which ages out under the rider's
+        // retention setting while the ride itself is kept. Three empty axes would read as a
+        // recording fault rather than as detail that was deliberately let go.
+        if (data.hasSamples) {
+            item(key = "chart_speed", contentType = "telemetry_chart") {
+                TelemetryChart("Speed", UnitFormatter.speedUnit(units), data.speedValues)
+            }
+            item(key = "chart_rpm", contentType = "telemetry_chart") {
+                TelemetryChart("Engine speed", "rpm", data.rpmValues)
+            }
+            item(key = "chart_throttle", contentType = "telemetry_chart") {
+                TelemetryChart("Throttle", "%", data.throttleValues)
+            }
+            item(key = "ride_events", contentType = "events_card") {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Ride events", style = MaterialTheme.typography.titleMedium)
+                        if (data.events.isEmpty()) Text("No hard acceleration or braking events detected", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        data.events.forEach { event ->
+                            val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
+                            Text("%s • %s • %+.1f m/s²".format(locale, label, UnitFormatter.formatTime(event.timestampMillis), event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        } else {
+            item(key = "telemetry_unavailable", contentType = "summary_card") {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Detailed telemetry", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "This ride no longer keeps its second-by-second telemetry, so the " +
+                                "charts, ride events and CSV export are unavailable. Everything " +
+                                "above is kept for good. Change how long detail is kept under " +
+                                "Settings → Ride Data & Export.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -620,15 +682,47 @@ private fun TelemetryChart(title: String, unit: String, series: TelemetryChartDa
     }
 }
 
+/**
+ * Confirms deleting one ride.
+ *
+ * Says what a rider cannot get back and what it changes beyond this screen: unlike telemetry
+ * ageing out, deleting a ride takes its distance and fuel out of every total on Insights.
+ */
+@Composable
+private fun DeleteRideDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null) },
+        title = { Text("Delete this ride?") },
+        text = {
+            Text(
+                "This permanently removes the ride, its route and its telemetry from this " +
+                    "device, and takes its distance and fuel out of your totals and records. " +
+                    "Export it first if you want to keep it.",
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text("Delete") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 /** CSV for spreadsheets and analysis; GPX for mapping and fitness tools. */
 private enum class RideExportFormat { Csv, Gpx }
 
 /**
  * Full sample series as CSV. Timestamps are ISO-8601 and every value is in SI units,
  * independent of the rider's display preference, so an export is self-describing.
+ *
+ * The acceleration column is the largest magnitude seen over each stored interval rather
+ * than an instantaneous reading, which is what survives thinning — hence its name.
  */
 private fun Writer.writeCsv(samples: List<RideSample>) {
-    appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,mileage_km_per_litre,acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
+    appendLine("timestamp_iso,speed_kph,rpm,throttle_percent,mileage_km_per_litre,peak_acceleration_mps2,latitude,longitude,accuracy_m,altitude_m")
     samples.forEach { sample ->
         appendLine(listOf(Instant.ofEpochMilli(sample.timestampMillis), sample.speedKph, sample.rpm, sample.throttlePercent, sample.mileageKilometresPerLitre ?: "", sample.accelerationMetresPerSecondSquared, sample.latitude ?: "", sample.longitude ?: "", sample.accuracyMetres ?: "", sample.altitudeMetres ?: "").joinToString(","))
     }

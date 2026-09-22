@@ -1,25 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    What leaves the device through Android's backup service.
+
+    These are allowlists. Naming even one <include> stops everything else being backed up,
+    so anything the app stores in future is outside the backup set until someone deliberately
+    puts it here. That is the point: the Navigation API key lives in shared preferences, and a
+    rule that worked by listing exclusions would leak it the day somebody forgot one. Listing
+    the sensitive files as exclusions as well is not available as a safety net — lint rejects
+    an exclude that is not inside an included path, precisely because the include already
+    excluded it.
+
+    Two things go:
+
+      backup/rides.backup  ride summaries, written by RideBackupStore. Not the database —
+                           that carries the telemetry sample series, which is around half a
+                           megabyte for every hour ridden against a 25 MB allowance for the
+                           whole app, so it would blow the budget in a couple of days and
+                           then stop backing anything up at all.
+      app_settings.xml     the rider's preferences. Nothing secret, nothing tied to a device.
+
+    Everything else stays behind, and the two kinds that matter are worth naming.
+    secure_navigation_settings holds the Navigation API key. bike_identity, associated_bike,
+    ble_protection_trust, bike_connection_demand and connection_diagnostics each describe one
+    bond between this phone and one motorcycle, so restoring them onto a different phone would
+    describe a pairing that does not exist.
+
+    disableIfNoEncryptionCapabilities keeps ride history, which is location data, off any
+    device that cannot encrypt the backup with the rider's own lock screen.
+-->
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
-        <exclude domain="root" path="." />
-        <exclude domain="file" path="." />
-        <exclude domain="database" path="." />
-        <exclude domain="sharedpref" path="." />
-        <exclude domain="external" path="." />
-        <exclude domain="device_root" path="." />
-        <exclude domain="device_file" path="." />
-        <exclude domain="device_database" path="." />
-        <exclude domain="device_sharedpref" path="." />
+        <include domain="file" path="backup/rides.backup" />
+        <include domain="sharedpref" path="app_settings.xml" />
     </cloud-backup>
+
+    <!--
+        Device-to-device transfer has no 25 MB limit, but it restores through the same code
+        path as a cloud restore and gains nothing from diverging. Keeping the two identical
+        means there is one thing to reason about rather than two.
+    -->
     <device-transfer>
-        <exclude domain="root" path="." />
-        <exclude domain="file" path="." />
-        <exclude domain="database" path="." />
-        <exclude domain="sharedpref" path="." />
-        <exclude domain="external" path="." />
-        <exclude domain="device_root" path="." />
-        <exclude domain="device_file" path="." />
-        <exclude domain="device_database" path="." />
-        <exclude domain="device_sharedpref" path="." />
+        <include domain="file" path="backup/rides.backup" />
+        <include domain="sharedpref" path="app_settings.xml" />
     </device-transfer>
 </data-extraction-rules>

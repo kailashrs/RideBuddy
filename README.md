@@ -9,7 +9,8 @@ vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 - **Material You UI**: Adaptive layouts, light/dark modes, and dynamic color. Features Live, History, Insights, Info, and Settings destinations.
 - **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and mileage metrics with automatic ride recording.
 - **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
-- **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities.
+- **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities. Rides, records and insights are kept for good; each ride's second-by-second telemetry is kept for a rider-chosen window, one year by default.
+- **Backup**: Ride summaries and preferences ride along with Android's own backup, encrypted with the device lock screen and free of the rider's Drive quota. Telemetry detail stays on the device.
 - **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and handlebar call controls directly to the motorcycle's display. Calls come from Telecom, so they work with any dialler.
 - **Alerts & Priorities**: Handles competing phone notifications, imminent turns, and weather warnings without obscuring critical driving information.
 
@@ -102,7 +103,36 @@ connected, and recording resumes once the bike has come to a stop and sets off a
 connection attempts are limited to three per cycle; failure saves the ongoing ride and clears
 pending display output. Tap **Connect** to deliberately start another session.
 
+## Ride data, storage and backup
+
+A ride is stored as a summary plus a telemetry series. The summary is under a kilobyte and is
+what History, Insights, weekly totals, records and the route thumbnail are built from. The series
+is what makes history grow, at roughly 0.14 MB for every hour ridden, and it backs the per-ride
+speed, engine and throttle charts, the ride-events list, and the detailed CSV and GPX exports.
+
+**Settings → Ride Data & Export → Keep detailed telemetry** chooses how long each ride keeps its
+series — 30 days to Keep everything, one year by default. Only the series expires: rides, records
+and insights are kept indefinitely whatever the window, and a ride past it shows its summary and
+route with a note in place of the charts.
+
+To remove a ride outright rather than just its detail, open it from History and use **Delete** in
+the top bar. That takes its distance and fuel out of your totals and records as well, so it is
+confirmed first.
+
+**Backup** is Android's own. The app keeps a summary snapshot current and the backup rules name
+that file and the rider's preferences, nothing else — the Navigation API key and everything
+describing the pairing with a specific motorcycle are outside the backup set by construction.
+Backups are free, do not count against Drive quota, and are encrypted with the device lock screen
+on Android 9 and above; a device with no lock screen is not backed up at all. Restoring onto a new
+phone brings back every ride summary and the rider's settings. It does not bring back telemetry
+detail, which is far past the 25 MB the platform allows an app, so restored rides have no charts.
+The app never uploads anything itself.
+
+Decisions and measurements behind all of this are in
+[docs/ride-storage-decisions.md](docs/ride-storage-decisions.md).
+
 ## Project references
 
 - [Stationary vehicle validation checklist](docs/hardware-validation.md)
+- [Ride storage and backup decisions](docs/ride-storage-decisions.md)
 - [Material You product design](docs/app-ui-design.md)

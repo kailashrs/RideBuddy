@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Mail
@@ -95,6 +96,7 @@ import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationApps
 import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
+import com.spaceboy.ridebuddy.data.SampleRetention
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
@@ -275,6 +277,8 @@ fun SettingsScreen(
         item("ride-data") {
             RideDataSection(
                 rideCount = rideCount,
+                settings = settings,
+                settingsActions = settingsActions,
                 onExportRideHistory = onExportRideHistory,
                 onRequestClearHistory = { confirmClearRideHistory = true },
             )
@@ -791,6 +795,8 @@ private fun PermissionsSection(
 @Composable
 private fun RideDataSection(
     rideCount: Int,
+    settings: AppSettings,
+    settingsActions: MoreSettingsActions,
     onExportRideHistory: () -> Unit,
     onRequestClearHistory: () -> Unit,
 ) {
@@ -802,6 +808,23 @@ private fun RideDataSection(
             trailingContent = {
                 TextButton(onClick = onRequestClearHistory, enabled = rideCount > 0) { Text("Clear") }
             },
+        )
+        HorizontalDivider(Modifier.padding(start = 56.dp))
+        SettingsChoiceRow(
+            title = "Keep detailed telemetry",
+            choices = SampleRetention.entries,
+            selectedChoice = settings.sampleRetention,
+            icon = Icons.Outlined.Storage,
+            choiceLabel = SampleRetention::label,
+            onSelected = settingsActions.onSampleRetentionChanged,
+        )
+        Text(
+            "Rides, records and insights are kept for good. This is how long each ride also " +
+                "keeps its speed, engine and throttle charts and its detailed export, which is " +
+                "what makes stored history grow.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 56.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsRow(

@@ -17,6 +17,7 @@ import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.ThemeMode
+import com.spaceboy.ridebuddy.data.SampleRetention
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
@@ -322,6 +323,7 @@ class MainViewModel internal constructor(
     fun setWeatherAlerts(value: Boolean) = updateSettings { it.copy(weatherAlerts = value) }
     fun setHazardAlerts(value: Boolean) = updateSettings { it.copy(hazardAlerts = value) }
     fun setTftTextMode(value: TftTextMode) = updateSettings { it.copy(tftTextMode = value) }
+    fun setSampleRetention(value: SampleRetention) = updateSettings { it.copy(sampleRetention = value) }
     fun setThemeMode(value: ThemeMode) = updateSettings { it.copy(themeMode = value) }
     fun setDynamicColor(value: Boolean) = updateSettings { it.copy(dynamicColor = value) }
     fun setHighContrast(value: Boolean) = updateSettings { it.copy(highContrast = value) }

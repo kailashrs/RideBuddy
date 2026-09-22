@@ -119,7 +119,10 @@ data class RideWeekSummary(
  * One recorded moment of a ride: vehicle telemetry, plus a GPS fix when one was available.
  *
  * [accelerationMetresPerSecondSquared] is derived from the change in wheel speed between
- * consecutive samples rather than measured, so it is longitudinal only.
+ * consecutive samples rather than measured, so it is longitudinal only. On a sample read
+ * back from storage it is the largest magnitude seen over that sample's interval rather than
+ * the value at its instant, because a stored sample stands for the second around it — see
+ * [decimatedForStorage]. Live samples always carry their own instantaneous value.
  */
 data class RideSample(
     val timestampMillis: Long,

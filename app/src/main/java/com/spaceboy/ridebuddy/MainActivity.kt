@@ -182,6 +182,7 @@ class MainActivity : ComponentActivity() {
                     onHazardAlertsChanged = viewModel::setHazardAlerts,
                     onTftNavigationOutputChanged = viewModel::setTftNavigationOutput,
                     onTftTextModeChanged = viewModel::setTftTextMode,
+                    onSampleRetentionChanged = viewModel::setSampleRetention,
                     onThemeModeChanged = viewModel::setThemeMode,
                     onDynamicColorChanged = viewModel::setDynamicColor,
                     onHighContrastChanged = viewModel::setHighContrast,

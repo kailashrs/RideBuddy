@@ -51,7 +51,7 @@
 
     <application
         android:name=".RideBuddyApplication"
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_launcher"

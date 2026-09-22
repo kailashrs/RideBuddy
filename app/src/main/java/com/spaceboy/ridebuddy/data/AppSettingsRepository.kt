@@ -30,6 +30,26 @@ enum class ThemeMode { System, Light, Dark }
 enum class TftTextMode { Full, Compact }
 
 /**
+ * How long a ride's telemetry samples are kept.
+ *
+ * Only the samples expire. The ride, its summary figures, its records and its route preview
+ * are kept for good, so history, insights and weekly totals reach back as far as they ever
+ * did however short a window this is — what ages out is a ride's detail charts and its
+ * per-sample exports.
+ *
+ * The series is what makes history grow: a summary is under a kilobyte, while samples run to
+ * roughly half a megabyte for every hour ridden. A window is what turns unbounded growth
+ * into a ceiling, which is why the default is a generous one rather than [Forever].
+ */
+enum class SampleRetention(val days: Int?, val label: String) {
+    ThirtyDays(30, "30 days"),
+    NinetyDays(90, "90 days"),
+    SixMonths(182, "6 months"),
+    OneYear(365, "1 year"),
+    Forever(null, "Keep everything"),
+}
+
+/**
  * Every user preference, as one immutable value.
  *
  * Replaced wholesale on each change rather than mutated, so Compose can skip on it. The
@@ -63,6 +83,7 @@ data class AppSettings(
     val weatherAlerts: Boolean = false,
     val hazardAlerts: Boolean = false,
     val tftTextMode: TftTextMode = TftTextMode.Full,
+    val sampleRetention: SampleRetention = SampleRetention.OneYear,
     val themeMode: ThemeMode = ThemeMode.System,
     val dynamicColor: Boolean = true,
     val highContrast: Boolean = false,
@@ -124,6 +145,7 @@ class AppSettingsRepository(context: Context) {
             putBoolean(KeyWeatherAlerts, updated.weatherAlerts)
             putBoolean(KeyHazardAlerts, updated.hazardAlerts)
             putString(KeyTftText, updated.tftTextMode.name)
+            putString(KeySampleRetention, updated.sampleRetention.name)
             putString(KeyTheme, updated.themeMode.name)
             putBoolean(KeyDynamicColor, updated.dynamicColor)
             putBoolean(KeyHighContrast, updated.highContrast)
@@ -169,6 +191,7 @@ class AppSettingsRepository(context: Context) {
             weatherAlerts = preferences.getBoolean(KeyWeatherAlerts, false),
             hazardAlerts = preferences.getBoolean(KeyHazardAlerts, false),
             tftTextMode = preferences.enum(KeyTftText, TftTextMode.Full),
+            sampleRetention = preferences.enum(KeySampleRetention, SampleRetention.OneYear),
             themeMode = preferences.enum(KeyTheme, ThemeMode.System),
             dynamicColor = preferences.getBoolean(KeyDynamicColor, true),
             highContrast = preferences.getBoolean(KeyHighContrast, false),
@@ -209,6 +232,7 @@ class AppSettingsRepository(context: Context) {
         const val KeyWeatherAlerts = "weather_alerts"
         const val KeyHazardAlerts = "hazard_alerts"
         const val KeyTftText = "tft_text_mode"
+        const val KeySampleRetention = "sample_retention"
         const val KeyTheme = "theme_mode"
         const val KeyDynamicColor = "dynamic_color"
         const val KeyHighContrast = "high_contrast"

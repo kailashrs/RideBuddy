@@ -245,7 +245,7 @@ Keep this behind an explicit diagnostics entry.
 Organize settings by user intent:
 
 - Navigation: Google Navigation API key, units, voice guidance, route preferences, TFT text behavior.
-- Ride recording: automatic start/stop thresholds, storage, export.
+- Ride recording: automatic start/stop thresholds, export, and how long each ride keeps its detailed telemetry. The retention choice sits with ride data rather than under storage or privacy, because what a rider is deciding is how much of a ride's detail to keep, not how many megabytes to spend. Say what survives it: rides, records and insights are kept for good.
 - Alerts: overspeed, RPM, acceleration, braking, weather, hazards.
 - Notifications: one toggle per app, grouped by kind. The kinds are headings, not switches — a category switch above per-app switches gave two controls for the same thing, either able to silently veto the other. The text-message entry is whichever app holds the default-SMS role, resolved rather than listed.
 - Calls: caller display and TFT call controls.
@@ -268,7 +268,7 @@ Use a standard Material 3 settings flow:
 - Mask the saved value and show only its final four characters after setup.
 - Provide Paste, Save, Replace, Remove, and Test configuration actions with appropriate button hierarchy.
 - Explain that the key must have Navigation SDK for Android enabled, billing configured, and Android application restrictions for this app's package and signing certificate.
-- Keep the key out of logs, analytics, screenshots, exports, backups, and crash reports.
+- Keep the key out of logs, analytics, screenshots, exports, backups, and crash reports. The backup rules are an allowlist naming two files, so the key is outside the backup set by construction rather than by an exclusion someone has to maintain.
 - Store it encrypted using Android Keystore-backed storage.
 - Never initialize the Navigation SDK until a configured key has been loaded.
 

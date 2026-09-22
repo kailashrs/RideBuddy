@@ -36,8 +36,9 @@ import kotlin.time.Duration.Companion.milliseconds
  * available, only adds the route trace and place labels.
  *
  * Two sample streams are kept for different purposes. The live window is a bounded recent
- * history for the UI, published on a throttle. The stored list is the full ride, thinned as
- * it grows so a long ride cannot grow without bound. All recording state is confined to a
+ * history for the UI, published on a throttle. The stored list is the full ride at the rate
+ * the vehicle sends it, halved as it grows so a long ride cannot grow without bound, and
+ * thinned once more on its way to the database. All recording state is confined to a
  * single-threaded dispatcher, which is why none of it is otherwise guarded.
  */
 class RideRecorder(
@@ -268,7 +269,9 @@ class RideRecorder(
             zeroToSixtyMillis = zeroToSixty,
             zeroToHundredMillis = zeroToHundred,
         )
-        saveQueue.enqueue(completedRide, completedSamples)
+        // Thinned only now, after the figures that need full resolution have been taken
+        // from the complete series. See decimatedForStorage.
+        saveQueue.enqueue(completedRide, completedSamples.decimatedForStorage())
         scope.launch { saveQueue.flush() }
     }
 
@@ -379,7 +382,13 @@ class RideRecorder(
         /** Live window: about two and a half minutes at the telemetry rate. */
         const val MaxLiveSamples = 600
 
-        /** Stored samples before the ride is thinned. Several hours at full resolution. */
+        /**
+         * Samples held in memory for a ride before the whole series is halved.
+         *
+         * This is the full-rate working copy, not what reaches the database — that is
+         * thinned once, at save time. Several hours at the telemetry rate, after which a
+         * ride is progressively coarsened rather than allowed to grow without bound.
+         */
         const val MaxStoredSamples = 36_000
 
         /** Beyond this gap, an acceleration figure would be an artefact of the gap itself. */

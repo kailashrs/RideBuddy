@@ -106,6 +106,11 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
+    // The real org.json, for unit tests only. android.jar ships stubs that throw at runtime,
+    // so without this the ride-backup format could only be exercised on a device. It is a
+    // test-only dependency: on device the platform's own implementation is used and nothing
+    // from this artifact is packaged.
+    testImplementation("org.json:json:20260814")
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
