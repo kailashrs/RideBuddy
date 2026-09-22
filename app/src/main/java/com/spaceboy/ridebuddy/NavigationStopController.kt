@@ -1,11 +1,16 @@
 package com.spaceboy.ridebuddy
 
 import android.app.Application
-import android.os.Handler
-import android.os.Looper
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** What a stop request did, so a caller with a UI can tell the rider. */
 enum class NavigationStopResult {
@@ -31,31 +36,44 @@ enum class NavigationStopResult {
  * foreground service and `NavigationActivity` deliberately detaches rather than stopping), so a
  * stop path that only existed on the Activity was dead exactly when the rider needed it.
  */
+/**
+ * How the SDK is asked for the navigator that is about to be stopped.
+ *
+ * A seam, because `NavigationApi.getNavigator` is a static call — which is what left the
+ * trickiest concurrency in the app with no test around it. The real implementation is
+ * [SdkNavigatorHandoff]; a test supplies one that calls back, errors, throws, or says nothing.
+ *
+ * The contract is the SDK's own: call back at most once, or throw.
+ */
+internal fun interface NavigatorHandoff {
+    fun request(onReady: (NavigationGuidanceSession) -> Unit, onError: () -> Unit)
+}
+
 class NavigationStopController internal constructor(
-    private val application: Application,
     private val guard: NavigationStartStopGuard,
     private val guidanceLifecycle: NavigationGuidanceLifecycle,
     private val clearOutput: () -> Unit,
+    private val scope: CoroutineScope,
+    private val handoff: NavigatorHandoff,
+    private val handoffTimeout: Duration = NavigatorHandoffTimeout,
 ) {
-    private val timeoutHandler = Handler(Looper.getMainLooper())
+    internal constructor(
+        application: Application,
+        guard: NavigationStartStopGuard,
+        guidanceLifecycle: NavigationGuidanceLifecycle,
+        clearOutput: () -> Unit,
+        scope: CoroutineScope,
+    ) : this(guard, guidanceLifecycle, clearOutput, scope, SdkNavigatorHandoff(application))
 
     /**
-     * Stops guidance and clears the cluster.
+     * Stops guidance and clears the cluster, reporting the outcome to [onResult].
      *
-     * The navigator has to be fetched asynchronously even to stop it, which is why this is
-     * callback-shaped. Every path reports exactly one result — including the three failure
-     * paths where the SDK never usefully calls back: an immediate throw, an error callback,
-     * and no callback at all.
+     * The guard is claimed before anything suspends, so a caller that stops navigation and
+     * then tears down the connection still has the stop registered by the time the teardown
+     * begins — the ordering the handlebar and the disconnect path both rely on.
      *
-     * That last one is why there is a timeout. `getNavigator` makes no promise to call back,
-     * and a request that is never answered leaves `stopInProgress` set forever, so every later
-     * press of the handlebar EXIT button returns [NavigationStopResult.AlreadyStopping] and
-     * guidance can no longer be stopped from anywhere. The timeout releases the guard and
-     * reports [NavigationStopResult.Failed], which is the honest answer: nothing was stopped.
-     *
-     * It deliberately does **not** clear the cluster. Guidance may well still be running, and
-     * a display cleared out from under a live route is worse than one that keeps showing it —
-     * the rider would be navigating with no turn prompts and no indication why.
+     * [onResult] is not called when another request takes the stop over; that one owns the
+     * outcome. See [stopAndAwait].
      */
     fun stop(onResult: (NavigationStopResult) -> Unit = {}) {
         val stopRequestId = guard.beginStop()
@@ -63,46 +81,59 @@ class NavigationStopController internal constructor(
             onResult(NavigationStopResult.AlreadyStopping)
             return
         }
-        // The timeout runs on the main thread while the SDK may call back on another, so the
-        // two can race. Claiming the outcome once keeps the one-result-per-request contract
-        // above true rather than merely likely.
-        val settled = AtomicBoolean(false)
-        val timeout = Runnable {
-            if (!settled.compareAndSet(false, true)) return@Runnable
-            if (!guard.isCurrentStop(stopRequestId)) return@Runnable
-            guard.finishStop(stopRequestId)
-            onResult(NavigationStopResult.Failed)
-        }
-        timeoutHandler.postDelayed(timeout, NavigatorHandoffTimeoutMillis)
-        val started = runCatching {
-            NavigationApi.getNavigator(
-                application,
-                object : NavigationApi.NavigatorListener {
-                    override fun onNavigatorReady(navigator: Navigator) {
-                        if (!settled.compareAndSet(false, true)) return
-                        timeoutHandler.removeCallbacks(timeout)
-                        if (!guard.isCurrentStop(stopRequestId)) return
-                        onResult(finish(navigator, stopRequestId))
-                    }
+        scope.launch { completeStop(stopRequestId)?.let(onResult) }
+    }
 
-                    override fun onError(errorCode: Int) {
-                        if (!settled.compareAndSet(false, true)) return
-                        timeoutHandler.removeCallbacks(timeout)
-                        if (!guard.isCurrentStop(stopRequestId)) return
-                        guard.finishStop(stopRequestId)
-                        onResult(NavigationStopResult.Failed)
-                    }
-                },
-            )
-        }.isSuccess
-        if (!started && settled.compareAndSet(false, true)) {
-            timeoutHandler.removeCallbacks(timeout)
-            if (guard.isCurrentStop(stopRequestId)) {
-                guard.finishStop(stopRequestId)
-                onResult(NavigationStopResult.Failed)
+    /**
+     * The same stop, for a caller that can suspend.
+     *
+     * Null means a newer request superseded this one before it finished. That is not a
+     * failure and not a success: the request simply no longer owns the outcome, and reporting
+     * anything would be reporting on a stop that something else is now responsible for.
+     */
+    suspend fun stopAndAwait(): NavigationStopResult? {
+        val stopRequestId = guard.beginStop() ?: return NavigationStopResult.AlreadyStopping
+        return completeStop(stopRequestId)
+    }
+
+    private suspend fun completeStop(stopRequestId: Long): NavigationStopResult? {
+        val session = awaitSession()
+        if (!guard.isCurrentStop(stopRequestId)) return null
+        if (session == null) {
+            guard.finishStop(stopRequestId)
+            return NavigationStopResult.Failed
+        }
+        return finish(session, stopRequestId)
+    }
+
+    /**
+     * The navigator, or null when the handoff failed or never answered.
+     *
+     * `getNavigator` makes no promise to call back at all, and a request that is never
+     * answered used to leave `stopInProgress` set forever — after which every later press of
+     * the handlebar EXIT button returned [NavigationStopResult.AlreadyStopping] and guidance
+     * could no longer be stopped from anywhere. Hence the timeout.
+     *
+     * A late callback after the timeout is a no-op: the continuation is no longer active, so
+     * exactly one answer is produced whichever of the two arrives first. That is what used to
+     * need an `AtomicBoolean`, a `Handler` and three `removeCallbacks`.
+     */
+    private suspend fun awaitSession(): NavigationGuidanceSession? =
+        withTimeoutOrNull(handoffTimeout) {
+            suspendCancellableCoroutine { continuation ->
+                fun settle(session: NavigationGuidanceSession?) {
+                    if (continuation.isActive) continuation.resume(session)
+                }
+                try {
+                    handoff.request(onReady = { settle(it) }, onError = { settle(null) })
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // getNavigator can throw where it would otherwise have called back.
+                    settle(null)
+                }
             }
         }
-    }
 
     /**
      * Stops guidance, then cleans up.
@@ -113,17 +144,17 @@ class NavigationStopController internal constructor(
      * display — a cluster still showing a route that has ended is worse than an untidy
      * teardown.
      */
-    private fun finish(navigator: Navigator, stopRequestId: Long): NavigationStopResult {
-        if (runCatching(navigator::stopGuidance).isFailure) {
+    private fun finish(session: NavigationGuidanceSession, stopRequestId: Long): NavigationStopResult {
+        if (runCatching(session::stopGuidance).isFailure) {
             guard.finishStop(stopRequestId)
             return NavigationStopResult.Failed
         }
-        guidanceLifecycle.release(navigator)
+        guidanceLifecycle.release(session.identity)
         // The route is already stopped by this point, so a cleanup failure is worth reporting but
         // must not leave the cluster showing a route that is no longer running.
         val cleanupFailed = listOf(
-            runCatching(navigator::unregisterServiceForNavUpdates),
-            runCatching(navigator::cleanup),
+            runCatching(session::unregisterServiceForNavUpdates),
+            runCatching(session::cleanup),
         ).any { it.isFailure }
         clearOutput()
         guard.finishStop(stopRequestId)
@@ -138,6 +169,21 @@ class NavigationStopController internal constructor(
          * rider who presses EXIT and sees nothing happen can press it again and have the second
          * press mean something.
          */
-        const val NavigatorHandoffTimeoutMillis = 10_000L
+        val NavigatorHandoffTimeout = 10.seconds
+    }
+}
+
+/** The real handoff: the SDK's static request, wrapped in the session surface. */
+private class SdkNavigatorHandoff(private val application: Application) : NavigatorHandoff {
+    override fun request(onReady: (NavigationGuidanceSession) -> Unit, onError: () -> Unit) {
+        NavigationApi.getNavigator(
+            application,
+            object : NavigationApi.NavigatorListener {
+                override fun onNavigatorReady(navigator: Navigator) =
+                    onReady(NavigatorGuidanceSession(navigator))
+
+                override fun onError(errorCode: Int) = onError()
+            },
+        )
     }
 }

@@ -282,7 +282,7 @@ internal interface NavigationGuidanceSession {
 }
 
 /** The real implementation. Holds its own arrival listener so it can be removed again. */
-private class NavigatorGuidanceSession(
+internal class NavigatorGuidanceSession(
     private val navigator: Navigator,
 ) : NavigationGuidanceSession {
     private var arrivalListener: Navigator.ArrivalListener? = null

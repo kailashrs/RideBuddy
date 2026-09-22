@@ -130,6 +130,7 @@ class AppContainer(context: Context) {
             navigationFeed.clear()
             runCatching(tftNavigationBridge::stop)
         },
+        scope = applicationScope,
     )
     val stationaryTftValidator = StationaryTftValidator(bikeConnection)
     internal val notificationIconWriter = NotificationIconWriter(
