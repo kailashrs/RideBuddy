@@ -102,6 +102,7 @@ import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.ui.components.SettingsChoiceRow
 import com.spaceboy.ridebuddy.ui.components.SettingsRow
+import com.spaceboy.ridebuddy.ui.components.SettingsPickerRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSection
 import com.spaceboy.ridebuddy.ui.components.SettingsSliderRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
@@ -810,11 +811,11 @@ private fun RideDataSection(
             },
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsChoiceRow(
+        SettingsPickerRow(
+            icon = Icons.Outlined.Storage,
             title = "Keep detailed telemetry",
             choices = SampleRetention.entries,
             selectedChoice = settings.sampleRetention,
-            icon = Icons.Outlined.Storage,
             choiceLabel = SampleRetention::label,
             onSelected = settingsActions.onSampleRetentionChanged,
         )

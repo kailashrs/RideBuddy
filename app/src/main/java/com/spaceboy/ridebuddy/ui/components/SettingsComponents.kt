@@ -7,6 +7,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -86,7 +100,13 @@ internal fun SettingsSliderRow(
     }
 }
 
-/** These choices are exclusive, so Material 3 asks for a segmented button rather than chips. */
+/**
+ * Two or three exclusive choices with short labels, as a segmented button.
+ *
+ * Material 3 sizes a segmented button for labels a few characters long and gives each segment
+ * an equal share of the row, so a label that does not fit wraps inside its own segment rather
+ * than the row adapting. Anything longer or more numerous belongs in [SettingsPickerRow].
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun <T> SettingsChoiceRow(
@@ -126,6 +146,88 @@ internal fun <T> SettingsChoiceRow(
                 )
             }
         }
+    }
+}
+
+/**
+ * An exclusive choice with more options, or longer labels, than a segmented button can carry.
+ *
+ * The row shows the current choice the way every other settings row shows its state, and opens
+ * a single-choice dialog. That is the Material 3 form for this — a segmented button holding
+ * five phrases like "Keep everything" splits them mid-word, one character per line, because
+ * each segment is a fixed fraction of the row whatever the label needs.
+ *
+ * Each option is one accessibility node, not a radio button next to some text: the row carries
+ * the selection and the radio is decorative, which is the same reason [SettingsSwitchRow] gives
+ * its switch no callback of its own.
+ */
+@Composable
+internal fun <T> SettingsPickerRow(
+    icon: ImageVector,
+    title: String,
+    choices: List<T>,
+    selectedChoice: T,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    choiceLabel: (T) -> String = { it.toString() },
+    onSelected: (T) -> Unit,
+) {
+    var picking by rememberSaveable { mutableStateOf(false) }
+    SettingsRow(
+        icon = icon,
+        title = title,
+        supportingText = choiceLabel(selectedChoice),
+        modifier = modifier,
+        enabled = enabled,
+        onClick = { picking = true },
+        // No chevron: that points at another screen, and this opens a dialog. The current
+        // choice sitting under the title is what says the row does something.
+        trailingContent = {},
+    )
+    if (picking) {
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            title = { Text(title) },
+            text = {
+                // The dialog caps its own height but does not scroll what it is given.
+                Column(
+                    Modifier
+                        .selectableGroup()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    choices.forEach { choice ->
+                        val isSelected = choice == selectedChoice
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // The Material 3 minimum touch target, which the text alone
+                                // would not reach on a single line.
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = isSelected,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        onSelected(choice)
+                                        picking = false
+                                    },
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Null, so the row owns the click and a screen reader announces one
+                            // control rather than a button beside a label.
+                            RadioButton(selected = isSelected, onClick = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(choiceLabel(choice), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            // Choosing applies and closes, as Android's own settings do, so the only button
+            // left is the way out without choosing.
+            confirmButton = {
+                TextButton(onClick = { picking = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

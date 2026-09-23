@@ -244,6 +244,15 @@ Keep this behind an explicit diagnostics entry.
 
 Organize settings by user intent:
 
+Pick the control from the choice, not from habit. A segmented button is for two or three
+exclusive options whose labels are a word long — Full/Compact, System/Light/Dark. Each segment
+takes an equal share of the row whatever its label needs, so a longer or a fifth option wraps
+inside its own segment, one character per line, rather than the row adapting. Those belong in a
+list row that shows the current choice and opens a single-choice dialog, which is also how
+Android's own settings present the same shape of decision. The row gets no trailing chevron: a
+chevron points at another screen, and a dialog is not one.
+
+
 - Navigation: Google Navigation API key, units, voice guidance, route preferences, TFT text behavior.
 - Ride recording: automatic start/stop thresholds, export, and how long each ride keeps its detailed telemetry. The retention choice sits with ride data rather than under storage or privacy, because what a rider is deciding is how much of a ride's detail to keep, not how many megabytes to spend. Say what survives it: rides, records and insights are kept for good.
 - Alerts: overspeed, RPM, acceleration, braking, weather, hazards.
