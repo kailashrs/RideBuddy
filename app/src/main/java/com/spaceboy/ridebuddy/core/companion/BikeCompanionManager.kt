@@ -139,6 +139,15 @@ class BikeCompanionManager internal constructor(
                     .build(),
             )
             .setSingleDevice(false)
+            // The watch profile, because it is one of only two roles that grant the
+            // MANAGE_ONGOING_CALLS app-op, and that app-op is the sole route by which
+            // Telecom will bind a third-party InCallService. Without it the cluster gets no
+            // calls at all -- not a degraded view of them, none.
+            //
+            // The motorcycle is not a watch, and the system's consent dialog will say it is.
+            // Nothing lets us describe it accurately and still receive calls: the profiles
+            // are a fixed list, and the only other one carrying the app-op is glasses.
+            .setDeviceProfile(AssociationRequest.DEVICE_PROFILE_WATCH)
             .build()
 
         val callback = object : CompanionDeviceManager.Callback() {

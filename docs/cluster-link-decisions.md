@@ -262,9 +262,10 @@ Raised during review and dismissed with reasons. Recorded so they are not re-rai
 
 ### D7 — Calls come from Telecom, not from notifications
 
-**Decision.** An `InCallService`, bound because the app declares `CALL_COMPANION_APP`. No call
-state is read from notifications, and the deprecated `TelecomManager.acceptRingingCall()` /
-`endCall()` path and its opt-in toggle are deleted along with `ANSWER_PHONE_CALLS`.
+**Decision.** An `InCallService`, bound because the association asks for the
+`COMPANION_DEVICE_WATCH` device profile and the app declares `MANAGE_ONGOING_CALLS`. No call state
+is read from notifications, and the deprecated `TelecomManager.acceptRingingCall()` / `endCall()`
+path and its opt-in toggle are deleted along with `ANSWER_PHONE_CALLS`.
 
 **Evidence.** Notification-derived call state cannot be made correct. A dialler may post the
 ringing call under one notification id and the in-call state under another; Truecaller does exactly
@@ -274,9 +275,37 @@ therefore *removes* the notification being tracked, which is indistinguishable f
 the cluster announced "call ended" at the moment the rider answered.
 
 The platform names this replacement itself: `acceptRingingCall()` carries `@deprecated Companion
-apps for wearable devices should use the InCallService API instead`. `CALL_COMPANION_APP` is
-`prot=normal`, so it is granted at install, needs no runtime prompt, does not make the app the
-default dialler, and does not take calls from one — a net reduction against `ANSWER_PHONE_CALLS`.
+apps for wearable devices should use the InCallService API instead`.
+
+**Correction: this first shipped with `CALL_COMPANION_APP`, and no call ever reached the cluster.**
+That permission is not in the binding path. `InCallController.getInCallServiceType()` classifies a
+third-party non-UI service as bindable only when it holds `CONTROL_INCALL_EXPERIENCE` —
+`signature|privileged`, and the comment there says it is there "to verify it is a system app" — or
+when the `MANAGE_ONGOING_CALLS` app-op check passes. `CALL_COMPANION_APP` appears nowhere in
+`InCallController.java` or `TelecomServiceImpl.java`. Its `prot=normal` level was read as a
+convenience and should have been read as a warning: the platform does not gate call control behind
+a permission it grants at install without asking.
+
+Measured on a paired phone, with the service correctly declared and `CALL_COMPANION_APP` granted:
+`dumpsys telecom` listed only `com.truecaller/.incallui.service.InCallUIServiceV2` (dialer UI) and
+`com.vivo.pcsuite/.service.PcSuiteInCallService` (non-UI, holds `CONTROL_INCALL_EXPERIENCE`) across
+every recorded call. RideBuddy appeared in none of them, and
+`cmd appops get com.spaceboy.ridebuddy MANAGE_ONGOING_CALLS` read
+`default; rejectTime=+3h2m3s446ms ago` — Telecom had checked for exactly that app-op and refused.
+
+`MANAGE_ONGOING_CALLS` is `signature|appop`, so the permission is unreachable and the app-op is the
+only way in. Exactly two roles grant it, `COMPANION_DEVICE_WATCH` and `COMPANION_DEVICE_GLASSES`,
+both `systemOnly="false"`, both carrying it under `<app-op-permissions>`. A role grants only the
+app-op permissions an app declares, which is why `com.huawei.health` holds the watch role on the
+same phone and still has no app-op: it never asks for the permission.
+
+**Cost, accepted deliberately.** The motorcycle is not a watch, and Android's consent dialog will
+tell the rider it is. Nothing lets the device be described accurately and still receive calls — the
+profile list is fixed and glasses is the only alternative, which trades calendar access for
+microphone. The profile is set when the association is made and cannot be added afterwards, so a
+pairing from before this change never delivers calls and the motorcycle has to be paired again. The
+role also grants contacts, SMS, phone, calendar and notification access, far more than the call
+state and answer/hang-up this uses.
 
 **Rejected: keeping the notification path as a fallback.** It has no case left where it is more
 correct, and two sources of truth for one call is how the false "call ended" survived review.
@@ -287,8 +316,9 @@ the observed pairing has never negotiated. Neither app can substitute: the OEM h
 all — no `ACTION_CALL`, no `tel:`, no `placeCall` — and its `CALL_PHONE` permission is declared and
 unused. Two restricted permissions would have bought nothing.
 
-**Reversal criteria.** Telecom failing to bind the service on a supported device, or a call state
-the `Call.STATE_*` vocabulary cannot express that the cluster needs.
+**Reversal criteria.** Telecom failing to bind the service on a supported device *after* the watch
+profile is held, a call state the `Call.STATE_*` vocabulary cannot express that the cluster needs,
+or a future profile that carries the app-op without the rest of the role's bundle.
 
 <a id="d8"></a>
 

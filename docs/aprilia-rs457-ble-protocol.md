@@ -440,8 +440,10 @@ name through `ContactsContract.PhoneLookup`. It answers and ends with the deprec
 `TelecomManager.acceptRingingCall()` / `endCall()`. It has no dial path at all — no `ACTION_CALL`,
 no `tel:` URI, no `placeCall` — so its `CALL_PHONE` permission is declared and unused.
 
-RideBuddy takes calls from Telecom instead, through an `InCallService` bound because it holds
-`CALL_COMPANION_APP` (a *normal* permission, granted at install). That is the replacement the
+RideBuddy takes calls from Telecom instead, through an `InCallService`. Telecom binds it because
+the motorcycle is associated with the `COMPANION_DEVICE_WATCH` device profile, whose role grants
+the `MANAGE_ONGOING_CALLS` app-op that `InCallController` requires of any third-party non-UI
+service. That is the replacement the
 platform itself names: `acceptRingingCall()` carries `@deprecated Companion apps for wearable
 devices should use the InCallService API instead`. Caller identity comes from `Call.Details`, state
 from `Call.STATE_*`, and the handlebar controls act via `Call.answer()` / `Call.disconnect()`.

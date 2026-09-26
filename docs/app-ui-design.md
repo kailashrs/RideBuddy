@@ -36,7 +36,7 @@ Keep setup linear and explain why each permission is needed.
 1. Welcome: “Your motorcycle, at a glance.”
 2. Bluetooth permission and explanation.
 3. Location permission and explanation for routes and ride recording.
-4. Optional notification access, for the per-app icons on the display. Calls need no permission prompt: they arrive through Telecom under the install-time `CALL_COMPANION_APP` permission.
+4. Optional notification access, for the per-app icons on the display. Calls do not use it: they arrive through Telecom, which needs the motorcycle paired with the watch device profile rather than any runtime prompt.
 5. Associate the bike via the system CompanionDeviceManager picker.
 6. Confirm the detected bike name and last four address characters.
 7. Pair and authenticate.
@@ -259,7 +259,7 @@ chevron points at another screen, and a dialog is not one.
 - Notifications: one toggle per app, grouped by kind. The kinds are headings, not switches — a category switch above per-app switches gave two controls for the same thing, either able to silently veto the other. The text-message entry is whichever app holds the default-SMS role, resolved rather than listed.
 - Calls: caller display and TFT call controls.
 - Appearance: dynamic color, light/dark/system, contrast.
-- Permissions: Bluetooth, location, and the notification listener. Calls need none: `CALL_COMPANION_APP` is granted at install.
+- Permissions: Bluetooth, location, and the notification listener. Calls need no runtime prompt, but they do need the motorcycle paired with the watch device profile, which is consented to once in the system pairing dialog.
 - Background guidance: disclose and link to the optional "Allow all the time" location setting without blocking foreground navigation.
 - Bike association: Android's generic Companion Device picker and nearby-presence status; never a watch profile.
 - Diagnostics: protocol logs and test mode.

@@ -12,9 +12,11 @@ import com.spaceboy.ridebuddy.core.calls.tftCallStateForTelecom
 /**
  * The call source for the cluster.
  *
- * Telecom binds this because the app holds `CALL_COMPANION_APP`, which is what the platform
- * offers a companion device rather than a dialler — it does not make RideBuddy the default
- * dialler and does not take calls away from whichever app is.
+ * Telecom binds this because the motorcycle is associated with the `COMPANION_DEVICE_WATCH`
+ * device profile, whose role grants the `MANAGE_ONGOING_CALLS` app-op. That app-op, or the
+ * system-only `CONTROL_INCALL_EXPERIENCE`, is all `InCallController` will accept from a
+ * third-party non-UI service. Binding still does not make RideBuddy the default dialler and
+ * does not take calls away from whichever app is. See D7.
  *
  * This replaces reading calls out of notifications, which could not be made correct. A
  * dialler is free to post a ringing notification under one id and a separate in-call

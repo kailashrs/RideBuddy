@@ -21,11 +21,20 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Lets Telecom bind our InCallService as a companion-device app. A normal permission:
-         it is granted at install, does not make RideBuddy the default dialler, and does not
-         take calls away from whichever app is. This replaces ANSWER_PHONE_CALLS, which only
-         ever existed for the deprecated TelecomManager answer/end path. -->
-    <uses-permission android:name="android.permission.CALL_COMPANION_APP" />
+    <!-- What actually lets Telecom bind our InCallService. InCallController binds a
+         third-party non-UI service only when it holds CONTROL_INCALL_EXPERIENCE, which is
+         signature|privileged and so out of reach, or when this one passes its app-op check.
+         It is signature|appop, so the permission itself cannot be granted to us either; the
+         app-op is granted by the COMPANION_DEVICE_WATCH role, which the association asks
+         for. Declaring it here is what makes the role grant it, because a role only grants
+         app-op permissions the app has requested.
+
+         CALL_COMPANION_APP used to be here and did nothing. It appears nowhere in
+         InCallController or TelecomServiceImpl, and its normal protection level was the
+         tell: the platform does not hand out call control for a permission it grants at
+         install without asking. See D7. -->
+    <uses-permission android:name="android.permission.MANAGE_ONGOING_CALLS" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_PROFILE_WATCH" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />

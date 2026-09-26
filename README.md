@@ -86,12 +86,19 @@ verification never receives release secrets or builds a signed release.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
 
-Calls are read from Telecom through an `InCallService`, bound because the app holds the normal
-`CALL_COMPANION_APP` permission. That works with whatever dialler is installed, needs no runtime
-prompt, does not make RideBuddy the default dialler, and does not take calls away from one.
-Caller identity, call state and the handlebar answer/end controls all come from the call itself
-rather than from a notification, so a dialler that posts unusual notifications — or none — makes
-no difference.
+Calls are read from Telecom through an `InCallService`. Android binds one from a third-party app
+only when it holds the `MANAGE_ONGOING_CALLS` app-op, and the only way to get that is a companion
+association carrying a device profile — so the motorcycle is paired with the **watch** profile.
+The system's pairing dialog will describe your motorcycle as a watch and ask for contacts, SMS,
+phone and notification access; that is the profile's fixed bundle, and there is no narrower one
+that still delivers calls. A motorcycle paired before this requirement was met has no profile and
+will never receive calls, because a profile cannot be added to an existing pairing: forget the
+motorcycle and pair it again.
+
+This still works with whatever dialler is installed, does not make RideBuddy the default dialler,
+and does not take calls away from one. Caller identity, call state and the handlebar answer/end
+controls all come from the call itself rather than from a notification, so a dialler that posts
+unusual notifications — or none — makes no difference.
 
 Text-message icons follow Android's default-SMS role rather than a list of app names, so whichever
 app the rider uses for texts is covered. Because an app holding that role is routinely a dialler
