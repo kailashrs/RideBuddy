@@ -13,7 +13,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
-import java.net.URLDecoder
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
@@ -42,7 +41,8 @@ class DestinationParser(context: Context) {
             } else {
                 value
             }
-            directNavigationDestination(expanded) ?: geocode(expanded).getOrThrow()
+            directNavigationDestination(expanded)
+                ?: geocode(geocodableText(expanded) ?: throw UnreadableLinkException()).getOrThrow()
         }
         Result.success(destination)
     } catch (cancelled: CancellationException) {
@@ -98,8 +98,7 @@ class DestinationParser(context: Context) {
      * timeout of its own. A geocoder error is treated exactly like no result — either way
      * there is no destination, and the rider needs the same message.
      */
-    private suspend fun geocode(value: String): Result<NavigationDestination> {
-        val query = extractNavigationQuery(value)
+    private suspend fun geocode(query: String): Result<NavigationDestination> {
         val geocoder = Geocoder(appContext, Locale.getDefault())
         val address = withTimeoutOrNull(TimeoutMillis.toLong().milliseconds) {
             suspendCancellableCoroutine { continuation ->
@@ -145,6 +144,14 @@ internal class DestinationExpansionTimeoutException : IllegalArgumentException(
 )
 
 /**
+ * A Maps link that resolved but named no place — some shares carry only an internal feature
+ * id. Distinct from a failed lookup so the rider is told to reshare rather than to retype.
+ */
+internal class UnreadableLinkException : IllegalArgumentException(
+    "That link doesn't say where to go. In Google Maps, open the place and share it again.",
+)
+
+/**
  * Timeout for the next redirect hop: whatever is left of the shared budget, capped.
  *
  * Rounded *up* and floored at 1 ms, because `HttpURLConnection` reads a timeout of zero as
@@ -161,48 +168,3 @@ internal fun remainingExpansionTimeoutMillis(
     val roundedUpMillis = (remainingNanos + 999_999L) / 1_000_000L
     return roundedUpMillis.coerceAtMost(maximumMillis.toLong()).toInt().coerceAtLeast(1)
 }
-
-/**
- * Coordinates recoverable from the text without any network access.
- *
- * Tried twice: once against the raw text, and once against the URL's decoded query
- * parameter, since a shared link often carries the coordinates percent-encoded inside it.
- */
-internal fun directNavigationDestination(value: String): NavigationDestination? =
-    coordinateFromText(value) ?: coordinateFromText(extractNavigationQuery(value))
-
-private fun coordinateFromText(value: String): NavigationDestination? {
-    CoordinatePatterns.forEach { pattern ->
-        pattern.find(value)?.let { match ->
-            val latitude = match.groupValues[1].toDoubleOrNull() ?: return@let
-            val longitude = match.groupValues[2].toDoubleOrNull() ?: return@let
-            if (latitude in -90.0..90.0 && longitude in -180.0..180.0) {
-                return NavigationDestination(latitude, longitude, "Shared destination")
-            }
-        }
-    }
-    return null
-}
-
-/**
- * The destination parameter out of a Maps-style URL, or the input unchanged when it is not
- * a URL — which is the normal case for a typed address.
- */
-private fun extractNavigationQuery(value: String): String = runCatching {
-    val uri = URI(value)
-    val rawQuery = uri.rawQuery.orEmpty().split('&').associate {
-        val parts = it.split('=', limit = 2)
-        parts.first() to URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
-    }
-    rawQuery["destination"] ?: rawQuery["query"] ?: rawQuery["q"] ?: value
-}.getOrDefault(value)
-
-// Ordered most specific first: the Maps `@lat,lon` viewport marker, then a coordinate
-// carried in a query parameter or `geo:` URI, then a bare pair on its own. The digit
-// bounds keep them from matching arbitrary numbers elsewhere in a URL, and every match is
-// range-checked before it is accepted.
-private val CoordinatePatterns = listOf(
-    Regex("@(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
-    Regex("(?:[?&](?:q|query|destination)=|geo:)(-?\\d{1,2}(?:\\.\\d+)?),(-?\\d{1,3}(?:\\.\\d+)?)"),
-    Regex("^\\s*(-?\\d{1,2}(?:\\.\\d+)?)\\s*,\\s*(-?\\d{1,3}(?:\\.\\d+)?)\\s*$"),
-)

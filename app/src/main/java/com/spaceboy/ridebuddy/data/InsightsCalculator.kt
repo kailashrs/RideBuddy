@@ -17,39 +17,22 @@ object InsightsCalculator {
         rides: List<Ride>,
         period: InsightPeriod,
         clock: Clock = Clock.systemDefaultZone(),
-    ): RideInsights = calculate(rides, period, clock.millis(), clock.zone)
-
-    fun calculate(
-        rides: List<Ride>,
-        period: InsightPeriod,
-        nowMillis: Long,
-    ): RideInsights = calculate(rides, period, nowMillis, ZoneId.systemDefault())
+    ): RideInsights = calculate(rides, period, clock.millis())
 
     /**
-     * Aggregates the rides falling in [period], relative to [nowMillis] in [zone].
+     * Aggregates the rides falling in [period], relative to [nowMillis].
      *
-     * "Today" means since local midnight, which needs the zone; the other fixed periods are
-     * rolling windows back from now. Each also defines an equally long preceding window,
-     * which is what [RideInsights.distanceChangePercent] compares against.
+     * Every fixed period is a rolling window back from now, so no zone is needed: a tab
+     * labelled with a length covers exactly that length wherever the rider is. Each window
+     * also defines an equally long preceding one, which is what
+     * [RideInsights.distanceChangePercent] compares against.
      */
     fun calculate(
         rides: List<Ride>,
         period: InsightPeriod,
         nowMillis: Long,
-        zone: ZoneId,
     ): RideInsights {
         val (currentStart, previousStart) = when (period) {
-            InsightPeriod.Today -> {
-                val todayStart = Instant.ofEpochMilli(nowMillis)
-                    .atZone(zone)
-                    .toLocalDate()
-                    .atStartOfDay(zone)
-                    .toInstant()
-                    .toEpochMilli()
-                Pair(todayStart, Instant.ofEpochMilli(todayStart).atZone(zone).toLocalDate()
-                    .minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli())
-            }
-
             InsightPeriod.AllTime -> Pair(Long.MIN_VALUE, null)
             else -> {
                 val window = (period.days ?: 0) * MillisPerDay

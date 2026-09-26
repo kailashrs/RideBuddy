@@ -74,7 +74,7 @@ class LiveTelemetryCardTest {
         composeRule.onNodeWithText("Recording").assertDoesNotExist()
         // The card's own action stays put whether or not a ride is running, so its position
         // does not move under a thumb when recording starts.
-        composeRule.onNodeWithText("Live details").assertIsDisplayed()
+        composeRule.onNodeWithText("Details").assertIsDisplayed()
     }
 
     @Test
@@ -90,7 +90,7 @@ class LiveTelemetryCardTest {
     fun theCardsOwnActionOpensTheDetailsSheet() {
         show(ride = LiveCardFixture.recording())
 
-        composeRule.onNodeWithText("Live details").performClick()
+        composeRule.onNodeWithText("Details").performClick()
 
         // A section heading that exists only inside the sheet.
         composeRule.onNodeWithText("This ride").assertIsDisplayed()

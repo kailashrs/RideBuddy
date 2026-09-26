@@ -238,7 +238,7 @@ private fun MetricGrid(metrics: List<InsightMetric>) {
 
 /** Period selector, with the short labels the segmented buttons show. */
 private val Periods = listOf(
-    InsightPeriod.Today to "1D",
+    InsightPeriod.OneDay to "1D",
     InsightPeriod.SevenDays to "7D",
     InsightPeriod.ThirtyDays to "30D",
     InsightPeriod.NinetyDays to "90D",

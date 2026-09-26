@@ -114,16 +114,27 @@ private fun WeeklySummary(week: RideWeekSummary, units: DistanceUnits) {
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("This week", style = MaterialTheme.typography.titleLarge)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                RideValue("Distance", UnitFormatter.distance(week.distanceKilometres, units, locale))
-                RideValue("Rides", week.rideCount.toString())
-                RideValue("Avg duration", formatDuration(week.averageDurationMillis))
+            // The week is the rider's calendar week, so on its first day this card is empty by
+            // definition. Saying so beats three zeroes and a dash, which read as a fault in the
+            // recording rather than as a week that has only just started.
+            if (week.rideCount == 0) {
+                Text(
+                    "No rides yet this week. Earlier rides are listed below.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    RideValue("Distance", UnitFormatter.distance(week.distanceKilometres, units, locale))
+                    RideValue("Rides", week.rideCount.toString())
+                    RideValue("Avg duration", formatDuration(week.averageDurationMillis))
+                }
+                Text(
+                    "Average mileage ${UnitFormatter.mileage(week.mileageKilometresPerLitre, units, locale)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                "Average mileage ${UnitFormatter.mileage(week.mileageKilometresPerLitre, units, locale)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

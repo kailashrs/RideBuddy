@@ -620,8 +620,10 @@ private fun TelemetryCard(
                         Text("End ride")
                     }
                 }
+                // Just "Details": the LIVE badge at the top of this card already says the
+                // figures are live, and the button repeating it read as a second claim.
                 FilledTonalButton(onClick = onDetails, shape = MaterialTheme.shapes.large) {
-                    Text("Live details")
+                    Text("Details")
                 }
             }
         }
@@ -682,7 +684,7 @@ private fun LiveDetailsSheet(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Live details", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+        Text("Details", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
 
         // One sheet rather than three levels. The levels asked the rider to choose how much
         // they wanted before they could see any of it, and the choice was sticky, so a rider

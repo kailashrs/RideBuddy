@@ -32,17 +32,16 @@ class InsightsCalculatorTest {
     }
 
     @Test
-    fun calculatesTodayPeriodCorrectly() {
-        // Pin to 12:00 UTC so "today" is unambiguous regardless of host timezone.
+    fun theOneDayPeriodCoversARollingTwentyFourHours() {
         val now = Instant.parse("2026-08-24T12:00:00Z").toEpochMilli()
-        val todayStart = Instant.parse("2026-08-24T00:00:00Z").toEpochMilli()
-
         val rides = listOf(
-            ride(start = todayStart + 3_600_000L, distance = 40.0, durationHours = 1, speed = 40.0),
-            ride(start = todayStart - 10_000L, distance = 20.0, durationHours = 1, speed = 20.0),
+            // 23 hours ago: inside the day, even though it is "yesterday" on the calendar.
+            ride(start = now - 23 * 3_600_000L, distance = 40.0, durationHours = 1, speed = 40.0),
+            // 25 hours ago: outside it, and so counts as the preceding window instead.
+            ride(start = now - 25 * 3_600_000L, distance = 20.0, durationHours = 1, speed = 20.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.Today, clockAt(now))
+        val result = InsightsCalculator.calculate(rides, InsightPeriod.OneDay, now)
 
         assertEquals(1, result.rideCount)
         assertEquals(40.0, result.totalDistanceKilometres, 0.001)
@@ -50,30 +49,22 @@ class InsightsCalculatorTest {
     }
 
     @Test
-    fun calculatesTodayPeriodHonoursExplicitZone() {
-        // 23:30 UTC on 24 Aug is the very start of 25 Aug in +05:30.
-        val now = Instant.parse("2026-08-24T23:30:00Z").toEpochMilli()
-
-        // Both rides happen to fall on 24 Aug in UTC (the rides themselves are
-        // stored as UTC instants) but on 25 Aug in +05:30.
-        val rides = listOf(
-            ride(start = Instant.parse("2026-08-24T19:00:00Z").toEpochMilli(), distance = 40.0, durationHours = 1, speed = 40.0),
-            ride(start = Instant.parse("2026-08-24T15:00:00Z").toEpochMilli(), distance = 20.0, durationHours = 1, speed = 20.0),
+    fun theOneDayPeriodDoesNotEmptyItselfJustAfterMidnight() {
+        // The calendar version made this tab useless around midnight: a ride from the
+        // evening fell out of "today" the moment the date turned over, so a rider checking
+        // their numbers at 00:30 saw nothing.
+        val justAfterMidnight = Instant.parse("2026-08-25T00:30:00Z").toEpochMilli()
+        val eveningRide = ride(
+            start = Instant.parse("2026-08-24T19:00:00Z").toEpochMilli(),
+            distance = 40.0,
+            durationHours = 1,
+            speed = 40.0,
         )
 
-        val utcClock = clockAt(now)
-        val istClock = Clock.fixed(Instant.ofEpochMilli(now), ZoneOffset.ofHoursMinutes(5, 30))
+        val result = InsightsCalculator.calculate(listOf(eveningRide), InsightPeriod.OneDay, justAfterMidnight)
 
-        assertEquals(
-            "From a UTC clock today is 24 Aug and both rides are in scope",
-            2,
-            InsightsCalculator.calculate(rides, InsightPeriod.Today, utcClock).rideCount,
-        )
-        assertEquals(
-            "From an +05:30 clock today is 25 Aug; only the 00:30 IST ride is in scope",
-            1,
-            InsightsCalculator.calculate(rides, InsightPeriod.Today, istClock).rideCount,
-        )
+        assertEquals(1, result.rideCount)
+        assertEquals(40.0, result.totalDistanceKilometres, 0.001)
     }
 
     @Test

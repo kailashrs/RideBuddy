@@ -75,8 +75,15 @@ data class RoutePoint(val latitude: Double, val longitude: Double) {
 internal const val MillisPerDay = 86_400_000L
 
 /** Window the insights screen aggregates over. A null [days] means no lower bound. */
+/**
+ * The insight tabs' windows, each a rolling span back from now.
+ *
+ * Rolling rather than calendar, because the tabs are labelled "1D", "7D", "30D" and a tab
+ * labelled with a length should cover that length. A calendar "today" made the first tab
+ * shrink towards nothing as midnight approached and empty itself just after.
+ */
 enum class InsightPeriod(val days: Int?) {
-    Today(0),
+    OneDay(1),
     SevenDays(7),
     ThirtyDays(30),
     NinetyDays(90),

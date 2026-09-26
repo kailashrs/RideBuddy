@@ -70,7 +70,7 @@ class LiveDetailsSheetRenderTest {
                 }
             }
         }
-        composeRule.onNodeWithText("Live details").performClick()
+        composeRule.onNodeWithText("Details").performClick()
         composeRule.waitForIdle()
     }
 
