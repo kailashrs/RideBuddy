@@ -92,8 +92,8 @@ class LiveTelemetryCardTest {
 
         composeRule.onNodeWithText("Live details").performClick()
 
-        // The sheet's own detail-level control, which exists nowhere else on the screen.
-        composeRule.onNodeWithText("Glance").assertIsDisplayed()
+        // A section heading that exists only inside the sheet.
+        composeRule.onNodeWithText("This ride").assertIsDisplayed()
         assertEquals(0, endedRide)
     }
 

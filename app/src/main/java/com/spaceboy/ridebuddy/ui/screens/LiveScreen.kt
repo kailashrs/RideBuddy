@@ -38,9 +38,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,19 +81,6 @@ import com.spaceboy.ridebuddy.ui.components.Metric
 import kotlin.math.roundToInt
 
 /**
- * How much the live screen shows.
- *
- * [Glance] is the riding default — speed and gear-level information, readable at arm's
- * length on a stem mount. [Ride] adds trip figures, and [Charts] the telemetry history,
- * both of which are for looking at while stopped.
- */
-private enum class LiveDetailLevel(val label: String) {
-    Glance("Glance"),
-    Ride("Ride"),
-    Charts("Charts"),
-}
-
-/**
  * The riding screen: connection status, live telemetry, and navigation entry.
  *
  * Telemetry arrives as flows rather than values (see
@@ -130,7 +115,6 @@ fun LiveScreen(
     // what clearing the field does — and wipe whatever the rider had typed.
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
-    var liveDetailLevel by rememberSaveable { mutableStateOf(LiveDetailLevel.Glance) }
     // Applies a share that arrives while this screen is already composed; the initial value above
     // covers first composition and state restore. Blank is ignored rather than assigned, so
     // clearing the share leaves the field alone.
@@ -366,13 +350,12 @@ fun LiveScreen(
         ModalBottomSheet(
             onDismissRequest = { showLiveDetails = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            // Opens fully rather than at the half stop. The content is one scroll now, so a
+            // partially expanded sheet would just be a drag standing between the rider and
+            // the ride figures they opened it for.
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
-            LiveDetailsSheet(
-                live = live,
-                units = units,
-                level = liveDetailLevel,
-                onLevelChanged = { liveDetailLevel = it },
-            )
+            LiveDetailsSheet(live = live, units = units)
         }
     }
     if (isNavigationStarting) {
@@ -687,8 +670,6 @@ private fun Gauge(
 private fun LiveDetailsSheet(
     live: LiveTelemetryStreams,
     units: DistanceUnits,
-    level: LiveDetailLevel,
-    onLevelChanged: (LiveDetailLevel) -> Unit,
 ) {
     // Confined to the sheet: while it is open the rider is looking at live values, so following
     // the frame rate here is the point. Closing the sheet stops the work.
@@ -696,75 +677,79 @@ private fun LiveDetailsSheet(
     val activeRide = live.activeRide.collectAsStateWithLifecycle().value
     val samples = live.rideSamples.collectAsStateWithLifecycle().value
     val metrics = live.rideMetrics.collectAsStateWithLifecycle().value
-    val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
     val locale = LocalConfiguration.current.locales[0]
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Live details", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            LiveDetailLevel.entries.forEachIndexed { index, option ->
-                SegmentedButton(
-                    selected = level == option,
-                    onClick = { onLevelChanged(option) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = LiveDetailLevel.entries.size,
-                    ),
-                    label = { Text(option.label) },
-                )
-            }
-        }
+
+        // One sheet rather than three levels. The levels asked the rider to choose how much
+        // they wanted before they could see any of it, and the choice was sticky, so a rider
+        // who had once picked Glance stopped being shown the ride figures at all. Scrolling
+        // answers the same question without a decision in front of it.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Metric("Speed", frame?.let { UnitFormatter.speed(it.speedKilometresPerHour, units, locale) } ?: "—")
             Metric("RPM", frame?.engineRpm?.toString() ?: "—")
             Metric("Throttle", frame?.let { "${it.throttlePercent}%" } ?: "—")
         }
-        Text(
-            "Mileage ${frame?.let { UnitFormatter.mileage(it.instantaneousMileageKilometresPerLitre, units, locale) } ?: "— ${UnitFormatter.mileageUnit(units)}"}",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        DetailRow(
+            "Mileage",
+            frame?.let { UnitFormatter.mileage(it.instantaneousMileageKilometresPerLitre, units, locale) }
+                ?: "— ${UnitFormatter.mileageUnit(units)}",
         )
-        if (level != LiveDetailLevel.Glance) {
-            activeRide?.let {
-                Text("Current ride • ${UnitFormatter.distance(it.distanceKilometres, units, locale)} • ${formatDuration(it.lastSampleAtElapsedRealtime - it.startedAtElapsedRealtime)}")
-            } ?: Text("Recording starts when you set off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            SignalStrength(diagnostics.rssi)
-            Text(
-                "${metrics.hardAccelerationEvents} hard ${"acceleration".pluralised(metrics.hardAccelerationEvents)} " +
-                    "• ${metrics.hardBrakingEvents} hard ${"brake".pluralised(metrics.hardBrakingEvents)} in recent telemetry",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
+        HorizontalDivider()
+        SheetSection("This ride")
+        if (activeRide == null) {
+            Text("Recording starts when you set off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            DetailRow("Distance", UnitFormatter.distance(activeRide.distanceKilometres, units, locale))
+            DetailRow("Time", formatDuration(activeRide.lastSampleAtElapsedRealtime - activeRide.startedAtElapsedRealtime))
         }
-        if (level == LiveDetailLevel.Charts) {
-            Text("Statistics", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-            val speedData = remember(samples, units) { telemetryChartData(samples, 120) { UnitFormatter.chartSpeed(it.speedKph, units) } }
-            val rpmData = remember(samples) { telemetryChartData(samples, 120) { it.rpm.toDouble() } }
-            val throttleData = remember(samples) { telemetryChartData(samples, 120) { it.throttlePercent.toDouble() } }
-            LiveChart("Speed", speedData, UnitFormatter.speedUnit(units))
-            LiveChart("RPM", rpmData, "rpm")
-            LiveChart("Throttle", throttleData, "%")
-        }
+        // Shown whether or not a ride is running: the detector works on the recent telemetry
+        // window, not on the ride, so these are real counts even before recording starts.
+        DetailRow("Hard acceleration", metrics.hardAccelerationEvents.toString())
+        DetailRow("Hard braking", metrics.hardBrakingEvents.toString())
+
+        HorizontalDivider()
+        SheetSection("Recent telemetry")
+        val speedData = remember(samples, units) { telemetryChartData(samples, 120) { UnitFormatter.chartSpeed(it.speedKph, units) } }
+        val rpmData = remember(samples) { telemetryChartData(samples, 120) { it.rpm.toDouble() } }
+        val throttleData = remember(samples) { telemetryChartData(samples, 120) { it.throttlePercent.toDouble() } }
+        LiveChart("Speed", speedData, UnitFormatter.speedUnit(units))
+        LiveChart("RPM", rpmData, "rpm")
+        LiveChart("Throttle", throttleData, "%")
     }
 }
 
 /**
- * Signal strength in words.
- *
- * Worth showing here rather than only in diagnostics, because a weak link is the usual reason a
- * figure on this screen looks frozen — which is the only thing a rider can act on. The dBm value,
- * the telemetry rate and the packet-gap estimate are all on the diagnostics screen; none of them
- * tell a rider anything they could do differently.
+ * A section heading inside the sheet, styled as the Live screen's own headings are.
  */
 @Composable
-private fun SignalStrength(rssi: Int?) {
-    val label = when {
-        rssi == null -> "Signal — measuring"
-        rssi >= StrongSignalDbm -> "Signal — strong"
-        rssi >= WeakSignalDbm -> "Signal — good"
-        else -> "Signal — weak, readings may lag"
+private fun SheetSection(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.semantics { heading() },
+    )
+}
+
+/**
+ * Label left, value right — the same rhythm the live card's gauges use, so a figure is found
+ * in the same place on both surfaces.
+ */
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
-    Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -776,7 +761,12 @@ private fun LiveChart(title: String, series: TelemetryChartData, unit: String) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
-                values.lastOrNull { it != null }?.let { "Latest %.0f %s".format(locale, it, unit) } ?: "No data yet",
+                // No space before a percent sign. The metrics higher up the sheet read "38%",
+                // and one surface should not spell the same unit two ways; every other unit
+                // here is a word and keeps its space.
+                values.lastOrNull { it != null }?.let {
+                    "Latest %.0f%s%s".format(locale, it, if (unit == "%") "" else " ", unit)
+                } ?: "No data yet",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LineChart(
@@ -798,16 +788,6 @@ private fun LiveChart(title: String, series: TelemetryChartData, unit: String) {
         }
     }
 }
-
-/**
- * RSSI bands for the signal wording. Deliberately coarse: the only decision a rider makes from
- * this is whether to move the phone, and three bands carry that where a number does not.
- */
-private const val StrongSignalDbm = -70
-private const val WeakSignalDbm = -85
-
-/** Adds a plural "s" for any count but one, so a single event does not read as "1 hard brakes". */
-private fun String.pluralised(count: Int): String = if (count == 1) this else this + "s"
 
 /** Where the RS 457 tachometer turns red; the gauge fill and its warning colour key off this. */
 private const val RedlineRpm = 10_500

@@ -184,20 +184,25 @@ existing navigation untouched.
 
 ## Live details bottom sheet
 
-Use a three-level bottom sheet:
+One sheet, opened fully expanded, scrolled rather than levelled:
 
-- Peek: speed, RPM, throttle, mileage.
-- Half: current ride metrics and connection quality.
-- Full: timestamped telemetry chart and raw-data diagnostics.
+- Live now: speed, RPM, throttle, then mileage as a label/value row.
+- **This ride**: distance, time, hard acceleration, hard braking.
+- **Recent telemetry**: speed, RPM and throttle charts, each timestamped.
 
-The full view may include:
+Design rules:
 
-- Speed chart.
-- RPM chart.
-- Throttle chart.
-- Mileage chart.
-- Acceleration/braking events.
-- Telemetry frequency and packet-loss estimate.
+- No detail-level selector. The three-level version asked the rider to choose how much they
+  wanted before they could see any of it, and the choice was sticky — a rider who had once
+  picked the smallest level silently stopped being shown the ride figures. Scrolling answers
+  the same question without putting a decision in front of it.
+- The sheet skips its partially expanded stop. The content is one scroll, so a half-height
+  sheet is just a drag between the rider and what they opened it for.
+- Figures are label left, value right, matching the live card's gauges, so the same number is
+  found in the same place on both surfaces.
+- No connection quality here. Signal strength is not ride information; it belongs to the
+  diagnostics screen with the dBm value, the telemetry rate and the packet-gap estimate.
+- Units are spelled one way per surface: "38%" and "Latest 39%", never "39 %".
 
 Raw hexadecimal packets should only appear under the diagnostic mode.
 
