@@ -150,7 +150,7 @@ fun InsightsScreen(
             )
         }
         Text(
-            "Fuel and mileage are estimated from the bike's reported mileage while moving; averages exclude telemetry gaps.",
+            "Fuel and mileage are estimated from the bike's reported mileage while moving.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

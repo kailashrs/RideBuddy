@@ -72,27 +72,41 @@ The main action is connection. Do not show empty telemetry gauges.
 
 ```text
 ┌─────────────────────────────┐
-│ Motorcycle             ●    │
-│ Connected                    │
+│ ● Motorcycle    Disconnect  │
 │                             │
-│           72                 │
-│          km/h               │
+│ ┌─────────────────────────┐ │
+│ │  72 km/h        [LIVE]  │ │
+│ │                         │ │
+│ │  RPM            5,420   │ │
+│ │  ████████░░░░░░░░░░░░░  │ │
+│ │  Throttle          38%  │ │
+│ │  ██████░░░░░░░░░░░░░░░  │ │
+│ │  ─────────────────────  │ │
+│ │  ● Recording     3.0 km │ │
+│ │                         │ │
+│ │  [End ride] [Live det…] │ │
+│ └─────────────────────────┘ │
 │                             │
-│  RPM       Throttle Mileage │
-│  5,420     38%      5.8km/L │
-│                             │
-│  Navigation                  │
+│  Navigate                    │
 │  Share a destination from   │
 │  Google Maps to begin       │
-│                             │
-│  [ Live details ]            │
 └─────────────────────────────┘
 ```
 
 Design rules:
 
-- Speed is the largest value and uses the user-selected unit.
-- RPM, throttle, and mileage are compact secondary metrics.
+- Speed is the largest value and uses the user-selected unit. Its unit sits on the number's
+  own baseline rather than at a tuned offset, so the pair holds together at any display scale.
+- Revs and throttle are bar gauges, not numbers: both are read as a position at riding pace,
+  and giving them one shape makes the pair read as a single instrument.
+- Instantaneous mileage is not on the card. It swings with every throttle movement and only
+  means something averaged over a finished ride, so it lives in the details sheet and in the
+  ride summary.
+- The card carries three kinds of thing and keeps them apart: readings, then ride state, then
+  actions. Ride state is a status line with a dot — never a control sharing a row with controls.
+- Card actions sit at the bottom trailing edge, ordered by emphasis with the lower-emphasis
+  “end” action first, matching the navigate card so no card trains a thumb onto the other's
+  “end” button. They wrap to their own lines rather than clip at large display scales.
 - The connection indicator is a semantic status pill, not a decorative Bluetooth icon.
 - Do not require a manual “Start ride” action. A ride begins automatically when the bike is connected and moving.
 - “Live details” opens a bottom sheet, not a new dense dashboard.

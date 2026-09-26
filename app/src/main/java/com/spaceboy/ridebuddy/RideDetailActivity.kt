@@ -477,9 +477,6 @@ private fun RideDetailContent(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride summary", style = MaterialTheme.typography.titleMedium)
                     Text("Estimated fuel ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}", style = MaterialTheme.typography.bodyMedium)
-                    if (ride.telemetryDurationMillis != null && ride.durationMillis - ride.telemetryDurationMillis > 2_500L) {
-                        Text("Telemetry gaps are excluded from distance and averages.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                     Text("Peak ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${ride.maximumRpm} rpm", style = MaterialTheme.typography.bodyMedium)
                     ride.zeroToSixtyMillis?.let { Text("0–60 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
                     ride.zeroToHundredMillis?.let { Text("0–100 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }

@@ -7,7 +7,7 @@ vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 ## Features
 
 - **Material You UI**: Adaptive layouts, light/dark modes, and dynamic color. Features Live, History, Insights, Info, and Settings destinations.
-- **BLE Telemetry**: Automatic background reconnection. Live speed, RPM, throttle, and mileage metrics with automatic ride recording.
+- **BLE Telemetry**: Automatic background reconnection. Live speed, RPM and throttle with automatic ride recording; mileage is reported per ride, where an average means something.
 - **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
 - **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities. Rides, records and insights are kept for good; each ride's second-by-second telemetry is kept for a rider-chosen window, one year by default.
 - **Backup**: Ride summaries and preferences ride along with Android's own backup, encrypted with the device lock screen and free of the rider's Drive quota. Telemetry detail stays on the device.

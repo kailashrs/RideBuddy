@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,11 +28,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -50,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.heading
@@ -539,20 +544,20 @@ private fun TelemetryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            displayedSpeed.toString(),
-                            style = TelemetryHero,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            UnitFormatter.speedUnit(units),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 12.dp),
-                        )
-                    }
+                // Baseline alignment rather than a tuned bottom padding: the unit sits on the
+                // speed's own baseline whatever the display scale does to either type size.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        displayedSpeed.toString(),
+                        style = TelemetryHero,
+                        modifier = Modifier.alignByBaseline(),
+                    )
+                    Text(
+                        UnitFormatter.speedUnit(units),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.alignByBaseline(),
+                    )
                 }
                 Surface(
                     shape = MaterialTheme.shapes.small,
@@ -567,53 +572,109 @@ private fun TelemetryCard(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Gauge(
+                label = "RPM",
+                value = "${frame.engineRpm} rpm",
+                fraction = rpmFraction,
+                color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                reading = "${frame.engineRpm} rpm of $RedlineRpm",
+            )
+            Gauge(
+                label = "Throttle",
+                value = "${frame.throttlePercent}%",
+                fraction = frame.throttlePercent / 100f,
+                color = MaterialTheme.colorScheme.primary,
+                reading = "${frame.throttlePercent} percent",
+            )
+
+            // Ride state reads as state, below the instruments and above the buttons, rather
+            // than sharing a row with them where it looked like a third button.
+            activeRide?.let { ride ->
+                HorizontalDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("RPM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${frame.engineRpm} rpm", style = MaterialTheme.typography.labelMedium)
-                }
-                LinearProgressIndicator(
-                    progress = { rpmFraction },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(16.dp)
-                        // Without this it is announced as a bare progress bar with no value.
-                        .semantics { stateDescription = "${frame.engineRpm} rpm of $RedlineRpm" },
-                    color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    strokeCap = StrokeCap.Round
-                )
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Throttle", "${frame.throttlePercent}%")
-                Metric("Mileage", UnitFormatter.mileage(frame.instantaneousMileageKilometresPerLitre, units, locale))
-            }
-
-            // Arrangement.End rather than SpaceBetween: with no ride recording the label is
-            // absent, and SpaceBetween would then push the lone button row back to the start.
-            // The weight keeps the label from crowding the buttons when it is present.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                activeRide?.let {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        )
+                        Text(
+                            "Recording",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
-                        "Recording • ${UnitFormatter.distance(it.distanceKilometres, units, locale)}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
+                        UnitFormatter.distance(ride.distanceKilometres, units, locale),
+                        style = MaterialTheme.typography.labelMedium,
                     )
-                    TextButton(onClick = onEndRide) { Text("End ride") }
-                    Spacer(Modifier.width(8.dp))
                 }
-                TextButton(onClick = onDetails) { Text("Live details") }
+            }
+
+            // Card actions: bottom, trailing edge, ordered by emphasis. Same order as the
+            // navigate card's pair, so the action that ends something is always the left of
+            // the two and no card trains a thumb to land on the other's "end" button.
+            // FlowRow rather than Row because two buttons stop fitting on one line at large
+            // display scales, where stacking them is better than clipping either label.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (activeRide != null) {
+                    OutlinedButton(onClick = onEndRide, shape = MaterialTheme.shapes.large) {
+                        Text("End ride")
+                    }
+                }
+                FilledTonalButton(onClick = onDetails, shape = MaterialTheme.shapes.large) {
+                    Text("Live details")
+                }
             }
         }
+    }
+}
+
+/**
+ * A labelled bar gauge: name on the left, current value on the right, fill beneath.
+ *
+ * Speed is the only figure worth reading as a number at riding pace; revs and throttle are
+ * read as positions, which is what a bar gives. Both use the one shape so the pair reads as
+ * a single instrument rather than two unrelated readouts.
+ */
+@Composable
+private fun Gauge(
+    label: String,
+    value: String,
+    fraction: Float,
+    color: Color,
+    reading: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.labelMedium)
+        }
+        LinearProgressIndicator(
+            progress = { fraction.coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(16.dp)
+                // Without this it is announced as a bare progress bar with no value.
+                .semantics { stateDescription = reading },
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            strokeCap = StrokeCap.Round,
+        )
     }
 }
 
