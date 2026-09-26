@@ -69,6 +69,27 @@ android {
 
     testOptions {
         animationsDisabled = true
+        // Robolectric needs the merged manifest and the resource table to bring a real
+        // Compose host up on the JVM; without this the UI tests below see no theme.
+        unitTests.isIncludeAndroidResources = true
+        // Robolectric reaches into JDK internals that have been closed since Java 9 — without
+        // these it fails at "Failed to interact with raw FileDescriptor internals". Scoped to
+        // the unit test JVM; nothing that ships is affected.
+        unitTests.all { test ->
+            test.jvmArgs(
+                "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                "--add-opens=java.base/java.util=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/java.net=ALL-UNNAMED",
+                "--add-opens=java.base/java.security=ALL-UNNAMED",
+                "--add-opens=java.base/java.text=ALL-UNNAMED",
+                "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
+                // API 36's ApplicationSharedMemory reaches SharedSecrets through Robolectric's
+                // FileDescriptor interceptor, which needs this one exported as well as opened.
+                "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+            )
+        }
         managedDevices {
             localDevices {
                 create("pixel2api36") {
@@ -111,6 +132,18 @@ dependencies {
     // test-only dependency: on device the platform's own implementation is used and nothing
     // from this artifact is packaged.
     testImplementation("org.json:json:20260814")
+    // Compose UI tests on the JVM. The live card is a visual surface, and rendering it on a
+    // device means either an emulator system image or an install; neither belongs in the
+    // ordinary test loop. Robolectric's native graphics mode draws the real thing with Skia,
+    // so the card can be both asserted on and looked at from `./gradlew testDebugUnitTest`.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test.ext:junit:1.3.0")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    // ui-test-junit4 still resolves espresso-core 3.5.0 transitively, which predates the
+    // InputManager rework in Android 16 and dies on API 36 with NoSuchMethodException for
+    // InputManager.getInstance(). Pin the same version the instrumented tests use.
+    testImplementation("androidx.test.espresso:espresso-core:3.7.0")
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")

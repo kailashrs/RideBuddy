@@ -559,14 +559,18 @@ private fun TelemetryCard(
                         modifier = Modifier.alignByBaseline(),
                     )
                 }
+                // Secondary rather than primary container. The app's seed colour is red, so in
+                // the dark scheme primaryContainer and errorContainer are the same value: a
+                // badge that is always on screen would wear the app's error colour, and would
+                // shout louder than the redline the RPM gauge turns red for.
                 Surface(
                     shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
                 ) {
                     Text(
                         text = "LIVE",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }

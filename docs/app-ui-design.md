@@ -107,9 +107,17 @@ Design rules:
 - Card actions sit at the bottom trailing edge, ordered by emphasis with the lower-emphasis
   “end” action first, matching the navigate card so no card trains a thumb onto the other's
   “end” button. They wrap to their own lines rather than clip at large display scales.
+- The LIVE badge uses the secondary container, not the primary one. The app's seed colour is
+  red, so in the dark scheme `primaryContainer` and `errorContainer` are the same value — a
+  badge that is always on screen would wear the app's error colour and shout louder than the
+  redline the RPM gauge turns red for. Anything permanent on this card stays off primary.
 - The connection indicator is a semantic status pill, not a decorative Bluetooth icon.
 - Do not require a manual “Start ride” action. A ride begins automatically when the bike is connected and moving.
 - “Live details” opens a bottom sheet, not a new dense dashboard.
+
+`./gradlew testDebugUnitTest` draws this card to `app/build/outputs/renders/` (see
+`LiveCardRenderTest`). Review changes to it by looking at those, not by reading the layout —
+the colour-token collision above was invisible in the source and obvious in the picture.
 
 ## Active navigation surface
 
