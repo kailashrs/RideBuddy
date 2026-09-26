@@ -115,9 +115,12 @@ Design rules:
 - Do not require a manual “Start ride” action. A ride begins automatically when the bike is connected and moving.
 - “Live details” opens a bottom sheet, not a new dense dashboard.
 
-`./gradlew testDebugUnitTest` draws this card to `app/build/outputs/renders/` (see
-`LiveCardRenderTest`). Review changes to it by looking at those, not by reading the layout —
-the colour-token collision above was invisible in the source and obvious in the picture.
+`./gradlew testDebugUnitTest` draws this card, and the details sheet at each of its three
+levels, to `app/build/outputs/renders/` (see `LiveCardRenderTest` and
+`LiveDetailsSheetRenderTest`). Review changes to either by looking at those, not by reading
+the layout — the colour-token collision above was invisible in the source and obvious in the
+picture. The sheet composes into its own window, which the screen's root never draws, so its
+capture goes through the sheet's own node rather than the root.
 
 ## Active navigation surface
 
