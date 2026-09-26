@@ -513,9 +513,9 @@ private fun RideDetailContent(
             item(key = "telemetry_unavailable", contentType = "summary_card") {
                 OutlinedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Detailed telemetry", style = MaterialTheme.typography.titleMedium)
+                        Text("Detailed ride data", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "This ride no longer keeps its second-by-second telemetry, so the " +
+                            "This ride no longer keeps its second-by-second ride data, so the " +
                                 "charts, ride events and CSV export are unavailable. Everything " +
                                 "above is kept for good. Change how long detail is kept under " +
                                 "Settings → Ride Data & Export.",
@@ -695,7 +695,7 @@ private fun DeleteRideDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
         title = { Text("Delete this ride?") },
         text = {
             Text(
-                "This permanently removes the ride, its route and its telemetry from this " +
+                "This permanently removes the ride, its route and its ride data from this " +
                     "device, and takes its distance and fuel out of your totals and records. " +
                     "Export it first if you want to keep it.",
             )

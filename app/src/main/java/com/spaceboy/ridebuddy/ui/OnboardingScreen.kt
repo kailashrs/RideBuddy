@@ -92,12 +92,12 @@ fun OnboardingScreen(
                 0 -> OnboardingPage(
                     icon = Icons.Outlined.TwoWheeler,
                     title = "Your motorcycle, at a glance",
-                    body = "Live telemetry, automatic ride history and Google-powered turn-by-turn guidance in one quiet companion.",
+                    body = "Live ride data, automatic ride history and Google-powered turn-by-turn guidance in one quiet companion.",
                 )
                 1 -> OnboardingPage(
                     icon = if (nearbyDeviceAccessGranted) Icons.Outlined.CheckCircle else Icons.Outlined.Bluetooth,
                     title = "Nearby devices",
-                    body = "Allow Bluetooth access so the companion can reconnect to the motorcycle and exchange telemetry and TFT commands.",
+                    body = "Allow Bluetooth access so the companion can reconnect to the motorcycle and exchange ride data and TFT commands.",
                     actions = if (nearbyDeviceAccessGranted) emptyList() else listOf("Allow nearby devices" to onRequestNearbyDeviceAccess),
                     status = if (nearbyDeviceAccessGranted) "Permission granted" else "Permission needed to connect",
                 )
@@ -143,7 +143,7 @@ fun OnboardingScreen(
                     body = if (navigationConfigured) {
                         "Your Google Navigation key is securely stored on this device to enable turn-by-turn route guidance on your dashboard."
                     } else {
-                        "Navigation is optional. Set up a Google Navigation key anytime in settings, or enjoy telemetry and ride logging without it."
+                        "Navigation is optional. Set up a Google Navigation key anytime in settings, or enjoy ride data and ride history without it."
                     },
                     actions = if (navigationConfigured) emptyList() else listOf("Set up navigation" to onSetUpNavigation),
                 )

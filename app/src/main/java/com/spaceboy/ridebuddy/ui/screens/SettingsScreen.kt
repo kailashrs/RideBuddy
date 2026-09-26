@@ -813,7 +813,7 @@ private fun RideDataSection(
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsPickerRow(
             icon = Icons.Outlined.Storage,
-            title = "Keep detailed telemetry",
+            title = "Keep detailed ride data",
             choices = SampleRetention.entries,
             selectedChoice = settings.sampleRetention,
             choiceLabel = SampleRetention::label,
@@ -903,7 +903,7 @@ private fun ClearHistoryDialog(
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = { Text("Clear all ride history?") },
-        text = { Text("This permanently deletes $rideCount saved rides, their telemetry samples, route data, and performance records from this device. Export anything you want to keep first.") },
+        text = { Text("This permanently deletes $rideCount saved rides, their detailed ride data, routes, and performance records from this device. Export anything you want to keep first.") },
         confirmButton = {
             Button(
                 onClick = {

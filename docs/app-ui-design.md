@@ -19,7 +19,7 @@ Use a five-item Material 3 navigation bar on compact screens when the bike is no
 
 | Destination | Purpose |
 |---|---|
-| Live | Connection status, live telemetry, current ride, quick status |
+| Live | Connection status, live ride data, current ride, quick status |
 | History | Ride history, summaries, routes, performance trends |
 | Insights | Long-term totals, averages, records, and period comparisons |
 | Info | Bike identity, connection, firmware, protocol status |
@@ -40,8 +40,8 @@ Keep setup linear and explain why each permission is needed.
 5. Associate the bike via the system CompanionDeviceManager picker.
 6. Confirm the detected bike name and last four address characters.
 7. Pair and authenticate.
-8. If no Google Navigation API key is configured, offer an optional “Set up navigation” step. Bike connection and telemetry remain usable without it.
-9. Show a short “ready” screen with connection, telemetry, and navigation status.
+8. If no Google Navigation API key is configured, offer an optional “Set up navigation” step. Bike connection and ride data remain usable without it.
+9. Show a short “ready” screen with connection, ride data, and navigation status.
 
 Do not expose protocol terminology such as GATT, characteristics, or challenge-response in normal onboarding. Put technical diagnostics under Settings → Diagnostics.
 
@@ -66,7 +66,7 @@ The Live screen has two states.
 └─────────────────────────────┘
 ```
 
-The main action is connection. Do not show empty telemetry gauges.
+The main action is connection. Do not show empty gauges.
 
 ### Connected state
 
@@ -182,13 +182,28 @@ ahead of the preview asked the same question twice, the first time without showi
 link always stops at the preview. If route calculation fails, show a clear retry state and leave the
 existing navigation untouched.
 
+## Wording
+
+The rider's word for what the bike sends is **ride data**, never “telemetry”. It appears in
+section headings, settings, dialogs and onboarding copy.
+
+“Telemetry” survives in three places, all deliberate:
+
+- Developer tools — the diagnostics screen, its shared report and the stationary TFT test.
+  That audience wants the precise word, and the figures there (frame rate, malformed frames,
+  packet-gap estimate) are not ride data in any useful sense.
+- Code identifiers, log output and Compose list keys, which no rider reads.
+- The stored backup key `telemetryDurationMillis` and the SQLite column `telemetry_duration`.
+  Renaming either breaks every existing backup and would need a schema migration to buy
+  nothing.
+
 ## Live details bottom sheet
 
 One sheet, opened fully expanded, scrolled rather than levelled:
 
 - Live now: speed, RPM, throttle, then mileage as a label/value row.
 - **This ride**: distance, time, hard acceleration, hard braking.
-- **Recent telemetry**: speed, RPM and throttle charts, each timestamped.
+- **Ride data**: speed, RPM and throttle charts, each timestamped.
 
 Design rules:
 
@@ -284,7 +299,7 @@ chevron points at another screen, and a dialog is not one.
 
 
 - Navigation: Google Navigation API key, units, voice guidance, route preferences, TFT text behavior.
-- Ride recording: automatic start/stop thresholds, export, and how long each ride keeps its detailed telemetry. The retention choice sits with ride data rather than under storage or privacy, because what a rider is deciding is how much of a ride's detail to keep, not how many megabytes to spend. Say what survives it: rides, records and insights are kept for good.
+- Ride recording: automatic start/stop thresholds, export, and how long each ride keeps its detailed ride data. The retention choice sits with ride data rather than under storage or privacy, because what a rider is deciding is how much of a ride's detail to keep, not how many megabytes to spend. Say what survives it: rides, records and insights are kept for good.
 - Alerts: overspeed, RPM, acceleration, braking, weather, hazards.
 - Notifications: one toggle per app, grouped by kind. The kinds are headings, not switches — a category switch above per-app switches gave two controls for the same thing, either able to silently veto the other. The text-message entry is whichever app holds the default-SMS role, resolved rather than listed.
 - Calls: caller display and TFT call controls.
@@ -315,7 +330,7 @@ The current SDK supports runtime configuration, but requires an app restart if t
 
 If the key is absent or invalid:
 
-- Keep Live telemetry, History, Info, BLE connection, and diagnostics available.
+- Keep Live ride data, History, Info, BLE connection, and diagnostics available.
 - Disable route creation without disabling the rest of the app.
 - Show one clear setup action in the navigation card.
 - Preserve an active route until the user explicitly replaces the key and restarts.
@@ -341,7 +356,7 @@ If the key is absent or invalid:
 - Provide a deep-red fallback seed color rather than forcing red over dynamic colors.
 - Use primary for actions and active navigation state.
 - Use error only for safety-critical warnings or failed connection states.
-- Use tertiary for telemetry emphasis and secondary for supporting information.
+- Use tertiary for ride-data emphasis and secondary for supporting information.
 - Never encode state using color alone; pair color with text or an icon.
 
 ### Shape

@@ -713,7 +713,7 @@ private fun LiveDetailsSheet(
         DetailRow("Hard braking", metrics.hardBrakingEvents.toString())
 
         HorizontalDivider()
-        SheetSection("Recent telemetry")
+        SheetSection("Ride data")
         val speedData = remember(samples, units) { telemetryChartData(samples, 120) { UnitFormatter.chartSpeed(it.speedKph, units) } }
         val rpmData = remember(samples) { telemetryChartData(samples, 120) { it.rpm.toDouble() } }
         val throttleData = remember(samples) { telemetryChartData(samples, 120) { it.throttlePercent.toDouble() } }
