@@ -131,7 +131,6 @@ fun SettingsScreen(
     onClearRideHistory: () -> Unit,
     onExportRideHistory: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onEnableCallControls: () -> Unit,
     bikeAssociation: BikeAssociationState,
     onAssociateBike: () -> Unit,
     onForgetBike: () -> Unit,
@@ -266,7 +265,6 @@ fun SettingsScreen(
                 onOpenNavigationSettings = onOpenNavigationSettings,
                 onOpenNotificationAccess = onOpenNotificationAccess,
                 onOpenBackgroundLocationSettings = onOpenBackgroundLocationSettings,
-                onEnableCallControls = onEnableCallControls,
                 onDistanceUnitsChanged = onDistanceUnitsChanged,
                 onAutoStartSharedChanged = onAutoStartSharedChanged,
                 onManageSupportedApps = { showSupportedAppsDialog = true },
@@ -355,11 +353,11 @@ private fun MotorcycleConnectionSection(
             icon = Icons.Outlined.Bluetooth,
             title = bikeAssociation.bike?.name ?: "Pair your motorcycle",
             supportingText = when {
-                bikeAssociation.associationInProgress -> "Waiting for Bluetooth permission"
-                bikeAssociation.bike == null && !bikeAssociation.supported -> "Companion device setup is unavailable on this phone"
-                bikeAssociation.bike == null -> "Pair with nearby motorcycle via Bluetooth"
-                bikeAssociation.observingPresence -> "Paired • automatic reconnection enabled"
-                else -> "Paired • tap to enable automatic reconnection"
+                bikeAssociation.associationInProgress -> "Waiting for permission"
+                bikeAssociation.bike == null && !bikeAssociation.supported -> "Motorcycle pairing isn't supported here"
+                bikeAssociation.bike == null -> "Choose your bike from the list"
+                bikeAssociation.observingPresence -> "Auto-connect on"
+                else -> "Tap to enable auto-connect"
             },
             onClick = if (bikeAssociation.bike == null) onAssociateBike else null,
         )
@@ -386,7 +384,6 @@ private fun NavigationAndCallsSection(
     onOpenNavigationSettings: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenBackgroundLocationSettings: () -> Unit,
-    onEnableCallControls: () -> Unit,
     onDistanceUnitsChanged: (DistanceUnits) -> Unit,
     onAutoStartSharedChanged: (Boolean) -> Unit,
     onManageSupportedApps: () -> Unit,
@@ -449,13 +446,6 @@ private fun NavigationAndCallsSection(
             },
             onClick = onManageSupportedApps,
             trailingContent = { TextButton(onClick = onManageSupportedApps) { Text("Manage") } },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.Settings,
-            title = "Bike call controls",
-            supportingText = if (notificationAccessEnabled) "Standard call actions enabled; your phone app remains in control" else "Tap to enable notification access; your default phone app is unchanged",
-            onClick = onEnableCallControls,
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSwitchRow(
@@ -903,7 +893,7 @@ private fun ClearHistoryDialog(
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = { Text("Clear all ride history?") },
-        text = { Text("This permanently deletes $rideCount saved rides, their detailed ride data, routes, and performance records from this device. Export anything you want to keep first.") },
+        text = { Text("This permanently deletes $rideCount rides and their routes and stats. Export anything you want to keep first.") },
         confirmButton = {
             Button(
                 onClick = {

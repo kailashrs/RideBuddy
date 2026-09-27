@@ -45,6 +45,25 @@ enum class ConnectionFailureCategory {
     Unknown,
 }
 
+/** Short rider-facing copy; the original message and status remain in [ConnectionFailure] diagnostics. */
+internal fun riderFacingConnectionFailure(
+    message: String,
+    category: ConnectionFailureCategory,
+): String = when (category) {
+    ConnectionFailureCategory.LocalPrecondition -> when {
+        message.contains("Nearby devices", ignoreCase = true) -> "Allow Nearby devices access."
+        message.contains("Bluetooth is unavailable", ignoreCase = true) -> "Bluetooth isn't available on this phone."
+        message.contains("Turn on Bluetooth", ignoreCase = true) -> "Turn on Bluetooth."
+        else -> "Couldn't connect."
+    }
+    ConnectionFailureCategory.AuthenticationRejected -> "Re-pair the bike in Settings."
+    ConnectionFailureCategory.LinkLost,
+    ConnectionFailureCategory.Deterministic,
+    ConnectionFailureCategory.Transient,
+    ConnectionFailureCategory.Unknown,
+    -> "Couldn't connect."
+}
+
 /** Bond state captured at the moment of failure rather than re-read later. */
 enum class BondStateSnapshot {
     None,

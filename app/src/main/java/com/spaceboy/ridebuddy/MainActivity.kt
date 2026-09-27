@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
         if (essentialGranted) {
             startAssociation()
         } else {
-            viewModel.showMessage("Nearby-device access is needed to connect to the motorcycle")
+            viewModel.showMessage("Allow Nearby devices access.")
         }
     }
 
@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         refreshRuntimePermissionState()
-        viewModel.showMessage(if (nearbyDeviceAccessGranted) "Nearby-device access granted" else "Nearby-device access was not granted")
+        viewModel.showMessage(if (nearbyDeviceAccessGranted) "Bluetooth access ready" else "Allow Bluetooth to connect.")
     }
 
     private val onboardingLocationPermissionLauncher = registerForActivityResult(
@@ -229,7 +229,6 @@ class MainActivity : ComponentActivity() {
         OnboardingScreen(
             connectionState = connectionState,
             bikeAssociated = bikeAssociation.bike != null,
-            associatedBikeLabel = bikeAssociation.bike?.let { "${it.name} • ${it.address.takeLast(5)}" },
             nearbyDeviceAccessGranted = nearbyDeviceAccessGranted,
             preciseLocationGranted = preciseLocationGranted,
             notificationAccessEnabled = notificationAccessEnabled,
@@ -323,10 +322,6 @@ class MainActivity : ComponentActivity() {
         onClearRideHistory = viewModel::clearRideHistory,
         onExportRideHistory = ::exportRideHistory,
         onOpenNotificationAccess = ::openNotificationAccessSettings,
-        onEnableCallControls = {
-            if (!notificationAccessEnabled) openNotificationAccessSettings()
-            else viewModel.showMessage("Standard call controls are enabled")
-        },
         onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
         onForgetBike = ::forgetBike,
         onRideSelected = { ride -> startActivity(RideDetailActivity.intent(this, ride.id)) },
@@ -427,16 +422,15 @@ class MainActivity : ComponentActivity() {
         val existing = manager.state.value.bike
         if (existing != null) {
             if (!BikeConnectionService.reconnect(this, existing, launchedFromVisibleActivity = true)) {
-                viewModel.showMessage("Unable to start connection service")
+                viewModel.showMessage("Couldn't start the connection. Try again.")
             }
             return
         }
         if (!manager.state.value.supported) {
-            viewModel.showMessage("Your phone does not support the Companion device setup feature required by RideBuddy")
+            viewModel.showMessage("This phone doesn't support motorcycle pairing.")
             return
         }
         lastAssociationConnectionAddress = null
-        viewModel.showMessage("Choose your motorcycle in the system device picker")
         manager.associate(
             launchApproval = { intentSender ->
                 associationApprovalLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
@@ -450,9 +444,7 @@ class MainActivity : ComponentActivity() {
         if (lastAssociationConnectionAddress.equals(bike.address, ignoreCase = true)) return
         lastAssociationConnectionAddress = bike.address
         if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
-            viewModel.showMessage("Unable to start connection service")
-        } else {
-            viewModel.showMessage("Bike associated; connecting")
+            viewModel.showMessage("Couldn't start the connection. Try again.")
         }
     }
 
@@ -559,7 +551,7 @@ class MainActivity : ComponentActivity() {
             if (!viewModel.uiState.value.navigationKey.isConfigured) {
                 abandon()
                 viewModel.openNavigationSettings()
-                viewModel.showMessage("Add a Google Navigation API key first")
+                viewModel.showMessage("Add a Google Navigation key to start a route.")
                 return
             }
 
@@ -625,7 +617,9 @@ class MainActivity : ComponentActivity() {
                 -> Unit
 
                 NavigationStopResult.CleanupIncomplete ->
-                    viewModel.showMessage(getString(R.string.navigation_end_cleanup_failed))
+                    appContainer.connectionEventJournal.record(
+                        "Navigation ended; Google Navigation cleanup was incomplete",
+                    )
 
                 NavigationStopResult.Failed ->
                     viewModel.showMessage(getString(R.string.navigation_end_request_failed))
@@ -706,7 +700,7 @@ class MainActivity : ComponentActivity() {
     private fun runStationaryTest() {
         val container = appContainer
         if (viewModel.connectionState.value !is BikeConnectionState.Connected || !viewModel.diagnostics.value.authenticated) {
-            viewModel.showMessage("Connect and verify the companion link before testing")
+            viewModel.showMessage("Connect to the bike before the display test.")
             return
         }
         lifecycleScope.launch {
@@ -800,7 +794,7 @@ class MainActivity : ComponentActivity() {
                 trigger = ConnectionAttemptTrigger.AppLaunch,
             )
         ) {
-            viewModel.showMessage("Unable to start connection service")
+            viewModel.showMessage("Couldn't start the connection. Try again.")
         }
     }
 

@@ -56,7 +56,6 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 fun OnboardingScreen(
     connectionState: BikeConnectionState,
     bikeAssociated: Boolean,
-    associatedBikeLabel: String?,
     nearbyDeviceAccessGranted: Boolean,
     preciseLocationGranted: Boolean,
     notificationAccessEnabled: Boolean,
@@ -92,49 +91,50 @@ fun OnboardingScreen(
                 0 -> OnboardingPage(
                     icon = Icons.Outlined.TwoWheeler,
                     title = "Your motorcycle, at a glance",
-                    body = "Live ride data, automatic ride history and Google-powered turn-by-turn guidance in one quiet companion.",
+                    body = "Live ride data, ride history and turn-by-turn navigation.",
                 )
                 1 -> OnboardingPage(
                     icon = if (nearbyDeviceAccessGranted) Icons.Outlined.CheckCircle else Icons.Outlined.Bluetooth,
                     title = "Nearby devices",
-                    body = "Allow Bluetooth access so the companion can reconnect to the motorcycle and exchange ride data and TFT commands.",
-                    actions = if (nearbyDeviceAccessGranted) emptyList() else listOf("Allow nearby devices" to onRequestNearbyDeviceAccess),
-                    status = if (nearbyDeviceAccessGranted) "Permission granted" else "Permission needed to connect",
+                    body = "Allow Bluetooth so RideBuddy can connect to your motorcycle.",
+                    actions = if (nearbyDeviceAccessGranted) emptyList() else listOf("Allow Bluetooth" to onRequestNearbyDeviceAccess),
+                    status = if (nearbyDeviceAccessGranted) "Ready" else "Needed to connect",
                 )
                 2 -> OnboardingPage(
                     icon = if (preciseLocationGranted) Icons.Outlined.CheckCircle else Icons.Outlined.LocationOn,
                     title = "Route recording",
-                    body = "Precise location adds distance, route previews and start/end areas to automatic ride history. Weather checks also use the current riding location when enabled.",
+                    body = "Location adds route maps and distance to ride history.",
                     actions = if (preciseLocationGranted) emptyList() else listOf("Allow precise location" to onRequestPreciseLocation),
                     status = if (preciseLocationGranted) "Precise location granted" else "Optional, but required for route maps",
                 )
                 3 -> OnboardingPage(
                     icon = if (bikeAssociated && authenticated) Icons.Outlined.CheckCircle else Icons.Outlined.Bluetooth,
-                    title = if (bikeAssociated) "Confirm your motorcycle" else "Pair your motorcycle",
+                    title = if (bikeAssociated) "Motorcycle paired" else "Pair your motorcycle",
                     body = if (bikeAssociated) {
-                        "Your motorcycle (${associatedBikeLabel ?: "saved motorcycle"}) is saved. RideBuddy will automatically connect whenever you switch on the ignition."
+                        "RideBuddy connects automatically when your motorcycle is available."
                     } else {
-                        "Pair your motorcycle using Android's device manager. This allows RideBuddy to automatically reconnect whenever your bike is turned on."
+                        "Choose your motorcycle in the Bluetooth picker."
                     },
                     actions = when {
-                        !bikeAssociated -> listOf("Choose motorcycle" to onAssociateBike)
-                        !authenticated -> listOf("Reconnect motorcycle" to onAssociateBike)
+                        !bikeAssociated -> listOf("Find my bike" to onAssociateBike)
+                        !authenticated -> listOf("Connect" to onAssociateBike)
                         else -> emptyList()
                     },
                     status = connectionState.onboardingLabel(),
                 )
                 4 -> OnboardingPage(
                     icon = if (notificationAccessEnabled) Icons.Outlined.CheckCircle else Icons.Outlined.Notifications,
-                    title = "Calls and alerts",
-                    body = "Grant notification access to display incoming caller names, call controls, and weather alerts directly on your motorcycle screen.",
+                    title = "App alerts",
+                    body = "Show supported app alerts on your motorcycle display.",
                     actions = buildList {
-                        if (!notificationAccessEnabled) add("Allow notification access" to onOpenNotificationAccess)
-                        if (!appNotificationPermissionGranted) add("Enable riding alerts" to onRequestAppNotificationPermission)
+                        if (!notificationAccessEnabled) add("Enable bike alerts" to onOpenNotificationAccess)
+                        if (!appNotificationPermissionGranted) add("Enable phone alerts" to onRequestAppNotificationPermission)
                     },
                     status = when {
-                        notificationAccessEnabled && appNotificationPermissionGranted -> "Standard call actions and riding alerts are ready"
-                        notificationAccessEnabled -> "TFT access ready; phone-side alerts are off"
-                        else -> "Optional access is not enabled"
+                        notificationAccessEnabled && appNotificationPermissionGranted -> "Bike and phone alerts enabled"
+                        notificationAccessEnabled -> "Bike alerts enabled"
+                        appNotificationPermissionGranted -> "Phone alerts enabled"
+                        else -> "Optional"
                     },
                 )
                 5 -> OnboardingPage(
@@ -156,7 +156,8 @@ fun OnboardingScreen(
                         "Motorcycle paired" to bikeAssociated,
                         "Live data from the bike" to (authenticated && telemetryReceiving),
                         "Route recording" to preciseLocationGranted,
-                        "TFT calls and alerts" to notificationAccessEnabled,
+                        "Bike app alerts" to notificationAccessEnabled,
+                        "Phone alerts" to appNotificationPermissionGranted,
                         "Google navigation" to navigationConfigured,
                     ),
                     )
@@ -235,7 +236,7 @@ private fun OnboardingPage(
 private fun BikeConnectionState.onboardingLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Not connected"
     is BikeConnectionState.Connecting -> "Connecting"
-    is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
+    is BikeConnectionState.Authenticating -> "Connecting"
     is BikeConnectionState.Connected -> "Connected to $deviceName"
-    is BikeConnectionState.Failed -> message
+    is BikeConnectionState.Failed -> "Couldn't connect"
 }

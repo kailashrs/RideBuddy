@@ -95,6 +95,8 @@ fun LiveScreen(
     sharedDestinationError: String?,
     isNavigationStarting: Boolean,
     connectionState: BikeConnectionState,
+    bikeAssociated: Boolean,
+    pairingInProgress: Boolean,
     live: LiveTelemetryStreams,
     lastRide: Ride?,
     guidance: GuidanceState,
@@ -132,7 +134,13 @@ fun LiveScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ConnectionCard(connectionState, onConnectBike, onDisconnectBike)
+        ConnectionCard(
+            state = connectionState,
+            bikeAssociated = bikeAssociated,
+            pairingInProgress = pairingInProgress,
+            onConnectBike = onConnectBike,
+            onDisconnectBike = onDisconnectBike,
+        )
 
         TelemetrySection(
             live = live,
@@ -402,8 +410,10 @@ private fun TelemetrySection(
 }
 
 @Composable
-private fun ConnectionCard(
+internal fun ConnectionCard(
     state: BikeConnectionState,
+    bikeAssociated: Boolean,
+    pairingInProgress: Boolean,
     onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
 ) {
@@ -478,30 +488,35 @@ private fun ConnectionCard(
                 // a rider waiting for their bike can simply wait until the connection succeeds
                 // or the app offers a retry.
                 text = when (state) {
-                    is BikeConnectionState.Connecting -> "Connecting…"
-                    is BikeConnectionState.Authenticating -> "Connecting…"
+                    is BikeConnectionState.Connecting, is BikeConnectionState.Authenticating -> "Connecting…"
                     is BikeConnectionState.Failed -> "Couldn't connect"
-                    else -> "Not connected"
+                    else -> when {
+                        pairingInProgress -> "Finding your bike…"
+                        bikeAssociated -> "Not connected"
+                        else -> "Not paired"
+                    }
                 },
                 style = MaterialTheme.typography.headlineSmall,
             )
-            Text(
-                text = when (state) {
-                    is BikeConnectionState.Failed -> state.message
-                    else -> "Switch the bike on and keep it nearby"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            val connectionHint = (state as? BikeConnectionState.Failed)
+                ?.message
+                ?.takeUnless { it == "Couldn't connect." }
+            if (!connectionHint.isNullOrBlank()) {
+                Text(
+                    connectionHint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             Spacer(Modifier.height(16.dp))
-            if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating) {
+            if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating || pairingInProgress) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             } else {
                 Button(onClick = onConnectBike) {
                     Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Find my bike")
+                    Text(if (bikeAssociated) "Connect" else "Find my bike")
                 }
             }
         }

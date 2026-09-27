@@ -28,6 +28,7 @@ import com.spaceboy.ridebuddy.domain.ConnectionFailure
 import com.spaceboy.ridebuddy.domain.ConnectionFailureCategory
 import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
+import com.spaceboy.ridebuddy.domain.riderFacingConnectionFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -970,10 +971,9 @@ internal class AndroidBikeConnection(
             // and it is worth naming rather than making them rediscover it. The wording stays
             // on what was observed; the cluster's reason for it is not ours to assert.
             val reason = if (consecutiveSecureLinkFailures >= MinSecureLinkFailures) {
-                "The motorcycle is not completing the secure link. Forget it in Bluetooth " +
-                    "settings and pair again."
+                "Forget and re-pair the bike in Bluetooth settings."
             } else {
-                "Could not connect after $MaxConnectionAttempts attempts. Tap Connect to try again."
+                "Couldn't connect."
             }
             // Persist suppression before publishing Failed. A queued presence callback must
             // not be able to turn the terminal state into a fresh retry budget.
@@ -1065,7 +1065,9 @@ internal class AndroidBikeConnection(
         // Built before teardown so the failure still carries the session it happened in.
         val failure = connectionFailure(message, category)
         disconnectInternal(closeOnly = true)
-        mutableConnectionState.value = BikeConnectionState.Failed(message)
+        mutableConnectionState.value = BikeConnectionState.Failed(
+            riderFacingConnectionFailure(message, category),
+        )
         recordConnectionFailure(failure)
     }
 

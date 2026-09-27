@@ -75,6 +75,8 @@ internal object LiveCardFixture {
             sharedDestinationError = null,
             isNavigationStarting = false,
             connectionState = BikeConnectionState.Connected("RS457_IDE1B7", rssi = -60),
+            bikeAssociated = true,
+            pairingInProgress = false,
             live = LiveTelemetryStreams(
                 telemetry = MutableStateFlow(Frame),
                 diagnostics = MutableStateFlow(BleDiagnostics(rssi = -64)),

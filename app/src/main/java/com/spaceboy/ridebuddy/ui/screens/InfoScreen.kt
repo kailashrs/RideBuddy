@@ -82,9 +82,9 @@ fun InfoScreen(
             Text(
                 text = when (connectionState) {
                     is BikeConnectionState.Connected -> "Connected to ${connectionState.deviceName}"
-                    is BikeConnectionState.Authenticating -> "Verifying motorcycle link"
+                    is BikeConnectionState.Authenticating -> "Connecting"
                     is BikeConnectionState.Connecting -> "Connecting"
-                    is BikeConnectionState.Failed -> connectionState.message
+                    is BikeConnectionState.Failed -> "Couldn't connect"
                     else -> "Not connected"
                 },
                 style = MaterialTheme.typography.labelLarge,

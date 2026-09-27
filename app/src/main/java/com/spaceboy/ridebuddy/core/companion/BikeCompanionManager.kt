@@ -163,7 +163,7 @@ class BikeCompanionManager internal constructor(
         }
         runCatching {
             companionManager.associate(request, appContext.mainExecutor, callback)
-        }.onFailure { fail(it.message ?: "Could not start bike association", onFailure) }
+        }.onFailure { fail("Couldn't start bike pairing. Try again.", onFailure) }
     }
 
     /** The Activity-result path out of the picker, for platforms that answer that way. */
@@ -178,7 +178,7 @@ class BikeCompanionManager internal constructor(
                 if (it == null) mutableState.update { state ->
                     state.copy(
                         associationInProgress = false,
-                        errorMessage = "The selected device could not be read",
+                        errorMessage = "Couldn't read the selected bike. Try again.",
                     )
                 }
             }
@@ -225,8 +225,7 @@ class BikeCompanionManager internal constructor(
                     // A refresh that could not reach the CDM says nothing about the pairing.
                     bike = state.bike ?: stored,
                     associationInProgress = false,
-                    errorMessage = refreshResult.exceptionOrNull()?.message?.takeIf(String::isNotBlank)
-                        ?: "Could not refresh the motorcycle association",
+                    errorMessage = "Couldn't refresh the bike pairing.",
                 )
             }
             return
@@ -269,7 +268,7 @@ class BikeCompanionManager internal constructor(
         mutableState.update {
             it.copy(
                 observingPresence = result.getOrDefault(false),
-                errorMessage = result.exceptionOrNull()?.message,
+                errorMessage = if (result.isSuccess) null else "Couldn't enable automatic connection.",
             )
         }
     }
@@ -301,8 +300,7 @@ class BikeCompanionManager internal constructor(
             }
             disassociationSucceeded = disassociation.isSuccess
             if (!disassociationSucceeded) {
-                val error = disassociation.exceptionOrNull()?.message?.takeIf(String::isNotBlank)
-                    ?: "Could not remove the motorcycle association"
+                val error = "Couldn't forget the bike. Try again."
                 if (observationStopped) {
                     mutableState.update { state -> state.copy(observingPresence = false) }
                     ensurePresenceObservation()
@@ -320,7 +318,7 @@ class BikeCompanionManager internal constructor(
             if (companionManager == null && bike != null) {
                 preserveAssociationAfterForgetFailure(
                     bike,
-                    "Companion device service is unavailable; try again",
+                    "Couldn't forget the bike. Try again.",
                 )
             }
             return false
@@ -404,7 +402,7 @@ class BikeCompanionManager internal constructor(
     }
 
     private fun rejectBikeName(name: String) {
-        val message = "The selected device '$name' is not a supported Aprilia RS 457 / Tuono 457"
+        val message = "Choose an Aprilia RS 457 or Tuono 457."
         mutableState.update {
             it.copy(associationInProgress = false, errorMessage = message)
         }

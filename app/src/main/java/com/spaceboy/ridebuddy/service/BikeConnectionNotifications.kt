@@ -85,9 +85,10 @@ internal fun connectionNotificationStatus(
         is BikeConnectionState.Connected -> "Connected to ${state.deviceName}"
         // Connecting and authenticating read the same on a lock screen, and the retry count is
         // the app's own bookkeeping — nobody waits differently on attempt four than on attempt two.
-        is BikeConnectionState.Connecting -> "Connecting to ${state.deviceName ?: "your motorcycle"}"
-        is BikeConnectionState.Authenticating -> "Connecting to ${state.deviceName}"
-        is BikeConnectionState.Failed -> state.message
+        is BikeConnectionState.Connecting,
+        is BikeConnectionState.Authenticating,
+        -> "Connecting"
+        is BikeConnectionState.Failed -> "Couldn't connect"
         BikeConnectionState.Disconnected -> "Disconnected"
     }
     return if (locationPermissionMissing && state is BikeConnectionState.Connected) {

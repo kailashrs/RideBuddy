@@ -94,7 +94,6 @@ data class MainScreenActions(
     val onClearRideHistory: () -> Unit,
     val onExportRideHistory: () -> Unit,
     val onOpenNotificationAccess: () -> Unit,
-    val onEnableCallControls: () -> Unit,
     val onAssociateBike: () -> Unit,
     val onForgetBike: () -> Unit,
     val onRideSelected: (Ride) -> Unit,

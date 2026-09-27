@@ -406,7 +406,8 @@ class NavigationActivity : ComponentActivity() {
                     appContainer.navigationGuidanceLifecycle
                         .abandonPendingSession(navigationSessionId)
                     if (!NavigationSessionOwners.isCurrent(navigationSessionId) || isFinishing || isDestroyed) return
-                    showError(getString(R.string.navigation_start_failed, errorCode))
+                    appContainer.connectionEventJournal.record("Navigation SDK initialization failed: $errorCode")
+                    showError(getString(R.string.navigation_start_failed))
                 }
             })
         }.onFailure {
@@ -510,7 +511,8 @@ class NavigationActivity : ComponentActivity() {
                     }
                 } else {
                     clearNavigationOutput()
-                    showError("Route unavailable: ${status.name.replace('_', ' ').lowercase()}")
+                    appContainer.connectionEventJournal.record("Navigation route request failed: ${status.name}")
+                    showError(getString(R.string.navigation_route_not_found))
                 }
             }
         }
