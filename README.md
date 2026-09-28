@@ -75,7 +75,7 @@ verification never receives release secrets or builds a signed release.
 1. Create a Google Cloud project and enable Navigation SDK for Android.
 2. Create an Android-restricted API key for package `com.spaceboy.ridebuddy` and the signing certificate used for the build.
 3. In the app, open **Settings → Navigation** and paste the key.
-4. Share a Google Maps destination to RideBuddy, or paste a **Google Maps link** into **Live → Navigate**. Review the calculated route, then tap **Go** on the phone or use the bike's **GO** action. **Start shared destinations** can start guidance immediately after routing succeeds.
+4. Share a Google Maps destination to RideBuddy, or paste a **Google Maps link** into **Live → Navigate**. Preview the route even while disconnected, then connect the bike and tap **Go** on the phone or use the bike's **GO** action. **Start shared destinations** skips Go only while connected; a route staged while disconnected still needs Go after connecting. Temporary reconnect attempts preserve guidance; exhausting the three attempts stops navigation and ends and saves the ride.
 5. Optionally set Location to **Allow all the time** under **Settings → Navigation with screen off** for the most accurate guidance when the app is backgrounded. Foreground navigation remains available without this optional grant.
 
 ## Bike and call setup

@@ -1,7 +1,6 @@
 package com.spaceboy.ridebuddy
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -10,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.viewModels
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -33,7 +31,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.spaceboy.ridebuddy.ble.shouldAutoConnectOnLaunch
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
-import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.diagnostics.diagnosticsReport
 import com.spaceboy.ridebuddy.core.tft.StationaryTftSafetyReason
 import com.spaceboy.ridebuddy.core.tft.StationaryTftPhase
@@ -63,13 +60,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The app's single Activity: onboarding, the main Compose screens, and every platform
- * interaction that requires an Activity.
+ * Hosts onboarding, the main Compose screens, permission settings and exports.
+ * Navigation and ride details have their own Activities.
  *
- * It holds no app state of its own — that belongs to [MainViewModel] and [AppContainer].
- * What lives here is the work only an Activity can do: runtime permission requests, the
- * system pairing picker, share intents, launching other Activities, and the file-sharing
- * exports.
+ * Feature state belongs to [MainViewModel] and [AppContainer]. This Activity owns platform
+ * interactions and permission UI state; [BikeConnectionActions] handles the shared pairing flow.
  *
  * Permission state is mirrored into Compose-observable fields and re-read in [onResume],
  * because the rider can grant or revoke any of it in system settings while the app is in
@@ -81,7 +76,6 @@ class MainActivity : ComponentActivity() {
     private var nearbyDeviceAccessGranted by mutableStateOf(false)
     private var preciseLocationGranted by mutableStateOf(false)
     private var backgroundLocationGranted by mutableStateOf(false)
-    private var lastAssociationConnectionAddress: String? = null
     private var navigationStartJob: Job? = null
     private val navigationStartStopGuard: NavigationStartStopGuard
         get() = appContainer.navigationStartStopGuard
@@ -92,21 +86,11 @@ class MainActivity : ComponentActivity() {
     // Result launchers must be registered before the Activity is started, so they are all
     // declared as fields rather than created where they are used.
 
-    private val bluetoothPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        refreshRuntimePermissionState()
-        // The notification permission is requested alongside these but is not required to
-        // pair: a refused notification permission must not block the association.
-        val essentialGranted = result
-            .filterKeys { it != NotificationPermission }
-            .values.all { it }
-        if (essentialGranted) {
-            startAssociation()
-        } else {
-            viewModel.showMessage("Allow Nearby devices access.")
-        }
-    }
+    private val bikeConnectionActions = BikeConnectionActions(
+        activity = this,
+        onMessage = { viewModel.showMessage(it) },
+        onPermissionResult = ::refreshRuntimePermissionState,
+    )
 
     private val onboardingNearbyPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -132,18 +116,6 @@ class MainActivity : ComponentActivity() {
     ) { granted ->
         appNotificationPermissionGranted = granted
         viewModel.showMessage(if (granted) "Riding alerts enabled" else "Phone-side riding alerts remain disabled")
-    }
-
-    private val associationApprovalLauncher = registerForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        val manager = appContainer.bikeCompanionManager
-        val bike = manager.acceptActivityResult(result.resultCode, result.data)
-        if (bike != null) {
-            connectNewAssociation(bike)
-        } else if (result.resultCode == Activity.RESULT_CANCELED) {
-            viewModel.showMessage("Pairing canceled")
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -238,7 +210,7 @@ class MainActivity : ComponentActivity() {
             navigationConfigured = uiState.navigationKey.isConfigured,
             onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
             onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
-            onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
+            onAssociateBike = bikeConnectionActions::requestConnection,
             onOpenNotificationAccess = ::openNotificationAccessSettings,
             onRequestAppNotificationPermission = ::requestAppNotificationPermission,
             onSetUpNavigation = {
@@ -322,7 +294,7 @@ class MainActivity : ComponentActivity() {
         onClearRideHistory = viewModel::clearRideHistory,
         onExportRideHistory = ::exportRideHistory,
         onOpenNotificationAccess = ::openNotificationAccessSettings,
-        onAssociateBike = ::requestBluetoothPermissionsAndAssociate,
+        onAssociateBike = bikeConnectionActions::requestConnection,
         onForgetBike = ::forgetBike,
         onRideSelected = { ride -> startActivity(RideDetailActivity.intent(this, ride.id)) },
         onDistanceUnitsChanged = viewModel::setDistanceUnits,
@@ -396,56 +368,6 @@ class MainActivity : ComponentActivity() {
 
     private fun requestAppNotificationPermission() {
         appNotificationPermissionLauncher.launch(NotificationPermission)
-    }
-
-    private fun requestBluetoothPermissionsAndAssociate() {
-        val requiredPermissions = requiredNearbyDevicePermissions()
-        val missingPermissions = requiredPermissions.filter { permission ->
-            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missingPermissions.isEmpty()) {
-            startAssociation()
-        } else {
-            bluetoothPermissionLauncher.launch(missingPermissions.toTypedArray())
-        }
-    }
-
-    /**
-     * Wired to the InfoScreen `Reconnect` button. If a bike is already associated, this
-     * restarts the BikeConnectionService via [BikeConnectionService.reconnect] so the
-     * foreground promotion happens before GATT begins. When no bike is associated yet,
-     * delegates to the CDM picker so the user can pick one.
-     */
-    private fun startAssociation() {
-        val manager = appContainer.bikeCompanionManager
-        val existing = manager.state.value.bike
-        if (existing != null) {
-            if (!BikeConnectionService.reconnect(this, existing, launchedFromVisibleActivity = true)) {
-                viewModel.showMessage("Couldn't start the connection. Try again.")
-            }
-            return
-        }
-        if (!manager.state.value.supported) {
-            viewModel.showMessage("This phone doesn't support motorcycle pairing.")
-            return
-        }
-        lastAssociationConnectionAddress = null
-        manager.associate(
-            launchApproval = { intentSender ->
-                associationApprovalLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
-            },
-            onAssociated = ::connectNewAssociation,
-            onFailure = viewModel::showMessage,
-        )
-    }
-
-    private fun connectNewAssociation(bike: AssociatedBike) {
-        if (lastAssociationConnectionAddress.equals(bike.address, ignoreCase = true)) return
-        lastAssociationConnectionAddress = bike.address
-        if (!BikeConnectionService.reconnect(this, bike, launchedFromVisibleActivity = true)) {
-            viewModel.showMessage("Couldn't start the connection. Try again.")
-        }
     }
 
     private fun forgetBike() {

@@ -8,6 +8,8 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.Toast
+import com.google.android.gms.maps.MapsInitializer
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,11 +24,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -72,8 +72,8 @@ import kotlinx.coroutines.launch
  * Its unusual property is that closing it does not stop navigation. Guidance keeps running
  * — the SDK holds its own foreground service, and the cluster keeps drawing turns — so
  * leaving this Activity detaches the UI rather than tearing the route down. That is the
- * normal riding case, with the phone stowed. See [shouldKeepGuidanceInBackground], and
- * [NavigationStopController] for the path that actually stops guidance.
+ * normal riding case, with the phone stowed. [NavigationStopController] owns the path
+ * that actually stops guidance.
  *
  * Every instance takes a session id and everything it does is guarded by
  * [NavigationSessionOwnership]. The navigator arrives asynchronously and there is exactly
@@ -92,7 +92,7 @@ class NavigationActivity : ComponentActivity() {
     private val routeReadyState = mutableStateOf(false)
     private val routeSummaryState = mutableStateOf("")
     private var routeRequestGeneration = 0L
-    private var connectionSessionSeen = false
+    private lateinit var connectionPolicy: NavigationConnectionPolicy
     private val navigationSessionId = NextNavigationSessionId.incrementAndGet()
 
     /**
@@ -113,10 +113,24 @@ class NavigationActivity : ComponentActivity() {
         else showError("Precise location is required for turn-by-turn navigation")
     }
 
+    private val bikeConnectionActions = BikeConnectionActions(this, onMessage = { message ->
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    })
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         guidanceStarted = savedInstanceState?.getBoolean(KeyGuidanceStarted, false) == true
+        connectionPolicy = NavigationConnectionPolicy(
+            autoStartPending = savedInstanceState?.getBoolean(KeyAutoStartPending)
+                ?: (intent.getBooleanExtra(ExtraAutoStartGuidance, false) &&
+                    appContainer.bikeConnection.connectionState.value is BikeConnectionState.Connected),
+            connectionSessionSeen = savedInstanceState?.getBoolean(KeyConnectionSessionSeen)
+                ?: (guidanceStarted || intent.getBooleanExtra(ExtraAttachExistingGuidance, false)),
+        )
+        // Capture an existing attempt before map setup can delay the state collector.
+        connectionPolicy.onConnectionState(appContainer.bikeConnection.connectionState.value)
         statusTextState.value = getString(R.string.navigation_preparing_route)
+        MapsInitializer.initialize(applicationContext)
         navigationView = NavigationView(this).also { it.onCreate(savedInstanceState) }
         onBackPressedDispatcher.addCallback(
             this,
@@ -132,6 +146,8 @@ class NavigationActivity : ComponentActivity() {
         val composeOverlay = ComposeView(this).apply {
             setContent {
                 val settings by container.appSettings.settings.collectAsStateWithLifecycle()
+                val connection by container.bikeConnection.connectionState.collectAsStateWithLifecycle()
+                val association by container.bikeCompanionManager.state.collectAsStateWithLifecycle()
 
                 Rs457Theme(
                     themeMode = settings.themeMode,
@@ -164,26 +180,14 @@ class NavigationActivity : ComponentActivity() {
                                         if (routeReadyState.value) routeSummaryState.value else statusTextState.value,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
-                                    Button(
-                                        onClick = ::startPreparedGuidance,
-                                        enabled = routeReadyState.value,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        if (routeReadyState.value) {
-                                            Icon(
-                                                Icons.Outlined.Navigation,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(ButtonDefaults.IconSize),
-                                            )
-                                        } else {
-                                            CircularProgressIndicator(
-                                                Modifier.size(ButtonDefaults.IconSize),
-                                                strokeWidth = 2.dp,
-                                            )
-                                        }
-                                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                                        Text(if (routeReadyState.value) "Go" else "Finding route…")
-                                    }
+                                    NavigationStartControls(
+                                        routeReady = routeReadyState.value,
+                                        connection = connection,
+                                        paired = association.bike != null,
+                                        pairing = association.associationInProgress,
+                                        onGo = ::startPreparedGuidance,
+                                        onConnect = bikeConnectionActions::requestConnection,
+                                    )
                                 }
                             }
                         }
@@ -307,10 +311,7 @@ class NavigationActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             appContainer.bikeConnection.connectionState.collect { state ->
-                val terminal = state is BikeConnectionState.Failed ||
-                    (state is BikeConnectionState.Disconnected && connectionSessionSeen)
-                if (state !is BikeConnectionState.Disconnected) connectionSessionSeen = true
-                if (terminal) {
+                if (connectionPolicy.onConnectionState(state)) {
                     routeRequestGeneration++
                     routeReadyState.value = false
                     finish()
@@ -499,15 +500,14 @@ class NavigationActivity : ComponentActivity() {
                         distance,
                         minutes?.let { if (it < 60) "$it min" else "${it / 60} hr ${it % 60} min" },
                     ).joinToString(" • ").ifBlank { "Route ready from your current location" }
-                    if (intent.getBooleanExtra(ExtraAutoStartGuidance, false)) {
+                    appContainer.tftNavigationBridge.previewDestination(
+                        intent.getStringExtra(ExtraTitle).orEmpty(),
+                        destinationDistanceMetres = trip?.meters,
+                        timeToDestinationSeconds = trip?.seconds,
+                    )
+                    showWholeRoute(navigator)
+                    if (connectionPolicy.consumeAutoStart(appContainer.bikeConnection.connectionState.value)) {
                         startPreparedGuidance()
-                    } else {
-                        appContainer.tftNavigationBridge.previewDestination(
-                            intent.getStringExtra(ExtraTitle).orEmpty(),
-                            destinationDistanceMetres = trip?.meters,
-                            timeToDestinationSeconds = trip?.seconds,
-                        )
-                        showWholeRoute(navigator)
                     }
                 } else {
                     clearNavigationOutput()
@@ -524,20 +524,34 @@ class NavigationActivity : ComponentActivity() {
         if (!routeReadyState.value || guidanceStarted || isFinishing || isDestroyed ||
             !NavigationSessionOwners.isOwner(navigationSessionId)
         ) return
-        routeReadyState.value = false
         val options = NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build()
-        val tftUpdatesRegistered = runCatching {
-            currentNavigator.registerServiceForNavUpdates(
-                packageName, NavInfoReceivingService::class.java.name, options,
+        runCatching {
+            startConnectedGuidance(
+                connectionState = { appContainer.bikeConnection.connectionState.value },
+                registerUpdates = {
+                    runCatching {
+                        currentNavigator.registerServiceForNavUpdates(
+                            packageName, NavInfoReceivingService::class.java.name, options,
+                        )
+                    }.getOrDefault(false)
+                },
+                unregisterUpdates = { runCatching(currentNavigator::unregisterServiceForNavUpdates) },
+                startGuidance = {
+                    appContainer.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
+                    currentNavigator.startGuidance()
+                },
             )
-        }.getOrDefault(false)
-        if (!tftUpdatesRegistered) {
-            showError(getString(R.string.navigation_tft_updates_unavailable))
-            clearNavigationOutput()
-            return
-        }
-        appContainer.tftNavigationBridge.start(intent.getStringExtra(ExtraTitle).orEmpty())
-        runCatching(currentNavigator::startGuidance).onSuccess {
+        }.onSuccess { result ->
+            when (result) {
+                GuidanceStartResult.ConnectionRequired -> return@onSuccess
+                GuidanceStartResult.UpdatesUnavailable -> {
+                    showError(getString(R.string.navigation_tft_updates_unavailable))
+                    clearNavigationOutput()
+                    return@onSuccess
+                }
+                GuidanceStartResult.Started -> Unit
+            }
+            routeReadyState.value = false
             stagingVisibleState.value = false
             guidanceStarted = true
             appContainer.navigationGuidanceLifecycle.markGuidanceStarted(navigationSessionId)
@@ -607,6 +621,8 @@ class NavigationActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(KeyAutoStartPending, connectionPolicy.autoStartPending)
+        outState.putBoolean(KeyConnectionSessionSeen, connectionPolicy.connectionSessionSeen)
         outState.putBoolean(KeyGuidanceStarted, guidanceStarted || navigator?.isGuidanceRunning == true)
         navigationView.onSaveInstanceState(outState)
         super.onSaveInstanceState(outState)
@@ -629,10 +645,7 @@ class NavigationActivity : ComponentActivity() {
         routeReadyState.value = false
         val currentNavigator = navigator
         currentNavigator?.removeReroutingListener(reroutingListener)
-        val continueInBackground = shouldKeepGuidanceInBackground(
-            guidanceStarted = guidanceStarted,
-            guidanceIsRunning = currentNavigator?.isGuidanceRunning == true,
-        )
+        val continueInBackground = guidanceStarted || currentNavigator?.isGuidanceRunning == true
         if (!continueInBackground) {
             if (currentNavigator != null) {
                 releaseNavigationSession(currentNavigator, stopGuidance = false)
@@ -687,6 +700,8 @@ class NavigationActivity : ComponentActivity() {
         private const val ExtraTitle = "title"
         private const val ExtraAutoStartGuidance = "auto_start_guidance"
         private const val ExtraAttachExistingGuidance = "attach_existing_guidance"
+        private const val KeyAutoStartPending = "auto_start_pending"
+        private const val KeyConnectionSessionSeen = "connection_session_seen"
         private const val KeyGuidanceStarted = "guidance_started"
         private val NextNavigationSessionId = AtomicLong()
         private val NavigationSessionOwners = NavigationSessionOwnership()
@@ -738,16 +753,6 @@ internal fun navigationLaunchPolicy(
     attachRequested -> NavigationLaunchPolicy.NoActiveRoute
     else -> NavigationLaunchPolicy.PrepareNewRoute
 }
-
-/**
- * Whether guidance should survive this Activity being destroyed. A rotation, a back press, the
- * app being backgrounded, and the handlebar EXIT all keep the route: stopping is the
- * process-scoped handler's job, never this screen's.
- */
-internal fun shouldKeepGuidanceInBackground(
-    guidanceStarted: Boolean,
-    guidanceIsRunning: Boolean,
-): Boolean = guidanceStarted || guidanceIsRunning
 
 /**
  * Decides which Activity instance owns the process's single navigator.

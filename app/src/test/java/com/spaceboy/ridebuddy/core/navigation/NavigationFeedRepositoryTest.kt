@@ -53,7 +53,6 @@ class NavigationFeedRepositoryTest {
 
         assertTrue(repository.guidance.value.active)
         assertSame(info, forwarded)
-        assertEquals(NavigationFeedOutputAction.Rerouting, navigationFeedOutputAction(info.navState))
     }
 
     @Test
@@ -83,7 +82,6 @@ class NavigationFeedRepositoryTest {
         assertFalse(repository.guidance.value.active)
         assertSame(stopped, forwarded)
         assertEquals(1, terminalDecisions)
-        assertEquals(NavigationFeedOutputAction.Stop, navigationFeedOutputAction(stopped.navState))
     }
 
     @Test

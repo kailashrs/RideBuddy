@@ -43,14 +43,6 @@ class NavigationActivityPolicyTest {
     }
 
     @Test
-    fun `background lifecycle keeps only started or running guidance`() {
-        assertFalse(shouldKeepGuidanceInBackground(guidanceStarted = false, guidanceIsRunning = false))
-        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = true, guidanceIsRunning = false))
-        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = false, guidanceIsRunning = true))
-        assertTrue(shouldKeepGuidanceInBackground(guidanceStarted = true, guidanceIsRunning = true))
-    }
-
-    @Test
     fun `stale activity cannot release the current navigation session`() {
         val ownership = NavigationSessionOwnership()
         ownership.register(1L)

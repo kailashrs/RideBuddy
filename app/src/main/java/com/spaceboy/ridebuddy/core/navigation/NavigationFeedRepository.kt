@@ -39,6 +39,9 @@ class NavigationFeedRepository {
     /** Raw pass-through for consumers needing the full update. Set by the app container. */
     internal var onNavInfo: ((NavInfo) -> Unit)? = null
 
+    /** Rejects queued ENROUTE/REROUTING messages once the owning session has ended. */
+    internal var acceptActiveNavInfo: (() -> Boolean)? = null
+
     /**
      * Veto for terminal states. The SDK emits them on its own teardown as well as on real
      * arrival, and acting on the former would clear guidance that is still running.
@@ -53,6 +56,9 @@ class NavigationFeedRepository {
      * is worse than showing the last known turn.
      */
     fun accept(info: NavInfo) {
+        if ((info.navState == NavState.ENROUTE || info.navState == NavState.REROUTING) &&
+            acceptActiveNavInfo?.invoke() == false
+        ) return
         if (info.navState == NavState.REROUTING) {
             mutableGuidance.value = mutableGuidance.value.asRerouting(
                 distanceToDestinationMetres = info.distanceToFinalDestinationMeters,
@@ -93,21 +99,6 @@ class NavigationFeedRepository {
     fun clear() {
         mutableGuidance.value = GuidanceState()
     }
-}
-
-/** What a navigation state means for the cluster display. */
-internal enum class NavigationFeedOutputAction {
-    Guidance,
-    Rerouting,
-
-    /** Anything else — arrived, stopped, not navigating — clears the display. */
-    Stop,
-}
-
-internal fun navigationFeedOutputAction(navState: Int): NavigationFeedOutputAction = when (navState) {
-    NavState.ENROUTE -> NavigationFeedOutputAction.Guidance
-    NavState.REROUTING -> NavigationFeedOutputAction.Rerouting
-    else -> NavigationFeedOutputAction.Stop
 }
 
 /**

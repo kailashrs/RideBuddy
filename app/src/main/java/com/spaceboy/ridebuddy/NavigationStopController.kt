@@ -28,27 +28,14 @@ enum class NavigationStopResult {
 }
 
 /**
- * The one place navigation is stopped.
- *
- * It lives at process scope rather than on an Activity because the handlebar EXIT button has to
- * work while guidance runs in the background — which is the normal riding case, with the phone
- * stowed and no navigation screen in the task. Guidance survives that (the SDK keeps its own
- * foreground service and `NavigationActivity` deliberately detaches rather than stopping), so a
- * stop path that only existed on the Activity was dead exactly when the rider needed it.
- */
-/**
- * How the SDK is asked for the navigator that is about to be stopped.
- *
- * A seam, because `NavigationApi.getNavigator` is a static call — which is what left the
- * trickiest concurrency in the app with no test around it. The real implementation is
- * [SdkNavigatorHandoff]; a test supplies one that calls back, errors, throws, or says nothing.
- *
- * The contract is the SDK's own: call back at most once, or throw.
+ * Adapter for the SDK's static navigator lookup. It calls back at most once, or throws.
+ * Tests control this handoff without initializing the SDK.
  */
 internal fun interface NavigatorHandoff {
     fun request(onReady: (NavigationGuidanceSession) -> Unit, onError: () -> Unit)
 }
 
+/** Process-scoped stop handling serves both the phone UI and handlebar EXIT in the background. */
 class NavigationStopController internal constructor(
     private val guard: NavigationStartStopGuard,
     private val guidanceLifecycle: NavigationGuidanceLifecycle,
@@ -97,6 +84,12 @@ class NavigationStopController internal constructor(
     }
 
     private suspend fun completeStop(stopRequestId: Long): NavigationStopResult? {
+        if (!guard.isCurrentStop(stopRequestId)) return null
+        if (!guidanceLifecycle.hasSessionOrPendingRequest()) {
+            clearOutput()
+            guard.finishStop(stopRequestId)
+            return NavigationStopResult.Stopped
+        }
         val session = awaitSession()
         if (!guard.isCurrentStop(stopRequestId)) return null
         if (session == null) {
@@ -114,9 +107,7 @@ class NavigationStopController internal constructor(
      * the handlebar EXIT button returned [NavigationStopResult.AlreadyStopping] and guidance
      * could no longer be stopped from anywhere. Hence the timeout.
      *
-     * A late callback after the timeout is a no-op: the continuation is no longer active, so
-     * exactly one answer is produced whichever of the two arrives first. That is what used to
-     * need an `AtomicBoolean`, a `Handler` and three `removeCallbacks`.
+     * A late callback after the timeout is ignored because the continuation is no longer active.
      */
     private suspend fun awaitSession(): NavigationGuidanceSession? =
         withTimeoutOrNull(handoffTimeout) {

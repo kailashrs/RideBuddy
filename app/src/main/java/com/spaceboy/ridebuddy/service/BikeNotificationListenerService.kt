@@ -11,13 +11,11 @@ import com.spaceboy.ridebuddy.AppContainer
 import com.spaceboy.ridebuddy.data.acceptsNotification
 import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
-import com.spaceboy.ridebuddy.data.NotificationAlertCategory
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationAppsByPackage
 
 /**
- * Turns phone notifications into cluster icons, and hands call notifications to the call
- * bridge.
+ * Turns supported phone notifications into cluster icons. Telecom handles calls separately.
  *
  * The cluster shows a small fixed set of icons rather than notification text, so several
  * apps map to one icon (see [SupportedNotificationApps]) and what is tracked is the *icon*,
@@ -39,10 +37,8 @@ class BikeNotificationListenerService : NotificationListenerService() {
     /**
      * Rebuilds state from the live notification set after a (re)connection.
      *
-     * Calls are replayed before ordinary notifications so a call in progress claims the
-     * display before anything else can occupy it. Eligibility is computed against current
-     * settings and the priority rules, so icons for notifications that are no longer
-     * eligible — or that vanished while the listener was down — are cleared rather than
+     * Eligibility is computed against current settings and the priority rules. Notifications
+     * that are no longer eligible or vanished while the listener was down are cleared rather than
      * left lit on the cluster indefinitely.
      */
     override fun onListenerConnected() {

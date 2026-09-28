@@ -13,7 +13,6 @@ import com.spaceboy.ridebuddy.data.InsightsCalculator
 import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.RideWeekSummary
-import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.ThemeMode
@@ -107,9 +106,11 @@ class MainViewModel internal constructor(
     val selectedInsightPeriod: StateFlow<InsightPeriod> = insightPeriod.asStateFlow()
     val insights: StateFlow<RideInsights> = combine(rides, insightPeriod) { currentRides, period ->
         InsightsCalculator.calculate(currentRides, period)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
     val weekSummary: StateFlow<RideWeekSummary> = rides
         .map { currentRides -> InsightsCalculator.weekSummary(currentRides, System.currentTimeMillis()) }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideWeekSummary())
 
     init {
@@ -225,7 +226,7 @@ class MainViewModel internal constructor(
             val result = withContext(Dispatchers.IO) { navigationSdkGateway.configureIfNeeded(key) }
             showMessage(
                 when (result) {
-                    ConfigureResult.Configured, ConfigureResult.AlreadyConfigured -> "Navigation SDK accepted the key configuration; cloud restrictions are verified when a route starts"
+                    ConfigureResult.Configured, ConfigureResult.AlreadyConfigured -> "Key configured. Start a route to verify access."
                     ConfigureResult.RestartRequired -> "Restart the app to test the replacement key"
                     is ConfigureResult.Failed -> result.message
                 },
@@ -288,13 +289,13 @@ class MainViewModel internal constructor(
         }
     }
 
-    fun setDistanceUnits(value: DistanceUnits) = updateSettings { it.copy(distanceUnits = value) }
-    fun setVoiceGuidance(value: Boolean) = updateSettings { it.copy(voiceGuidance = value) }
-    fun setAvoidTolls(value: Boolean) = updateSettings { it.copy(avoidTolls = value) }
-    fun setAvoidHighways(value: Boolean) = updateSettings { it.copy(avoidHighways = value) }
-    fun setAvoidFerries(value: Boolean) = updateSettings { it.copy(avoidFerries = value) }
-    fun setAutoStartSharedDestinations(value: Boolean) = updateSettings { it.copy(autoStartSharedDestinations = value) }
-    fun setNotificationPackageEnabled(packageName: String, enabled: Boolean) = updateSettings { settings ->
+    fun setDistanceUnits(value: DistanceUnits) = appSettings.update { it.copy(distanceUnits = value) }
+    fun setVoiceGuidance(value: Boolean) = appSettings.update { it.copy(voiceGuidance = value) }
+    fun setAvoidTolls(value: Boolean) = appSettings.update { it.copy(avoidTolls = value) }
+    fun setAvoidHighways(value: Boolean) = appSettings.update { it.copy(avoidHighways = value) }
+    fun setAvoidFerries(value: Boolean) = appSettings.update { it.copy(avoidFerries = value) }
+    fun setAutoStartSharedDestinations(value: Boolean) = appSettings.update { it.copy(autoStartSharedDestinations = value) }
+    fun setNotificationPackageEnabled(packageName: String, enabled: Boolean) = appSettings.update { settings ->
         settings.copy(
             disabledNotificationPackages = if (enabled) {
                 settings.disabledNotificationPackages - packageName
@@ -303,35 +304,31 @@ class MainViewModel internal constructor(
             },
         )
     }
-    fun setCallerDisplay(value: Boolean) = updateSettings { it.copy(callerDisplay = value) }
-    fun setTftCallControls(value: Boolean) = updateSettings { it.copy(tftCallControls = value) }
-    fun setTftNavigationOutput(value: Boolean) = updateSettings { it.copy(tftNavigationOutputEnabled = value) }
-    fun setBleCaptureEnabled(value: Boolean) = updateSettings { it.copy(bleCaptureEnabled = value) }
+    fun setCallerDisplay(value: Boolean) = appSettings.update { it.copy(callerDisplay = value) }
+    fun setTftCallControls(value: Boolean) = appSettings.update { it.copy(tftCallControls = value) }
+    fun setTftNavigationOutput(value: Boolean) = appSettings.update { it.copy(tftNavigationOutputEnabled = value) }
+    fun setBleCaptureEnabled(value: Boolean) = appSettings.update { it.copy(bleCaptureEnabled = value) }
     fun setPersistConnectionDiagnostics(value: Boolean) =
-        updateSettings { it.copy(persistConnectionDiagnostics = value) }
-    fun completeOnboarding() = updateSettings { it.copy(onboardingComplete = true) }
-    fun resetOnboarding() = updateSettings { it.copy(onboardingComplete = false) }
-    fun setRideStartSpeed(value: Double) = updateSettings { it.copy(rideStartSpeedKph = value.coerceIn(1.0, 15.0)) }
-    fun setRideStopSpeed(value: Double) = updateSettings { it.copy(rideStopSpeedKph = value.coerceIn(0.0, 10.0)) }
-    fun setRideStopDelay(value: Int) = updateSettings { it.copy(rideStopDelaySeconds = value.coerceIn(10, 600)) }
-    fun setOverspeedAlerts(value: Boolean) = updateSettings { it.copy(overspeedAlerts = value) }
-    fun setOverspeedThreshold(value: Int) = updateSettings { it.copy(overspeedThresholdKph = value.coerceIn(40, 250)) }
-    fun setRpmAlerts(value: Boolean) = updateSettings { it.copy(rpmAlerts = value) }
-    fun setRpmThreshold(value: Int) = updateSettings { it.copy(rpmThreshold = value.coerceIn(3_000, 15_000)) }
-    fun setAccelerationAlerts(value: Boolean) = updateSettings { it.copy(accelerationAlerts = value) }
-    fun setBrakingAlerts(value: Boolean) = updateSettings { it.copy(brakingAlerts = value) }
-    fun setWeatherAlerts(value: Boolean) = updateSettings { it.copy(weatherAlerts = value) }
-    fun setHazardAlerts(value: Boolean) = updateSettings { it.copy(hazardAlerts = value) }
-    fun setTftTextMode(value: TftTextMode) = updateSettings { it.copy(tftTextMode = value) }
-    fun setSampleRetention(value: SampleRetention) = updateSettings { it.copy(sampleRetention = value) }
-    fun setThemeMode(value: ThemeMode) = updateSettings { it.copy(themeMode = value) }
-    fun setDynamicColor(value: Boolean) = updateSettings { it.copy(dynamicColor = value) }
-    fun setHighContrast(value: Boolean) = updateSettings { it.copy(highContrast = value) }
+        appSettings.update { it.copy(persistConnectionDiagnostics = value) }
+    fun completeOnboarding() = appSettings.update { it.copy(onboardingComplete = true) }
+    fun resetOnboarding() = appSettings.update { it.copy(onboardingComplete = false) }
+    fun setRideStartSpeed(value: Double) = appSettings.update { it.copy(rideStartSpeedKph = value.coerceIn(1.0, 15.0)) }
+    fun setRideStopSpeed(value: Double) = appSettings.update { it.copy(rideStopSpeedKph = value.coerceIn(0.0, 10.0)) }
+    fun setRideStopDelay(value: Int) = appSettings.update { it.copy(rideStopDelaySeconds = value.coerceIn(10, 600)) }
+    fun setOverspeedAlerts(value: Boolean) = appSettings.update { it.copy(overspeedAlerts = value) }
+    fun setOverspeedThreshold(value: Int) = appSettings.update { it.copy(overspeedThresholdKph = value.coerceIn(40, 250)) }
+    fun setRpmAlerts(value: Boolean) = appSettings.update { it.copy(rpmAlerts = value) }
+    fun setRpmThreshold(value: Int) = appSettings.update { it.copy(rpmThreshold = value.coerceIn(3_000, 15_000)) }
+    fun setAccelerationAlerts(value: Boolean) = appSettings.update { it.copy(accelerationAlerts = value) }
+    fun setBrakingAlerts(value: Boolean) = appSettings.update { it.copy(brakingAlerts = value) }
+    fun setWeatherAlerts(value: Boolean) = appSettings.update { it.copy(weatherAlerts = value) }
+    fun setHazardAlerts(value: Boolean) = appSettings.update { it.copy(hazardAlerts = value) }
+    fun setTftTextMode(value: TftTextMode) = appSettings.update { it.copy(tftTextMode = value) }
+    fun setSampleRetention(value: SampleRetention) = appSettings.update { it.copy(sampleRetention = value) }
+    fun setThemeMode(value: ThemeMode) = appSettings.update { it.copy(themeMode = value) }
+    fun setDynamicColor(value: Boolean) = appSettings.update { it.copy(dynamicColor = value) }
+    fun setHighContrast(value: Boolean) = appSettings.update { it.copy(highContrast = value) }
     fun clearBleCapture() = bleCaptureRecorder.clear()
-
-    private fun updateSettings(transform: (AppSettings) -> AppSettings) {
-        appSettings.update(transform)
-    }
 
     /**
      * Applies a shared-destination change and mirrors it into saved state, so a share that

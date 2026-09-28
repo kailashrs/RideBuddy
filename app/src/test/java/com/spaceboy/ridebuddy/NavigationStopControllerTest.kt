@@ -209,14 +209,36 @@ class NavigationStopControllerTest {
         assertEquals(listOf(NavigationStopResult.Stopped), world.results)
     }
 
-    private class World {
+    @Test
+    fun `idle bike disconnect clears output without acquiring a navigator`() {
+        val world = World(pendingRoute = false)
+        world.controller(NavigatorHandoff { _, _ -> error("Idle stop must not initialize the SDK") })
+            .stop(world.results::add)
+        assertEquals(listOf(NavigationStopResult.Stopped), world.results)
+        assertEquals(1, world.clearOutputCalls)
+        assertTrue(world.guardIsFree())
+    }
+
+    @Test
+    fun `stopping a route still being prepared keeps the SDK stop path`() {
+        val world = World(pendingRoute = true)
+        val session = FakeSession()
+        var handoffs = 0
+        world.controller(NavigatorHandoff { ready, _ -> handoffs++; ready(session) })
+            .stop(world.results::add)
+        assertEquals(1, handoffs)
+        assertEquals(1, session.stopCalls)
+        assertEquals(listOf(NavigationStopResult.Stopped), world.results)
+    }
+
+    private class World(pendingRoute: Boolean = true) {
         val guard = NavigationStartStopGuard()
         val results = mutableListOf<NavigationStopResult>()
         var clearOutputCalls = 0
         private val lifecycle = NavigationGuidanceLifecycle(
             clearNavigationFeed = {},
             finishTftArrival = {},
-        )
+        ).also { if (pendingRoute) it.registerPendingSession(1L) }
 
         fun controller(
             handoff: NavigatorHandoff,

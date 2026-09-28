@@ -5,6 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.CircularProgressIndicator
+import com.google.android.gms.maps.MapsInitializer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -592,6 +596,23 @@ private fun RouteCard(points: List<Pair<Double, Double>>) {
 /** The full-screen map owns gestures, so panning never competes with the details list. */
 @Composable
 private fun RecordedRouteMap(points: List<Pair<Double, Double>>, modifier: Modifier, interactive: Boolean) {
+    val context = LocalContext.current
+    var initialized by remember(context) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(context) {
+        // This Activity can be restored directly after process death, without MainViewModel
+        // having loaded the key. Await the shared bootstrap before creating its map.
+        val container = context.appContainer
+        container.navigationKeyBootstrap.await()
+        initialized = container.navigationSdkGateway.isConfiguredInProcess && runCatching {
+            MapsInitializer.initialize(context.applicationContext) == 0
+        }.getOrDefault(false)
+    }
+    if (initialized != true) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            if (initialized == null) CircularProgressIndicator() else Text("Map unavailable")
+        }
+        return
+    }
     val routeColor = MaterialTheme.colorScheme.primary
     val cameraPaddingPx = with(LocalDensity.current) { 48.dp.toPx().toInt() }
     val route = remember(points) { points.map { LatLng(it.first, it.second) } }

@@ -13,8 +13,7 @@ import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
 import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
-import com.spaceboy.ridebuddy.core.navigation.NavigationFeedOutputAction
-import com.spaceboy.ridebuddy.core.navigation.navigationFeedOutputAction
+import com.google.android.libraries.mapsplatform.turnbyturn.model.NavState
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.core.tft.TftNavigationBridge
 import com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator
@@ -174,10 +173,11 @@ class AppContainer(context: Context) {
         // The guidance feed drives the cluster display. Routed here rather than from the
         // feed itself so the feed stays a plain fan-out point with no knowledge of the bike.
         navigationFeed.acceptTerminalNavInfo = navigationGuidanceLifecycle::acceptAndMarkTerminalFeed
+        navigationFeed.acceptActiveNavInfo = navigationGuidanceLifecycle::acceptsActiveFeed
         navigationFeed.onNavInfo = { info ->
-            when (navigationFeedOutputAction(info.navState)) {
-                NavigationFeedOutputAction.Guidance -> tftNavigationBridge.accept(info)
-                NavigationFeedOutputAction.Rerouting -> {
+            when (info.navState) {
+                NavState.ENROUTE -> tftNavigationBridge.accept(info)
+                NavState.REROUTING -> {
                     // The alert is raised and published *before* the reroute frames are queued.
                     // Ordering carries the fix: a reroute batch already in the queue would drain
                     // over an alert regardless of any guard inside rerouting(), because it does
@@ -190,7 +190,7 @@ class AppContainer(context: Context) {
                     }
                     tftNavigationBridge.rerouting()
                 }
-                NavigationFeedOutputAction.Stop -> tftNavigationBridge.stop()
+                else -> tftNavigationBridge.stop()
             }
         }
         applicationScope.launch {

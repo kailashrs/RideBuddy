@@ -24,6 +24,18 @@ internal class NavigationGuidanceLifecycle(
     private val pendingSessions = mutableSetOf<Long>()
     private var binding: Binding? = null
 
+    /** An idle bike disconnect must not acquire the SDK just to stop nonexistent guidance. */
+    fun hasSessionOrPendingRequest(): Boolean = synchronized(lock) {
+        binding != null || pendingSessions.isNotEmpty()
+    }
+
+    /** Only a started, nonterminal session may publish active guidance to the rest of the app. */
+    fun acceptsActiveFeed(): Boolean = synchronized(lock) {
+        val current = binding ?: return false
+        current.guidanceStarted && !current.finalized && !current.terminalEnded &&
+            pendingSessions.none { it > current.sessionId }
+    }
+
     /**
      * Declares that a session has been requested but not yet bound. Older pending ids are
      * dropped: they have been superseded, and only the newest request can still complete.
@@ -59,10 +71,9 @@ internal class NavigationGuidanceLifecycle(
      * Binds a session's callbacks, returning false when a newer session has already been
      * requested and this one is stale on arrival.
      *
-     * Re-attaching the *same* navigator — the Activity returning to the foreground — keeps
-     * the existing session object and only swaps the callbacks, so the arrival state built
-     * up while it was backgrounded survives. A different navigator replaces the binding and
-     * detaches the old one's handlers.
+     * Re-attaching the same navigator reuses its listener adapter. Each UI attachment gets
+     * a fresh binding; the Activity marks it started only when it attaches to running guidance
+     * or starts the prepared route. A different navigator detaches the old one's handlers.
      */
     internal fun attach(
         sessionId: Long,
