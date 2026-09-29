@@ -69,10 +69,13 @@ internal object LiveCardFixture {
         ride: ActiveRide?,
         onEndRide: () -> Unit = {},
         samples: List<RideSample> = emptyList(),
+        sharedDestination: String? = null,
+        sharedDestinationError: String? = null,
+        onSharedDestinationHandled: () -> Unit = {},
     ) {
         LiveScreen(
-            sharedDestination = null,
-            sharedDestinationError = null,
+            sharedDestination = sharedDestination,
+            sharedDestinationError = sharedDestinationError,
             isNavigationStarting = false,
             connectionState = BikeConnectionState.Connected("RS457_IDE1B7", rssi = -60),
             bikeAssociated = true,
@@ -95,7 +98,7 @@ internal object LiveCardFixture {
             onStartNavigation = {},
             onOpenActiveNavigation = {},
             onStopNavigation = {},
-            onSharedDestinationHandled = {},
+            onSharedDestinationHandled = onSharedDestinationHandled,
             onCancelNavigationStart = {},
         )
     }

@@ -366,7 +366,15 @@ class MainViewModel internal constructor(
     }
 
     fun clearSharedDestination() {
-        updateSharedDestinationState { it.copy(sharedDestination = null, sharedDestinationError = null) }
+        updateSharedDestinationState {
+            it.copy(
+                sharedDestination = null,
+                sharedDestinationError = null,
+                autoStartSharedDestination = null,
+                isNavigationStarting = false,
+                navigationStartAttemptId = null,
+            )
+        }
     }
 
     fun clearTransientMessage() {

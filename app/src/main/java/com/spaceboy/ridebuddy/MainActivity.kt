@@ -288,7 +288,10 @@ class MainActivity : ComponentActivity() {
         onStartNavigation = ::startNavigation,
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,
-        onSharedDestinationHandled = viewModel::clearSharedDestination,
+        onSharedDestinationHandled = {
+            navigationStartJob?.cancel()
+            viewModel.clearSharedDestination()
+        },
         onCancelNavigationStart = ::cancelNavigationStart,
         onInsightPeriodSelected = viewModel::selectInsightPeriod,
         onClearRideHistory = viewModel::clearRideHistory,

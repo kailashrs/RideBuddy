@@ -267,7 +267,7 @@ internal fun MainScreenContent(
         when (uiState.selectedDestination) {
             TopLevelDestination.Live -> LiveScreen(
                 modifier = modifier,
-                sharedDestination = uiState.sharedDestination,
+                sharedDestination = uiState.autoStartSharedDestination?.destination ?: uiState.sharedDestination,
                 sharedDestinationError = uiState.sharedDestinationError,
                 isNavigationStarting = uiState.isNavigationStarting,
                 connectionState = connectionState,

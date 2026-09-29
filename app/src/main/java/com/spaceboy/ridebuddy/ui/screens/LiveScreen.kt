@@ -112,9 +112,7 @@ fun LiveScreen(
     onCancelNavigationStart: () -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
-    // Deliberately unkeyed. A share arriving later is applied by the effect below; keying this on
-    // sharedDestination instead would re-initialise the field when it goes back to null — which is
-    // what clearing the field does — and wipe whatever the rider had typed.
+    // Keep edits when a share is consumed; a newer share is applied by the effect below.
     var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
     // Applies a share that arrives while this screen is already composed; the initial value above
@@ -290,7 +288,7 @@ fun LiveScreen(
                     OutlinedTextField(
                         value = destination,
                         onValueChange = { value ->
-                            if (sharedDestinationError != null) onSharedDestinationHandled()
+                            if (sharedDestination != null) onSharedDestinationHandled()
                             destination = value.take(MaxDestinationInputLength)
                         },
                         label = { Text("Google Maps link") },
