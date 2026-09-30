@@ -353,7 +353,6 @@ class BikeConnectionService : Service() {
     private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
         BluetoothAddress.fromBytes(getByteArrayExtra(ExtraAddressBytes))
 
-    /** An intent from an older process may carry a name this build no longer knows. */
     private fun Intent.connectionTriggerExtra(): ConnectionAttemptTrigger =
         getStringExtra(ExtraTrigger)?.let { name ->
             ConnectionAttemptTrigger.entries.firstOrNull { trigger -> trigger.name == name }

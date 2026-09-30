@@ -45,8 +45,6 @@ internal class SharedPreferencesProtectionAcceptanceStore(
     }
 
     internal companion object {
-        // Keep the existing on-device keys; the application is unreleased, but changing them adds
-        // no value and would make local hardware testing less predictable.
         const val PreferencesName = "ble_protection_trust"
         const val KeyAddress = "trusted_address"
 

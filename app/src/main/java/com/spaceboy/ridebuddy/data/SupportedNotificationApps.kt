@@ -79,15 +79,6 @@ internal fun defaultSmsNotificationApp(
 internal val SupportedNotificationAppsByPackage = SupportedNotificationApps.associateBy { it.packageName }
 
 /**
- * Every listed app is enabled by default; the feature as a whole is what is opt-in.
- *
- * The default SMS app is not in here and carries no per-app toggle: it is whatever the rider
- * has chosen at OS level rather than one option among several, so the Messages category
- * switch governs it on its own.
- */
-internal val DefaultNotificationPackages = SupportedNotificationAppsByPackage.keys
-
-/**
  * Whether a notification from this app should light its cluster icon.
  *
  * Group summaries never do: they restate messages already counted individually.

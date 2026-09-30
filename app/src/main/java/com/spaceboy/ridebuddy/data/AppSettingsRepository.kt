@@ -150,8 +150,6 @@ class AppSettingsRepository(context: Context) {
             putBoolean(KeyDynamicColor, updated.dynamicColor)
             putBoolean(KeyHighContrast, updated.highContrast)
             putStringSet(KeyNotificationPackagesDisabled, updated.disabledNotificationPackages)
-            remove(KeyNotificationPackages)
-            remove(KeyNotificationPackagesV2)
         }
         mutableSettings.value = updated
     }
@@ -170,8 +168,6 @@ class AppSettingsRepository(context: Context) {
             avoidTolls = preferences.getBoolean(KeyTolls, false),
             avoidHighways = preferences.getBoolean(KeyHighways, false),
             avoidFerries = preferences.getBoolean(KeyFerries, false),
-            // V2 is intentionally opt-in. The previous key defaulted to automatic launch, so it
-            // cannot distinguish an explicit user choice from the legacy implicit default.
             autoStartSharedDestinations = preferences.getBoolean(KeyAutoStartV2, false),
             callerDisplay = preferences.getBoolean(KeyCallerDisplay, false),
             tftCallControls = preferences.getBoolean(KeyTftCallControls, false),
@@ -195,13 +191,8 @@ class AppSettingsRepository(context: Context) {
             themeMode = preferences.enum(KeyTheme, ThemeMode.System),
             dynamicColor = preferences.getBoolean(KeyDynamicColor, true),
             highContrast = preferences.getBoolean(KeyHighContrast, false),
-            disabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesDisabled, null)?.toSet()
-                // Carried over from the enabled-set key: anything a rider had turned off
-                // stays off, and anything not listed there was never theirs to exclude.
-                ?: preferences.getStringSet(KeyNotificationPackagesV2, null)
-                    ?.let { enabled -> DefaultNotificationPackages - enabled }
-                ?: preferences.getStringSet(KeyNotificationPackages, null)
-                    ?.let { enabled -> DefaultNotificationPackages - enabled }
+            disabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesDisabled, null)
+                ?.toSet()
                 ?: emptySet(),
         )
     }
@@ -236,8 +227,6 @@ class AppSettingsRepository(context: Context) {
         const val KeyTheme = "theme_mode"
         const val KeyDynamicColor = "dynamic_color"
         const val KeyHighContrast = "high_contrast"
-        const val KeyNotificationPackages = "notification_packages"
-        const val KeyNotificationPackagesV2 = "notification_packages_v2"
         const val KeyNotificationPackagesDisabled = "notification_packages_disabled"
     }
 }
