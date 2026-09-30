@@ -15,7 +15,6 @@ class BikeConnectionActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             BikeConnectionService.ActionDisconnect -> BikeConnectionService.disconnect(context)
-            BikeConnectionService.ActionRetryRideSave -> BikeConnectionService.retryRideSave(context)
         }
     }
 }

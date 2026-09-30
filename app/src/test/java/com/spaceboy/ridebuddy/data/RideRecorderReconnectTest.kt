@@ -1,6 +1,9 @@
 package com.spaceboy.ridebuddy.data
 
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
+import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
 import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
@@ -41,8 +44,12 @@ class RideRecorderReconnectTest {
         val context = RuntimeEnvironment.getApplication()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bike = RecordingBikeConnection()
-        val databaseName = "ride-reconnect-${UUID.randomUUID()}.db"
-        val recorder = RideRecorder(bike, RideRepository(context, databaseName = databaseName, backupStore = null),
+        val repository = RideRepository(
+            Room.inMemoryDatabaseBuilder(context, RideHistoryDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RideSamplesDatabase::class.java).build(),
+            scope,
+        )
+        val recorder = RideRecorder(bike, repository,
             scope, RideLocationTracker(context), AppSettingsRepository(context), RideLocationLabeler(context))
         try {
             recorder.start()
@@ -78,7 +85,6 @@ class RideRecorderReconnectTest {
             await { recorder.activeRide.value == null && recorder.liveSamples.value.isEmpty() }
         } finally {
             scope.cancel()
-            context.deleteDatabase(databaseName)
         }
     }
 

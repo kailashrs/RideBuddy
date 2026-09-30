@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Keeps stored history within what the rider asked to keep, and brings back what a restore
- * left behind.
+ * Keeps stored history within what the rider asked to keep, and imports the history the
+ * previous database layout left behind.
  *
  * Separate from [RideRecorder] because none of this is recording: the recorder's job ends
  * when a ride is saved, and how long that ride's samples then survive is a question about
@@ -18,12 +18,13 @@ import kotlinx.coroutines.launch
  */
 internal class RideHistoryMaintenance(
     private val repository: RideRepository,
+    private val legacyImporter: LegacyRideImporter,
     private val settingsRepository: AppSettingsRepository,
     private val scope: CoroutineScope,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     /**
-     * Runs the restore once, then prunes on every retention change.
+     * Imports the previous history once, then prunes on every retention change.
      *
      * Collecting the setting rather than pruning once covers both occasions that matter with
      * one path: the flow replays its current value immediately, which is the pass at startup,
@@ -32,7 +33,7 @@ internal class RideHistoryMaintenance(
      */
     fun start() {
         scope.launch {
-            restore()
+            importLegacyHistory()
             settingsRepository.settings
                 .map { it.sampleRetention }
                 .distinctUntilChanged()
@@ -40,14 +41,13 @@ internal class RideHistoryMaintenance(
         }
     }
 
-    private suspend fun restore() {
+    private suspend fun importLegacyHistory() {
         try {
-            val restored = repository.restoreFromBackupIfEmpty()
-            if (restored > 0) Log.i(LogTag, "Restored $restored ride summaries from backup")
+            legacyImporter.importIfPresent()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            Log.w(LogTag, "Could not restore ride summaries from backup", error)
+            Log.w(LogTag, "Could not import the previous ride history; it is kept for another attempt", error)
         }
     }
 
@@ -55,7 +55,7 @@ internal class RideHistoryMaintenance(
         val days = retention.days ?: return
         try {
             val removed = repository.pruneSamplesStartedBefore(nowMillis() - days * MillisPerDay)
-            if (removed > 0) Log.i(LogTag, "Removed $removed telemetry samples past the ${retention.label} window")
+            if (removed > 0) Log.i(LogTag, "Removed samples of $removed rides past the ${retention.label} window")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {

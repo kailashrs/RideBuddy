@@ -105,7 +105,6 @@ fun LiveScreen(
     onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
     onEndRide: () -> Unit,
-    onRetryRideSave: () -> Unit,
     onStartNavigation: (String) -> Unit,
     onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
@@ -149,22 +148,6 @@ fun LiveScreen(
             onDetails = { showLiveDetails = true },
             onEndRide = onEndRide,
         )
-
-        if (live.saveFailed.collectAsStateWithLifecycle().value) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Ride not saved", style = MaterialTheme.typography.titleMedium)
-                    Text("The phone's storage is full or unavailable. Free some space, then retry. Keep RideBuddy open until it is saved.")
-                    Button(onClick = onRetryRideSave, modifier = Modifier.align(Alignment.End)) { Text("Retry") }
-                }
-            }
-        }
 
         Column {
             SectionHeader("Navigate")

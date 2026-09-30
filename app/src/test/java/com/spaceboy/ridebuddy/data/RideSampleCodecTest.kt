@@ -80,24 +80,34 @@ class RideSampleCodecTest {
     }
 
     @Test
-    fun scalingRoundTripsWithinTheStoredPrecision() {
-        assertEquals(87.4, 87.4.scaled(SpeedScale).unscaled(SpeedScale), 1e-9)
-        assertEquals(-7.64, (-7.64).scaled(AccelerationScale).unscaled(AccelerationScale), 1e-9)
-        assertEquals(12.9715937, 12.9715937.scaledOrNull(CoordinateScale).unscaledOrNull(CoordinateScale)!!, 1e-7)
+    fun aSeriesRoundTripsThroughTheStoredBlob() {
+        val startedAt = 1_700_000_000_000L
+        val samples = listOf(
+            RideSample(startedAt, 0.0, 1_200, 0, null, 0.0),
+            RideSample(
+                startedAt + 1_000, 87.4, 7_650, 42, 24.6, -7.64,
+                latitude = 12.9715937, longitude = 77.5945627, accuracyMetres = 4.5f, altitudeMetres = 920.3,
+            ),
+        )
+
+        val decoded = decodeSampleSeries(startedAt, encodeSampleSeries(startedAt, samples))
+
+        assertEquals(samples.map(RideSample::timestampMillis), decoded.map(RideSample::timestampMillis))
+        assertEquals(87.4, decoded[1].speedKph, 1e-4)
+        assertEquals(-7.64, decoded[1].accelerationMetresPerSecondSquared, 1e-4)
+        assertEquals(12.9715937, decoded[1].latitude!!, 1e-9)
+        assertEquals(77.5945627, decoded[1].longitude!!, 1e-9)
+        assertEquals(920.3, decoded[1].altitudeMetres!!, 1e-3)
+        assertEquals(7_650L, decoded[1].rpm)
+        assertEquals(42, decoded[1].throttlePercent)
     }
 
     @Test
     fun aMissingReadingStaysMissingRatherThanBecomingZero() {
-        assertNull((null as Double?).scaledOrNull(MileageScale))
-        assertNull((null as Long?).unscaledOrNull(MileageScale))
-        // The vehicle reports no mileage on a closed throttle, which must not read as 0 km/L.
-        assertTrue(0.0.scaledOrNull(MileageScale) == 0L)
-    }
+        val decoded = decodeSampleSeries(0, encodeSampleSeries(0, listOf(sample(timestamp = 0).copy(mileageKilometresPerLitre = null))))
 
-    @Test
-    fun anInfiniteReadingIsStoredAsZeroRatherThanOverflowing() {
-        assertEquals(0L, Double.NaN.scaled(SpeedScale))
-        assertNull(Double.POSITIVE_INFINITY.scaledOrNull(SpeedScale))
+        assertNull(decoded.single().mileageKilometresPerLitre)
+        assertNull(decoded.single().latitude)
     }
 
     private fun sample(timestamp: Long, acceleration: Double = 0.0) = RideSample(

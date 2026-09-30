@@ -12,10 +12,9 @@
 
     Two things go:
 
-      backup/rides.backup  ride summaries, written by RideBackupStore. Not the database —
-                           that carries the telemetry sample series, which is around half a
-                           megabyte for every hour ridden against a 25 MB allowance for the
-                           whole app, so it would blow the budget in a couple of days and
+      ride_history.db      ride summaries. Not ride_samples.db — the sample series is around
+                           half a megabyte for every hour ridden against a 25 MB allowance for
+                           the whole app, so it would blow the budget in a couple of days and
                            then stop backing anything up at all.
       app_settings.xml     the rider's preferences. Nothing secret, nothing tied to a device.
 
@@ -30,7 +29,7 @@
 -->
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
-        <include domain="file" path="backup/rides.backup" />
+        <include domain="database" path="ride_history.db" />
         <include domain="sharedpref" path="app_settings.xml" />
     </cloud-backup>
 
@@ -40,7 +39,7 @@
         means there is one thing to reason about rather than two.
     -->
     <device-transfer>
-        <include domain="file" path="backup/rides.backup" />
+        <include domain="database" path="ride_history.db" />
         <include domain="sharedpref" path="app_settings.xml" />
     </device-transfer>
 </data-extraction-rules>

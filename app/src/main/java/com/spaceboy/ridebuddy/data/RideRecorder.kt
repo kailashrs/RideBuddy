@@ -14,6 +14,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -75,21 +77,11 @@ class RideRecorder(
      * away and the button looks inert.
      */
     private var awaitStopBeforeNextRide = false
-    private val saveQueue = RideSaveQueue(
-        insert = repository::insert,
-        onSaved = { rideId, ride ->
-            // Enrichment is optional and runs after the primary save barrier opens.
-            scope.launch {
-                refreshLocationLabels(ride.copy(id = rideId))
-            }
-        },
-        onFailure = { error -> Log.e(LogTag, "Could not save completed ride; retained for retry", error) },
-    )
-    val saveFailed: StateFlow<Boolean> = saveQueue.saveFailed
+    /** Saves still writing; confined to [RecordingDispatcher] like the rest of this state. */
+    private val pendingSaves = mutableListOf<Job>()
 
-    /** Loads history and begins watching telemetry. Called once, at app start. */
+    /** Begins watching telemetry. Called once, at app start. */
     fun start() {
-        scope.launch { refreshHistory() }
         scope.launch(RecordingDispatcher) {
             bikeConnection.rawTelemetry.collect(::record)
         }
@@ -272,16 +264,8 @@ class RideRecorder(
         )
         // Thinned only now, after the figures that need full resolution have been taken
         // from the complete series. See decimatedForStorage.
-        saveQueue.enqueue(completedRide, completedSamples.decimatedForStorage())
-        scope.launch { saveQueue.flush() }
-    }
-
-    /**
-     * Retries a save the disk refused. Needed on its own because a ride ended by hand fails
-     * while the service is still running, so there is no shutdown pass to carry the retry.
-     */
-    fun retrySave() {
-        scope.launch { saveQueue.flush() }
+        pendingSaves.removeAll { !it.isActive }
+        pendingSaves += scope.launch(NonCancellable) { save(completedRide, completedSamples.decimatedForStorage()) }
     }
 
     /**
@@ -304,31 +288,30 @@ class RideRecorder(
     }
 
     /**
-     * Ends any active ride and waits for its primary insert. False retains it for Retry save.
+     * Ends any active ride and waits until every ride is written.
      *
-     * The service cannot do this by watching a counter. It collects the same connection state
-     * this recorder does, on a different dispatcher, so it can reach the barrier before the
-     * recorder has even seen the state that ends the ride — finding a count of zero and
-     * shutting down while the ride is still un-finalised. Finalisation therefore happens *here*,
-     * on the recorder's own single-threaded dispatcher, which orders it against the collector:
-     * whichever runs first, the other finds the ride already ended and simply awaits the save.
+     * The service calls this before it stops, so the process is never left killable while a
+     * ride is only in memory. Finalisation runs on the recorder's own dispatcher, which orders
+     * it against the connection-state collector that may be ending the same ride.
      */
-    suspend fun finalizeAndAwaitSave(): Boolean {
-        withContext(RecordingDispatcher) {
+    suspend fun finalizeAndAwaitSaves() {
+        val saves = withContext(RecordingDispatcher) {
             if (mutableActiveRide.value != null) finishRide(stopCandidate, endOfSession = true)
             clearLiveTelemetryState()
+            pendingSaves.toList()
         }
-        return saveQueue.flush()
+        saves.joinAll()
     }
 
-    private suspend fun refreshHistory() {
-        try {
-            repository.refresh()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
+    private suspend fun save(ride: Ride, samples: List<RideSample>) {
+        val id = try {
+            repository.insert(ride, samples)
         } catch (error: Exception) {
-            Log.e(LogTag, "Could not load ride history", error)
+            Log.e(LogTag, "Could not save the completed ride", error)
+            return
         }
+        // Place names are optional enrichment and need a network, so they follow the save.
+        refreshLocationLabels(ride.copy(id = id))
     }
 
     /** Retry unresolved names when a ride is opened; never block its initial display or saving. */

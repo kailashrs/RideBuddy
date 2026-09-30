@@ -246,7 +246,6 @@ class MainActivity : ComponentActivity() {
                 telemetry = viewModel.telemetry,
                 diagnostics = viewModel.diagnostics,
                 activeRide = viewModel.activeRide,
-                saveFailed = viewModel.rideSaveFailed,
                 rideSamples = viewModel.liveRideSamples,
                 rideMetrics = viewModel.liveRideMetrics,
             )
@@ -283,7 +282,6 @@ class MainActivity : ComponentActivity() {
         onTestNavigationApiKey = viewModel::testNavigationApiKey,
         onDisconnectBike = { BikeConnectionService.disconnect(this) },
         onEndRide = { BikeConnectionService.endRide(this) },
-        onRetryRideSave = { BikeConnectionService.retryRideSave(this) },
         onStartNavigation = ::startNavigation,
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,

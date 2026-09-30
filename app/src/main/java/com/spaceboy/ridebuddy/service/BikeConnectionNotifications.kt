@@ -28,7 +28,7 @@ internal class BikeConnectionNotifications(private val context: Context) {
     }
 
     /** The ongoing notification. Low importance: it is a status line, not an alert. */
-    fun build(status: String, retrySave: Boolean = false) = NotificationCompat.Builder(context, ChannelId)
+    fun build(status: String) = NotificationCompat.Builder(context, ChannelId)
         .setSmallIcon(R.drawable.ic_launcher)
         .setContentTitle("RideBuddy")
         .setContentText(status)
@@ -43,14 +43,12 @@ internal class BikeConnectionNotifications(private val context: Context) {
         )
         .addAction(
             0,
-            if (retrySave) "Retry save" else "Disconnect",
+            "Disconnect",
             PendingIntent.getBroadcast(
                 context,
                 1,
                 Intent(context, BikeConnectionActionReceiver::class.java)
-                    .setAction(
-                        if (retrySave) BikeConnectionService.ActionRetryRideSave else BikeConnectionService.ActionDisconnect,
-                    ),
+                    .setAction(BikeConnectionService.ActionDisconnect),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             ),
         )
@@ -60,8 +58,8 @@ internal class BikeConnectionNotifications(private val context: Context) {
      * Updates the notification in place. Failures are logged rather than thrown: notification
      * posting can be refused, and losing a status line must not take the connection down.
      */
-    fun publish(status: String, retrySave: Boolean = false) {
-        runCatching { notificationManager.notify(BikeConnectionService.NotificationId, build(status, retrySave)) }
+    fun publish(status: String) {
+        runCatching { notificationManager.notify(BikeConnectionService.NotificationId, build(status)) }
             .onFailure { error ->
                 Log.w("BikeConnectionService", "Unable to update connection notification", error)
             }

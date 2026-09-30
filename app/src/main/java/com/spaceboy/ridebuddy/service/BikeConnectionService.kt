@@ -127,14 +127,6 @@ class BikeConnectionService : Service() {
         receivedStartCommand = true
         when (intent?.action) {
             ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
-            ActionRetryRideSave -> {
-                // Flushes directly, because a ride ended by hand fails while the service is
-                // still connected and so never reaches the shutdown pass below.
-                container.rideRecorder.retrySave()
-                // An old notification action must never end a newly connected session.
-                handleConnectionState(container.bikeConnection.connectionState.value)
-                return START_NOT_STICKY
-            }
             ActionRestartConnect -> {
                 val trigger = intent.connectionTriggerExtra()
                 val automatic = trigger.isAutomatic()
@@ -296,8 +288,6 @@ class BikeConnectionService : Service() {
      * foreground notification first hands the OS a killable process holding an unwritten ride,
      * which is exactly the ride a rider most expects to find afterwards.
      *
-     * A disk error keeps the ride in memory and the foreground notification offers Retry save.
-     * Stopping after an arbitrary timeout would make an unwritten ride killable again.
      */
     private fun stopForegroundAndSelf() {
         if (shuttingDown) return
@@ -305,17 +295,12 @@ class BikeConnectionService : Service() {
         val stopId = latestStartId
         notifications.publish("Saving ride")
         shutdownJob = scope.launch {
-            val saved = stopConnectionServiceAfterSave(
+            stopConnectionServiceAfterSave(
                 stopId = stopId,
-                saveRide = container.rideRecorder::finalizeAndAwaitSave,
+                saveRides = container.rideRecorder::finalizeAndAwaitSaves,
                 stopIfCurrent = ::stopSelfResult,
                 removeForeground = ::removeForegroundNotification,
             )
-            if (!saved) {
-                shuttingDown = false
-                container.connectionEventJournal.record("Ride save failed; retained for Retry save")
-                notifications.publish("Ride not saved. Check free storage, then retry.", retrySave = true)
-            }
         }
     }
 
@@ -361,7 +346,6 @@ class BikeConnectionService : Service() {
     companion object {
         internal const val NotificationId = 457
         internal const val ActionDisconnect = "com.spaceboy.ridebuddy.action.DISCONNECT_BIKE"
-        internal const val ActionRetryRideSave = "com.spaceboy.ridebuddy.action.RETRY_RIDE_SAVE"
         private const val ActionEnableLocation = "enable_location"
         private const val ActionRestartConnect = "restart_connect"
         private const val ExtraAddressBytes = "address_bytes"
@@ -399,12 +383,6 @@ class BikeConnectionService : Service() {
          */
         fun endRide(context: Context) {
             context.applicationContext.appContainer.rideRecorder.endRideNow()
-        }
-
-        /** The failed-save notification keeps the service alive, so this is a normal command. */
-        fun retryRideSave(context: Context) {
-            val intent = Intent(context, BikeConnectionService::class.java).setAction(ActionRetryRideSave)
-            startSafely(intent) { context.startService(intent) }
         }
 
         /**
@@ -458,15 +436,13 @@ class BikeConnectionService : Service() {
  */
 internal suspend fun stopConnectionServiceAfterSave(
     stopId: Int,
-    saveRide: suspend () -> Boolean,
+    saveRides: suspend () -> Unit,
     stopIfCurrent: (Int) -> Boolean,
     removeForeground: () -> Unit,
-): Boolean {
-    val saved = saveRide()
+) {
+    saveRides()
     currentCoroutineContext().ensureActive()
-    if (!saved) return false
     if (stopIfCurrent(stopId)) removeForeground()
-    return true
 }
 
 /**

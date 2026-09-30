@@ -150,12 +150,8 @@ class RideDetailActivity : ComponentActivity() {
         lifecycleScope.launch {
             val container = appContainer
             val rideId = intent.getLongExtra(ExtraRideId, -1)
-            var exportRide = (loadState as? RideDetailLoadState.Loaded)?.data?.ride
-                ?: container.rideRepository.rides.value.firstOrNull { it.id == rideId }
-            if (exportRide == null) {
-                container.rideRepository.refresh()
-                exportRide = container.rideRepository.rides.value.firstOrNull { it.id == rideId }
-            }
+            val exportRide = (loadState as? RideDetailLoadState.Loaded)?.data?.ride
+                ?: container.rideRepository.ride(rideId)
             if (exportRide == null) {
                 Toast.makeText(this@RideDetailActivity, "This ride is no longer available", Toast.LENGTH_LONG).show()
                 return@launch
@@ -288,11 +284,7 @@ class RideDetailActivity : ComponentActivity() {
         lifecycleScope.launch {
             val container = appContainer
             try {
-                var loadedRide = container.rideRepository.rides.value.firstOrNull { it.id == rideId }
-                if (loadedRide == null) {
-                    container.rideRepository.refresh()
-                    loadedRide = container.rideRepository.rides.value.firstOrNull { it.id == rideId }
-                }
+                val loadedRide = container.rideRepository.ride(rideId)
                 if (loadedRide == null) {
                     loadState = RideDetailLoadState.Error("This ride is no longer available")
                     return@launch

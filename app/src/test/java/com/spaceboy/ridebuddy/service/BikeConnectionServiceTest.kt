@@ -20,7 +20,7 @@ class BikeConnectionServiceTest {
         val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
             stopConnectionServiceAfterSave(
                 stopId = 7,
-                saveRide = { saved.await(); actions += "saved"; true },
+                saveRides = { saved.await(); actions += "saved" },
                 stopIfCurrent = { id -> actions += "stop:$id"; true },
                 removeForeground = { actions += "foreground removed" },
             )
@@ -42,7 +42,7 @@ class BikeConnectionServiceTest {
         val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
             stopConnectionServiceAfterSave(
                 stopId = 7,
-                saveRide = { saved.await(); true },
+                saveRides = { saved.await() },
                 stopIfCurrent = { id -> attemptedStopId = id; id == newestStartId },
                 removeForeground = { foregroundRemoved = true },
             )
@@ -63,7 +63,7 @@ class BikeConnectionServiceTest {
         val shutdown = launch(start = CoroutineStart.UNDISPATCHED) {
             stopConnectionServiceAfterSave(
                 stopId = 7,
-                saveRide = { saved.await(); true },
+                saveRides = { saved.await() },
                 stopIfCurrent = { stopRequested = true; true },
                 removeForeground = { foregroundRemoved = true },
             )
@@ -71,22 +71,6 @@ class BikeConnectionServiceTest {
         shutdown.cancelAndJoin()
         saved.complete(Unit)
 
-        assertFalse(stopRequested)
-        assertFalse(foregroundRemoved)
-    }
-
-    @Test
-    fun `save failure retains foreground protection and never asks Android to stop`() = runBlocking {
-        var stopRequested = false
-        var foregroundRemoved = false
-        val saved = stopConnectionServiceAfterSave(
-            stopId = 7,
-            saveRide = { false },
-            stopIfCurrent = { stopRequested = true; true },
-            removeForeground = { foregroundRemoved = true },
-        )
-
-        assertFalse(saved)
         assertFalse(stopRequested)
         assertFalse(foregroundRemoved)
     }

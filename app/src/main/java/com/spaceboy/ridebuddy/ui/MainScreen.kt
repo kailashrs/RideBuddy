@@ -212,7 +212,6 @@ internal fun MainScreenContent(
                     onConnectBike = onAssociateBike,
                     onDisconnectBike = onDisconnectBike,
                     onEndRide = onEndRide,
-                    onRetryRideSave = onRetryRideSave,
                     onStartNavigation = onStartNavigation,
                     onOpenActiveNavigation = onOpenActiveNavigation,
                     onStopNavigation = onStopNavigation,

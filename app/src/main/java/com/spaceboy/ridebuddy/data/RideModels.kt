@@ -1,6 +1,8 @@
 package com.spaceboy.ridebuddy.data
 
 import androidx.compose.runtime.Immutable
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 
 /**
  * A completed ride, as stored and shown in history.
@@ -11,8 +13,9 @@ import androidx.compose.runtime.Immutable
  * reported mileage, which is not always available.
  */
 @Immutable
+@Entity(tableName = "rides")
 data class Ride(
-    val id: Long,
+    @PrimaryKey(autoGenerate = true) val id: Long,
     val startedAtMillis: Long,
     val endedAtMillis: Long,
     val distanceKilometres: Double,

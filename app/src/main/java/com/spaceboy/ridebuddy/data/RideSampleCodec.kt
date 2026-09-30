@@ -1,38 +1,77 @@
 package com.spaceboy.ridebuddy.data
 
-import kotlin.math.roundToLong
+import java.io.ByteArrayOutputStream
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromByteArray
+import kotlinx.serialization.encodeToByteArray
+import kotlinx.serialization.protobuf.ProtoBuf
 
 /**
- * Fixed-point scales for the stored sample columns.
- *
- * Every telemetry value is a measurement with a known useful precision, so each is stored as
- * a scaled integer rather than an IEEE double. SQLite writes an integer as a variable-length
- * value — one or two bytes for a speed, four or five for a coordinate — while a `REAL` is
- * always a full eight. Across a ride's samples that difference is most of the row.
- *
- * The scales are chosen to be finer than the source data: the vehicle reports speed in
- * whole km/h and mileage in tenths, and a GPS fix is never accurate to the centimetre that
- * [CoordinateScale] preserves. Nothing observable is rounded away.
+ * A ride's samples as stored: offsets from the ride's start rather than epoch times, and
+ * single precision for everything but coordinates, which is still finer than the source data.
+ * ProtoBuf keeps absent readings absent, and gzip removes most of what repeats between rows.
  */
-internal const val SpeedScale = 10.0
+@Serializable
+private class StoredSeries(val samples: List<StoredSample>)
 
-internal const val MileageScale = 10.0
+@Serializable
+private class StoredSample(
+    val offsetMillis: Long,
+    val speedKph: Float,
+    val rpm: Long,
+    val throttlePercent: Int,
+    val accelerationMetresPerSecondSquared: Float,
+    val mileageKilometresPerLitre: Float? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val accuracyMetres: Float? = null,
+    val altitudeMetres: Float? = null,
+)
 
-internal const val AccelerationScale = 100.0
+@OptIn(ExperimentalSerializationApi::class)
+internal fun encodeSampleSeries(startedAtMillis: Long, samples: List<RideSample>): ByteArray {
+    val series = StoredSeries(
+        samples.map { sample ->
+            StoredSample(
+                offsetMillis = sample.timestampMillis - startedAtMillis,
+                speedKph = sample.speedKph.toFloat(),
+                rpm = sample.rpm,
+                throttlePercent = sample.throttlePercent,
+                accelerationMetresPerSecondSquared = sample.accelerationMetresPerSecondSquared.toFloat(),
+                mileageKilometresPerLitre = sample.mileageKilometresPerLitre?.toFloat(),
+                latitude = sample.latitude,
+                longitude = sample.longitude,
+                accuracyMetres = sample.accuracyMetres,
+                altitudeMetres = sample.altitudeMetres?.toFloat(),
+            )
+        },
+    )
+    val bytes = ByteArrayOutputStream()
+    GZIPOutputStream(bytes).use { it.write(ProtoBuf.encodeToByteArray(series)) }
+    return bytes.toByteArray()
+}
 
-internal const val CoordinateScale = 10_000_000.0
-
-internal const val MetresScale = 10.0
-
-/** Scales and rounds for storage, keeping null as "no reading" rather than mapping it to zero. */
-internal fun Double?.scaledOrNull(scale: Double): Long? =
-    this?.takeIf(Double::isFinite)?.let { (it * scale).roundToLong() }
-
-internal fun Double.scaled(scale: Double): Long = if (isFinite()) (this * scale).roundToLong() else 0L
-
-internal fun Long?.unscaledOrNull(scale: Double): Double? = this?.let { it / scale }
-
-internal fun Long.unscaled(scale: Double): Double = this / scale
+@OptIn(ExperimentalSerializationApi::class)
+internal fun decodeSampleSeries(startedAtMillis: Long, data: ByteArray): List<RideSample> {
+    val series = ProtoBuf.decodeFromByteArray<StoredSeries>(GZIPInputStream(data.inputStream()).use { it.readBytes() })
+    return series.samples.map { stored ->
+        RideSample(
+            timestampMillis = startedAtMillis + stored.offsetMillis,
+            speedKph = stored.speedKph.toDouble(),
+            rpm = stored.rpm,
+            throttlePercent = stored.throttlePercent,
+            mileageKilometresPerLitre = stored.mileageKilometresPerLitre?.toDouble(),
+            accelerationMetresPerSecondSquared = stored.accelerationMetresPerSecondSquared.toDouble(),
+            latitude = stored.latitude,
+            longitude = stored.longitude,
+            accuracyMetres = stored.accuracyMetres,
+            altitudeMetres = stored.altitudeMetres?.toDouble(),
+        )
+    }
+}
 
 /**
  * The interval stored samples are thinned to, from the roughly 250 ms the vehicle sends.

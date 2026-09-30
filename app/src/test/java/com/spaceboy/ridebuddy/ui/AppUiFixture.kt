@@ -18,7 +18,7 @@ internal object AppUiFixture {
     val ride = Ride(1, System.currentTimeMillis() - 3_600_000L, System.currentTimeMillis(),
         28.6, 28.6, 82.0, 4500.0, 8000, 28.0, 1.1, startArea = "Home", endArea = "Marina Beach")
     val live = LiveTelemetryStreams(MutableStateFlow(LiveCardFixture.Frame), MutableStateFlow(BleDiagnostics()),
-        MutableStateFlow(LiveCardFixture.recording()), MutableStateFlow(false),
+        MutableStateFlow(LiveCardFixture.recording()),
         MutableStateFlow(emptyList()), MutableStateFlow(LiveRideMetrics()))
     fun state(ui: MainUiState) = MainScreenState(
         uiState = ui,
@@ -73,7 +73,6 @@ internal object AppUiFixture {
         onTestNavigationApiKey = { },
         onDisconnectBike = { },
         onEndRide = { },
-        onRetryRideSave = { },
         onStartNavigation = { _ -> },
         onOpenActiveNavigation = { },
         onStopNavigation = { },

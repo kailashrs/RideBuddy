@@ -26,7 +26,10 @@ import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.service.NotificationIconWriter
+import com.spaceboy.ridebuddy.data.LegacyRideImporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
+import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
+import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -89,7 +92,9 @@ class AppContainer(context: Context) {
         onAttemptsExhausted = bikeConnectionDemand::onConnectionAttemptsExhausted,
     )
     val rideLocationTracker = RideLocationTracker(context)
-    val rideRepository = RideRepository(context)
+    private val rideHistoryDatabase = RideHistoryDatabase.open(context)
+    private val rideSamplesDatabase = RideSamplesDatabase.open(context)
+    val rideRepository = RideRepository(rideHistoryDatabase, rideSamplesDatabase, applicationScope)
     val bikeCompanionManager = BikeCompanionManager(
         context,
         protectionAcceptanceStore,
@@ -105,7 +110,17 @@ class AppContainer(context: Context) {
         appSettings,
         rideLocationLabeler,
     )
-    private val rideHistoryMaintenance = RideHistoryMaintenance(rideRepository, appSettings, applicationScope)
+    private val rideHistoryMaintenance = RideHistoryMaintenance(
+        repository = rideRepository,
+        legacyImporter = LegacyRideImporter(
+            legacyDatabase = context.getDatabasePath("rides.db"),
+            legacyBackupSnapshot = java.io.File(context.filesDir, "backup/rides.backup"),
+            history = rideHistoryDatabase,
+            sampleStore = rideSamplesDatabase,
+        ),
+        settingsRepository = appSettings,
+        scope = applicationScope,
+    )
     val navigationApiKeyStore = SecureNavigationApiKeyStore(context)
     val navigationSdkGateway = GoogleNavigationSdkGateway()
     internal val navigationKeyBootstrap = NavigationKeyBootstrap(
