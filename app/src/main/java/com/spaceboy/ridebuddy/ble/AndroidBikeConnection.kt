@@ -228,15 +228,16 @@ internal class AndroidBikeConnection(
             }
         } catch (_: TimeoutCancellationException) {
             AttemptOutcome.Retry("Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms", silent = manager.wasConnected && !sawAnyValue)
-        } catch (error: RequestFailedException) {
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            // A peer that is not this vehicle, or a discovery that returned nothing usable, is
+            // deterministic: retrying cannot help.
             if (manager.profileIncomplete) {
                 AttemptOutcome.Stop("Motorcycle companion profile is incomplete", "Couldn't connect.")
             } else {
-                AttemptOutcome.Retry("Connection failed: ${statusName(error.status)}", silent = manager.wasConnected && !sawAnyValue)
+                val reason = (error as? RequestFailedException)?.let { statusName(it.status) } ?: error.javaClass.simpleName
+                AttemptOutcome.Retry("Connection failed: $reason", silent = manager.wasConnected && !sawAnyValue)
             }
-        } catch (error: Exception) {
-            if (error is kotlinx.coroutines.CancellationException) throw error
-            AttemptOutcome.Retry("Connection failed: ${error.javaClass.simpleName}", silent = manager.wasConnected && !sawAnyValue)
         }
         if (failed != null) {
             closeLink()
@@ -433,6 +434,7 @@ internal class AndroidBikeConnection(
     }
 
     private fun resetLinkDiagnostics(bonded: Boolean) {
+        manager.beginAttempt()
         sawAnyValue = false
         sessionEvidence.value = false
         challengeAnswered = null
@@ -547,6 +549,11 @@ internal class AndroidBikeConnection(
         val currentMtu: Int get() = mtu
 
         fun characteristic(uuid: UUID): BluetoothGattCharacteristic? = characteristics[uuid]
+
+        fun beginAttempt() {
+            profileIncomplete = false
+            wasConnected = false
+        }
 
         /**
          * Looked up across every service rather than under one: the vendor service UUID is not
