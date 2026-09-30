@@ -7,6 +7,8 @@ import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeWrite
 import com.spaceboy.ridebuddy.domain.BikeWriteMode
+import com.spaceboy.ridebuddy.service.ClearAppEventsEvent
+import com.spaceboy.ridebuddy.service.appEventPacket
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlin.time.Duration
@@ -19,7 +21,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * question covering both surfaces cannot say which of them was wrong, and by the time it is asked
  * the evidence for the first has already been cleared off the screen.
  */
-enum class StationaryTftPhase { Navigation, Calls }
+enum class StationaryTftPhase { Navigation, Calls, Notifications }
 
 /**
  * Runs a bounded, stationary-only sample across one cluster output.
@@ -29,6 +31,7 @@ enum class StationaryTftPhase { Navigation, Calls }
  */
 class StationaryTftValidator(
     private val connection: BikeConnection,
+    private val batteryPercent: () -> Int = { 100 },
     private val pauseBetweenWrites: suspend (Duration) -> Unit = { delay(it) },
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
@@ -46,6 +49,7 @@ class StationaryTftValidator(
         val frames = when (phase) {
             StationaryTftPhase.Navigation -> navigationFrames(nowMillis)
             StationaryTftPhase.Calls -> callFrames()
+            StationaryTftPhase.Notifications -> notificationFrames()
         }
         frames.forEachIndexed { index, frame ->
             safetyStopReason()?.let { reason ->
@@ -161,6 +165,21 @@ class StationaryTftValidator(
     )
 
     /**
+     * Lights and clears the Messages, Instagram and Gmail icons in turn, using the OEM app's
+     * `[0x0B, event, battery, 0x00]` packet, then clears every icon. This is the only way to
+     * tell whether the cluster draws notification icons at all without waiting for one to
+     * arrive mid-ride.
+     */
+    private fun notificationFrames(): List<Frame> {
+        val battery = batteryPercent()
+        fun icon(event: Int, hold: Duration = WritePacing) =
+            Frame(BleCharacteristics.AppEvent, appEventPacket(event, battery), hold = hold)
+        return TestNotificationIcons.flatMap { (shown, hidden) ->
+            listOf(icon(shown, hold = DisplayHold), icon(hidden))
+        } + icon(ClearAppEventsEvent)
+    }
+
+    /**
      * Why the run must not continue, or null when it may.
      *
      * Telemetry age is checked as well as speed, because a stale reading of zero says
@@ -223,6 +242,9 @@ class StationaryTftValidator(
 
         /** Older than this and the reading no longer describes the present. */
         const val MaxTelemetryAgeMillis = 2_000L
+
+        /** Show/hide event pairs for Messages, Instagram and Gmail, as the OEM app sends them. */
+        val TestNotificationIcons = listOf(7 to 6, 13 to 12, 15 to 14)
 
         const val TestCallerName = "TEST CALLER"
 

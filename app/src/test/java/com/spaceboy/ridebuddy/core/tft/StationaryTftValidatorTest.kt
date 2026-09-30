@@ -313,6 +313,37 @@ class StationaryTftValidatorTest {
     }
 }
 
+class StationaryNotificationPhaseTest {
+    @Test
+    fun `each icon is shown, held, hidden, and everything is cleared at the end`() = runBlocking {
+        val now = 10_000L
+        val connection = RecordingConnection(receivedAtElapsedRealtime = now)
+        val holds = mutableListOf<Long>()
+        val validator = StationaryTftValidator(
+            connection,
+            batteryPercent = { 64 },
+            pauseBetweenWrites = { holds += it.inWholeMilliseconds },
+            elapsedRealtimeMillis = { now },
+        )
+
+        val result = validator.run(StationaryTftPhase.Notifications)
+
+        assertEquals(StationaryTftTestResult.Succeeded(7), result)
+        assertTrue(connection.writes.all { it.characteristic == BleCharacteristics.AppEvent })
+        assertEquals(
+            listOf(
+                listOf(11, 7, 64, 0), listOf(11, 6, 64, 0),
+                listOf(11, 13, 64, 0), listOf(11, 12, 64, 0),
+                listOf(11, 15, 64, 0), listOf(11, 14, 64, 0),
+                listOf(11, 0, 64, 0),
+            ),
+            connection.writes.map { write -> write.payload.map(Byte::toInt) },
+        )
+        // Only the three "show" frames are held long enough to look at.
+        assertEquals(listOf(true, false, true, false, true, false), holds.map { it >= 2_000L })
+    }
+}
+
 private class RecordingConnection(
     private val failAtWrite: Int? = null,
     receivedAtElapsedRealtime: Long,

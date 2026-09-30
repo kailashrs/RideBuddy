@@ -131,14 +131,15 @@ class AppContainer(context: Context) {
         },
         scope = applicationScope,
     )
-    val stationaryTftValidator = StationaryTftValidator(bikeConnection)
+    private val phoneBatteryPercent: () -> Int = {
+        context.getSystemService(BatteryManager::class.java)
+            ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            ?.coerceIn(0, 100)
+            ?: 0
+    }
+    val stationaryTftValidator = StationaryTftValidator(bikeConnection, phoneBatteryPercent)
     internal val notificationIconWriter = NotificationIconWriter(
-        batteryPercent = {
-            context.getSystemService(BatteryManager::class.java)
-                ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-                ?.coerceIn(0, 100)
-                ?: 0
-        },
+        batteryPercent = phoneBatteryPercent,
         write = { payload -> bikeConnection.enqueueWrite(BleCharacteristics.AppEvent, payload) },
     )
     val callBridge = CallBridge(context, bikeConnection, appSettings, applicationScope)

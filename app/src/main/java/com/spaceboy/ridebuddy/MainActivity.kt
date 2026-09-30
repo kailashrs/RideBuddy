@@ -634,13 +634,16 @@ class MainActivity : ComponentActivity() {
                 if (!runStationaryPhase(phase)) phase else null
             }
             viewModel.showMessage(
-                when {
-                    faults.isEmpty() -> "TFT display test completed"
-                    faults.size == StationaryTftPhase.entries.size ->
-                        "Navigation and caller displays need investigation"
-                    faults.single() == StationaryTftPhase.Navigation ->
-                        "Navigation display needs investigation"
-                    else -> "Caller display needs investigation"
+                if (faults.isEmpty()) {
+                    "TFT display test completed"
+                } else {
+                    "Needs investigation: " + faults.joinToString { phase ->
+                        when (phase) {
+                            StationaryTftPhase.Navigation -> "navigation display"
+                            StationaryTftPhase.Calls -> "caller display"
+                            StationaryTftPhase.Notifications -> "notification icons"
+                        }
+                    }
                 },
             )
         }
@@ -686,6 +689,10 @@ class MainActivity : ComponentActivity() {
                         "While parked, did you see TEST CALLER ring, answer, clear, then show " +
                             "again as an outgoing call? The number should read 9876543210 — " +
                             "if it shows +919876543 the cluster is being sent too many digits."
+
+                    StationaryTftPhase.Notifications ->
+                        "While parked, did you see the Messages, Instagram and Gmail " +
+                            "notification icons appear one after another, each for a few seconds?"
                 }
                 return viewModel.awaitTftTestConfirmation(
                     "The Bluetooth stack accepted ${result.acceptedWrites} test writes. $prompt",
