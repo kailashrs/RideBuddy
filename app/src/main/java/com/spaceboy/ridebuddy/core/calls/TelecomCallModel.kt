@@ -2,6 +2,9 @@ package com.spaceboy.ridebuddy.core.calls
 
 import android.telecom.Call
 
+/** The three call states the cluster can be told about. */
+internal enum class TftCallState { Ringing, Answered, Outgoing }
+
 /**
  * One call the cluster is being told about, with the actions the handlebar can take on it.
  *

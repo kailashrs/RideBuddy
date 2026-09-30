@@ -13,14 +13,10 @@ import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GuidanceOutput
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
 import com.spaceboy.ridebuddy.core.navigation.NavigationController
-import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
-import com.google.android.libraries.mapsplatform.turnbyturn.model.NavInfo
 import kotlinx.coroutines.flow.filter
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
-import com.spaceboy.ridebuddy.core.tft.TftNavigationBridge
-import com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator
+import com.spaceboy.ridebuddy.core.tft.ClusterDisplay
 import com.spaceboy.ridebuddy.core.tft.StationaryTftValidator
-import com.spaceboy.ridebuddy.core.calls.CallBridge
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
@@ -118,25 +114,16 @@ class AppContainer(context: Context) {
     )
     val navigationApiKey = NavigationApiKey(SecureNavigationApiKeyStore(context), applicationScope)
     val destinationParser = DestinationParser(rideLocationLabeler)
-    val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings.settings, applicationScope)
+    val clusterDisplay = ClusterDisplay(bikeConnection, appSettings.settings, applicationScope)
 
-    /** Routes guidance to the cluster. The hazard alert is raised before the reroute frames queue. */
-    private val guidanceOutput: GuidanceOutput = object : GuidanceOutput {
-        override fun preview(destination: NavigationDestination, distanceMetres: Int?, durationSeconds: Int?) =
-            tftNavigationBridge.previewDestination(destination.title, distanceMetres, durationSeconds)
-
-        override fun started(destination: NavigationDestination) = tftNavigationBridge.start(destination.title)
-        override fun update(info: NavInfo) = tftNavigationBridge.accept(info)
-
+    /** The hazard alert is raised before the reroute reaches the cluster, so it owns the rows first. */
+    private val guidanceOutput = object : GuidanceOutput by clusterDisplay {
         override fun rerouting() {
             if (ridingAlertMonitor.navigationHazard("The route is being recalculated; check for changed road conditions")) {
-                tftPriorityCoordinator.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")
+                clusterDisplay.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")
             }
-            tftNavigationBridge.rerouting()
+            clusterDisplay.rerouting()
         }
-
-        override fun arrived() = tftNavigationBridge.arrivedAndStop()
-        override fun stopped() = tftNavigationBridge.stop()
     }
     val navigationController: NavigationController = NavigationController(
         application = appContext as Application,
@@ -154,9 +141,6 @@ class AppContainer(context: Context) {
     }
     val stationaryTftValidator = StationaryTftValidator(bikeConnection, phoneBatteryPercent)
     internal val notificationIcons = NotificationIcons(bikeConnection, appSettings.settings, phoneBatteryPercent)
-    val callBridge = CallBridge(context, bikeConnection, appSettings, applicationScope)
-    val tftPriorityCoordinator: TftPriorityCoordinator =
-        TftPriorityCoordinator(navigationController.guidance, callBridge, tftNavigationBridge, applicationScope)
     val ridingAlertMonitor = RidingAlertMonitor(context, bikeConnection, rideRecorder, appSettings, applicationScope)
     val weatherAlertProvider = WeatherAlertProvider(
         rideLocationTracker,
@@ -164,7 +148,7 @@ class AppContainer(context: Context) {
         applicationScope,
     ) { message ->
         if (ridingAlertMonitor.weatherAlert(message)) {
-            tftPriorityCoordinator.presentTextAlert("WEATHER ALERT. $message")
+            clusterDisplay.presentTextAlert("WEATHER ALERT. $message")
         }
     }
 
@@ -184,33 +168,12 @@ class AppContainer(context: Context) {
                 .collect(connectionEventJournal::setPersistenceEnabled)
         }
         applicationScope.launch {
-            bikeConnection.controls.filter { it is BikeControlEvent.ClusterReady }.collect {
-                connectionEventJournal.record("Cluster reported ready; resending navigation and app events")
-                tftNavigationBridge.republishLast()
-            }
-        }
-        applicationScope.launch {
-            var hadConnectionSession = false
-            var terminalHandled = false
-            bikeConnection.connectionState.collect { state ->
-                val terminal = state is BikeConnectionState.Failed ||
-                    (state is BikeConnectionState.Disconnected && hadConnectionSession)
-                if (state !is BikeConnectionState.Disconnected) hadConnectionSession = true
-                if (!terminal) {
-                    terminalHandled = false
-                    return@collect
-                }
-                if (terminalHandled) return@collect
-                terminalHandled = true
-                hadConnectionSession = false
-                // Brief reconnection attempts preserve the ride. A terminal session discards
-                // every app-side queue, including timers that could otherwise replay old alerts.
-                callBridge.clearPendingBikeOutput()
-                tftPriorityCoordinator.clearPendingBikeOutput()
-                ridingAlertMonitor.clearPendingBikeOutput()
-                tftNavigationBridge.clearPendingBikeOutput()
-                connectionEventJournal.record("Connection ended; clearing pending output")
-            }
+            // A lost link ends the session's phone-side alerts; brief reconnects keep them.
+            bikeConnection.connectionState
+                .map { it is BikeConnectionState.Failed || it is BikeConnectionState.Disconnected }
+                .distinctUntilChanged()
+                .filter { it }
+                .collect { ridingAlertMonitor.clearPendingBikeOutput() }
         }
         notificationIcons.start(appContext, applicationScope)
         rideRecorder.start()

@@ -69,7 +69,7 @@ class RideBuddyInCallService : InCallService() {
         val tracked = calls.orEmpty()
             .mapNotNull { call -> call.toTrackedCall() }
             .minByOrNull { if (it.state == TftCallState.Ringing) 0 else 1 }
-        appContainer.callBridge.onTelecomCallChanged(tracked)
+        appContainer.clusterDisplay.onTelecomCallChanged(tracked)
     }
 
     /**

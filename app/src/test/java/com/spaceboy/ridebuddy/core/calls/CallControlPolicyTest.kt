@@ -10,24 +10,6 @@ import org.junit.Test
 
 class CallControlPolicyTest {
     @Test
-    fun controlsPublishCallStateWhenCallerDisplayIsDisabled() {
-        assertTrue(shouldPublishCallState(callerDisplay = false, tftCallControls = true))
-    }
-
-    @Test
-    fun callStateIsSilentOnlyWhenBothCallFeaturesAreDisabled() {
-        assertFalse(shouldPublishCallState(callerDisplay = false, tftCallControls = false))
-        assertTrue(shouldPublishCallState(callerDisplay = true, tftCallControls = false))
-    }
-
-    @Test
-    fun disablingBothFeaturesClearsOnlyAPreviouslyPublishedCall() {
-        assertTrue(shouldClearPublishedCall(true, callerDisplay = false, tftCallControls = false))
-        assertFalse(shouldClearPublishedCall(false, callerDisplay = false, tftCallControls = false))
-        assertFalse(shouldClearPublishedCall(true, callerDisplay = false, tftCallControls = true))
-    }
-
-    @Test
     fun `a ringing call is ringing whichever way it rang`() {
         assertEquals(TftCallState.Ringing, tftCallStateForTelecom(Call.STATE_RINGING, incoming = true))
         assertEquals(
