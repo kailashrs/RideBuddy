@@ -9,18 +9,11 @@ import org.junit.Test
 
 class BleReconnectPolicyTest {
     @Test
-    fun `initial request and its retries share a total three attempt budget`() {
-        val budget = ConnectionAttemptBudget()
-        assertTrue(budget.beginAttempt())
-        assertEquals(1, budget.attemptsStarted)
-        assertEquals(1_000L, budget.nextDelayMillis())
-        assertTrue(budget.beginAttempt())
-        assertEquals(2_000L, budget.nextDelayMillis())
-        assertTrue(budget.beginAttempt())
-        assertEquals(3, budget.attemptsStarted)
-        assertNull(budget.nextDelayMillis())
-        assertFalse(budget.beginAttempt())
-        assertEquals(3, budget.attemptsStarted)
+    fun `an attempt cycle is three attempts, 1 s then 2 s apart`() {
+        assertEquals(1_000L, reconnectDelayMillis(0))
+        assertEquals(1_000L, reconnectDelayMillis(1))
+        assertEquals(2_000L, reconnectDelayMillis(2))
+        assertNull(reconnectDelayMillis(3))
     }
 
     @Test
@@ -28,19 +21,6 @@ class BleReconnectPolicyTest {
         assertNull(reconnectDelayMillis(3))
         assertNull(reconnectDelayMillis(Int.MAX_VALUE))
         assertNull(reconnectDelayMillis(-1))
-    }
-
-    @Test
-    fun `losing an authenticated connection starts a new three attempt recovery cycle`() {
-        val budget = ConnectionAttemptBudget()
-        repeat(3) { assertTrue(budget.beginAttempt()) }
-        // Production resets only on an explicit request or successful authentication.
-        budget.reset()
-
-        assertEquals(1_000L, budget.nextDelayMillis())
-        repeat(3) { assertTrue(budget.beginAttempt()) }
-        assertNull(budget.nextDelayMillis())
-        assertFalse(budget.beginAttempt())
     }
 
     @Test

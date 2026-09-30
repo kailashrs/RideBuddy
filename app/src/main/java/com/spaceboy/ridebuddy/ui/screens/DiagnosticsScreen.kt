@@ -125,9 +125,7 @@ fun DiagnosticsScreen(
         Readout("Cluster software", identity.clusterSoftwareVersion ?: "Not reported")
 
         Header("GATT activity")
-        Readout("Active operation", diagnostics.activeGattOperation ?: "—")
         Readout("Notifications", diagnostics.notificationsReceived.toString())
-        Readout("Descriptor writes", diagnostics.descriptorWritesCompleted.toString())
         Readout("Characteristic writes", diagnostics.writesCompleted.toString())
         Readout("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz))
         Readout("Last frame", diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
@@ -138,18 +136,8 @@ fun DiagnosticsScreen(
         Header("Errors")
         Readout("Last error", diagnostics.lastError ?: "None")
         Readout("Error time", diagnostics.lastErrorAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
-        Readout("Error category", diagnostics.lastFailure?.category?.name ?: "—")
-        Readout("Error context", diagnostics.lastFailure?.contextLine() ?: "—")
         Readout("Automatic retries", diagnostics.suppressionReason ?: "Active")
 
-        diagnostics.lastSuccessfulLink?.let { link ->
-            Header("Last successful link")
-            Readout("Session", link.sessionId.toString())
-            Readout("ATT MTU", link.attMtu?.let { "$it bytes" } ?: "—")
-            Readout("GATT services", link.servicesDiscovered.toString())
-            Readout("Established", link.establishedAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
-            Readout("Held for", link.durationMillis?.let { "${it / 1_000}s" } ?: "—")
-        }
         if (diagnostics.serviceSnapshot.isNotEmpty()) {
             Header("GATT snapshot")
             diagnostics.serviceSnapshot.forEachIndexed { index, value -> Readout("${index + 1}", value) }

@@ -26,13 +26,11 @@ internal fun diagnosticsReport(
     appendLine("Protection phase: $protectionPhaseLabel")
     appendLine("Protection path: ${protectionPathLabel ?: Unknown}")
     appendLine("Bonded: ${diagnostics.bonded ?: Unknown}")
-    appendLine("Active GATT operation: ${diagnostics.activeGattOperation ?: "none"}")
     appendLine("RSSI: ${diagnostics.rssi ?: Unknown} dBm")
     appendLine("Telemetry rate: %.2f Hz".format(diagnostics.telemetryHz))
     appendLine("ATT MTU: ${diagnostics.attMtu ?: Unknown}")
     appendLine("Services: ${diagnostics.servicesDiscovered}")
     appendLine("Notifications: ${diagnostics.notificationsReceived}")
-    appendLine("Descriptor writes: ${diagnostics.descriptorWritesCompleted}")
     appendLine("Characteristic writes: ${diagnostics.writesCompleted}")
     appendLine("Malformed frames: ${diagnostics.malformedTelemetryFrames}")
     appendLine("Dropped ride frames: ${diagnostics.droppedRawTelemetryFrames}")
@@ -43,15 +41,7 @@ internal fun diagnosticsReport(
             (identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime) ?: "never"),
     )
     appendLine("Last error: ${diagnostics.lastError ?: "none"}")
-    diagnostics.lastFailure?.let { failure -> appendLine("Last error detail: ${failure.contextLine()}") }
     diagnostics.suppressionReason?.let { reason -> appendLine("Automatic retries paused: $reason") }
-    diagnostics.lastSuccessfulLink?.let { link ->
-        appendLine(
-            "Last successful link detail: session ${link.sessionId}, MTU ${link.attMtu ?: Unknown}, " +
-                "${link.servicesDiscovered} services" +
-                (link.durationMillis?.let { ", held ${it / 1_000}s" }.orEmpty()),
-        )
-    }
     appendLine("\nGATT snapshot")
     diagnostics.serviceSnapshot.forEach(::appendLine)
     appendLine("\nRecent events")

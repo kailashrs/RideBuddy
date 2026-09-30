@@ -1,1155 +1,652 @@
 package com.spaceboy.ridebuddy.ble
 
-import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
-import android.net.MacAddress
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
-import android.bluetooth.BluetoothGattConnectionSettings
 import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import com.spaceboy.ridebuddy.domain.BikeWrite
+import com.spaceboy.ridebuddy.domain.BikeWriteMode
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
-import com.spaceboy.ridebuddy.domain.BondStateSnapshot
-import com.spaceboy.ridebuddy.domain.ConnectionAttemptContext
-import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
-import com.spaceboy.ridebuddy.domain.ConnectionFailure
-import com.spaceboy.ridebuddy.domain.ConnectionFailureCategory
 import com.spaceboy.ridebuddy.domain.ProtectionPath
 import com.spaceboy.ridebuddy.domain.ProtectionPhase
-import com.spaceboy.ridebuddy.domain.riderFacingConnectionFailure
-import kotlinx.coroutines.CancellationException
+import java.util.UUID
+import kotlin.coroutines.resume
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.withContext
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration.Companion.milliseconds
+import no.nordicsemi.android.ble.BleManager
+import no.nordicsemi.android.ble.Request
+import no.nordicsemi.android.ble.callback.FailCallback
+import no.nordicsemi.android.ble.exception.RequestFailedException
+import no.nordicsemi.android.ble.ktx.state.ConnectionState
+import no.nordicsemi.android.ble.ktx.stateAsFlow
+import no.nordicsemi.android.ble.ktx.suspend
 
 /**
- * Sole owner of the GATT link and of automatic reconnection.
+ * The link to the motorcycle, and the only thing that starts, retries or ends it.
  *
- * Nothing outside this class may start, retry, or tear down a GATT session: the foreground
- * service and the companion presence receiver express *demand*, and this class decides what
- * to do about it. Concentrating that here is what makes the retry budget meaningful —
- * anywhere else could hand the stack a fresh one just by asking again.
- *
- * The work is delegated in layers, each independently testable: [BluetoothBondCoordinator]
- * gets the device bonded, [ProtectionCoordinator] and [ProtectionSession] run the
- * handshake, [GattOperationCoordinator] serialises I/O and owns the retry policy, and
- * [BikeTelemetryStream] decodes and publishes what arrives. What is left here is the
- * connection lifecycle itself and the routing of framework callbacks into those parts.
- *
- * Two invariants run through it. All mutable state is confined to the main handler, and
- * every public entry point hops there before touching anything. And every framework
- * callback is checked against the session registry first: Android keeps delivering
- * callbacks from a `BluetoothGatt` long after the app has stopped using it, so an
- * unchecked callback would drive a link that no longer exists. Sessions are tracked
- * through [GattSessionRegistry] so each instance is closed exactly once, and every failure
- * is recorded as a structured [ConnectionFailure] rather than a bare string.
+ * GATT I/O goes through Nordic's [BleManager], which serialises operations and correlates their
+ * callbacks. What is left here is this cluster's own sequence: bond before opening GATT, as the
+ * OEM app does; connect; answer the protection challenge, or skip it for a bike that has already
+ * accepted one; subscribe to the session's notifications; and only once the cluster has sent
+ * something over them, report the link as connected.
  */
 @SuppressLint("MissingPermission")
 internal class AndroidBikeConnection(
     context: Context,
     private val captureRecorder: BleCaptureRecorder,
-    private val protectionAcceptanceStore: ProtectionAcceptanceStore,
-    private val connectionEventJournal: ConnectionEventJournal,
-    private val bikeIdentityRepository: BikeIdentityRepository,
+    private val protectionAcceptance: ProtectionAcceptanceStore,
+    private val journal: ConnectionEventJournal,
+    private val identityRepository: BikeIdentityRepository,
     private val onAttemptsExhausted: () -> Unit,
 ) : BikeConnection {
     private val appContext = context.applicationContext
-    private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val bondCoordinator = BluetoothBondCoordinator(
-        context = appContext,
-        handler = mainHandler,
-        isGenerationCurrent = { generation -> generation == connectionGeneration },
-        onBondReady = ::onBondReady,
-        onFailure = { message -> failLocally(message) },
-        log = ::log,
-    )
-    private val profile = BikeGattProfile()
-    private val sessions = GattSessionRegistry<BluetoothGatt>(
-        // Logged so a leaked connection request shows up as an open with no matching close.
-        { gatt, disconnectFirst ->
-            log("Closing GATT transport (disconnectFirst=$disconnectFirst)")
-            closeAndroidGatt(gatt, disconnectFirst)
-        },
-    )
-    private var connectedDevice: BluetoothDevice? = null
-    private var connectionTarget: BikeConnectionTarget? = null
-    private var deviceName: String? = null
-    private var connectedDeviceBonded = false
-    private var intentionalDisconnect = false
-    private var reconnectAttempt = 0
-    private val attemptBudget = ConnectionAttemptBudget()
-    private var consecutiveSecureLinkFailures = 0
-    private var reconnectScheduled = false
-    private var connectionGeneration = 0L
-    private var connectionMonitoringActive = false
-    private var attemptTrigger: ConnectionAttemptTrigger? = null
-    private var authenticatedAtMillis: Long? = null
-    private val nextWriteRequestId = AtomicLong()
-    private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val manager = BikeBleManager(appContext)
     private val telemetryStream = BikeTelemetryStream()
-
-    private val mutableConnectionState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
-    private val diagnosticsRecorder = BleDiagnosticsRecorder(connectionEventJournal.events.value)
+    private val mutableState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
+    private val mutableDiagnostics = MutableStateFlow(BleDiagnostics(recentEvents = journal.events.value))
     private val mutableControls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)
-    private val operationCoordinator = GattOperationCoordinator(
-        handler = mainHandler,
-        executor = AndroidGattOperationExecutor(captureRecorder),
-        currentGatt = { sessions.current()?.openTransport() },
-        isChallengeResponsePending = ::isChallengeResponsePending,
-        attemptContext = { attemptContext() },
-        onActiveOperationChanged = diagnosticsRecorder::setActiveOperation,
-        onFailureRecorded = ::recordConnectionFailure,
-        onResetRequired = ::retireLinkAndReconnect,
-        onOperationExhausted = ::handleExhaustedOperation,
-        log = ::log,
-    )
-    private val protectionCoordinator = ProtectionCoordinator(
-        handler = mainHandler,
-        currentGeneration = { connectionGeneration },
-        characteristic = { uuid -> profile[uuid] },
-        enqueue = operationCoordinator::enqueue,
-        enqueueAll = operationCoordinator::enqueueAll,
-        isAuthenticated = { diagnosticsRecorder.value.authenticated },
-        markAccepted = { connectionTarget?.address?.let(protectionAcceptanceStore::markAccepted) },
-        clearAcceptance = { connectionTarget?.address?.let(protectionAcceptanceStore::clear) },
-        onAuthenticated = ::completeAuthentication,
-        onFailure = ::failWithCategory,
-        onReconnectRequired = ::reconnectAfterProtectionFailure,
-        updateDiagnostics = diagnosticsRecorder::setProtection,
-        log = ::log,
-    )
+    private var target: BikeConnectionTarget? = null
+    private var session: Job? = null
 
-    init {
-        // Mirror the journal into the diagnostics snapshot so the screen has one source to
-        // read. The hop back onto the main handler keeps every diagnostics mutation on the
-        // thread that owns it.
-        telemetryScope.launch {
-            connectionEventJournal.events.collect { events ->
-                mainHandler.post { diagnosticsRecorder.recordEvents(events) }
-            }
-        }
-    }
+    /** Completed by the challenge callback while the handshake waits for it. */
+    private var challengeAnswered: CompletableDeferred<Boolean>? = null
+    private var lastChallenge: ByteArray? = null
 
-    override val connectionState: StateFlow<BikeConnectionState> = mutableConnectionState.asStateFlow()
+    /** Proof the session is live: a value the cluster only sends over an established link. */
+    private val sessionEvidence = MutableStateFlow(false)
+
+    /** Whether anything at all arrived on this attempt's link. */
+    private var sawAnyValue = false
+
+    override val connectionState: StateFlow<BikeConnectionState> = mutableState.asStateFlow()
     override val rawTelemetry = telemetryStream.rawTelemetry
     override val telemetry = telemetryStream.telemetry
     override val latestTelemetryReading = telemetryStream.latestReading
-    override val identity = bikeIdentityRepository.identity
-    override val diagnostics: StateFlow<BleDiagnostics> = diagnosticsRecorder.diagnostics
+    override val identity = identityRepository.identity
+    override val diagnostics: StateFlow<BleDiagnostics> = mutableDiagnostics.asStateFlow()
     override val controls: SharedFlow<BikeControlEvent> = mutableControls
 
-    /**
-     * Requests a connection to [target], tearing down whatever is in play first.
-     *
-     * A duplicate request for the bike already being connected is ignored rather than
-     * restarting the attempt — see [shouldStartConnection]. Bumping the generation is what
-     * makes every callback and timer belonging to the previous attempt inert.
-     */
+    init {
+        scope.launch { journal.events.collect { events -> mutableDiagnostics.update { it.copy(recentEvents = events) } } }
+    }
+
+    /** A second request for the bike already being connected is ignored rather than restarting it. */
     override fun connect(target: BikeConnectionTarget) {
-        runOnMain {
-            if (!shouldStartConnection(connectionTarget, target, mutableConnectionState.value)) {
-                log("Ignored duplicate connection request for ${target.deviceName}; connection already active")
-                return@runOnMain
+        scope.launch {
+            if (!shouldStartConnection(this@AndroidBikeConnection.target, target, mutableState.value)) {
+                journal.record("Ignored duplicate connection request for ${target.deviceName}")
+                return@launch
             }
-            val replacingTarget = connectionTarget?.address != target.address
-            connectionGeneration++
-            intentionalDisconnect = true
-            disconnectInternal(closeOnly = false)
-            connectionTarget = target
-            deviceName = target.deviceName
-            bikeIdentityRepository.select(target.address)
-            // A failure recorded against a different bike says nothing about this one.
-            if (replacingTarget) diagnosticsRecorder.clearFailure()
-            diagnosticsRecorder.setProtection(ProtectionPhase.Idle, null)
-            diagnosticsRecorder.setActiveOperation(null)
-            reconnectAttempt = 0
-            attemptBudget.reset()
-            attemptTrigger = target.trigger
-            mainHandler.removeCallbacksAndMessages(ReconnectToken)
-            // Cleared before connectGatt(), not after: on an already-bonded device the whole
-            // chain below is synchronous, so a failure inside it reaches scheduleReconnect()
-            // during this call. Leaving the flag set there suppressed the backoff and stranded
-            // the state machine in Connecting with no retry and no timeout armed. Late callbacks
-            // from the session just torn down are recognised by the session registry, not by
-            // this flag, so clearing it early loses nothing.
-            intentionalDisconnect = false
-            connectGatt()
+            if (this@AndroidBikeConnection.target?.address != target.address) {
+                mutableDiagnostics.update { it.copy(lastError = null, lastErrorAtMillis = null, suppressionReason = null) }
+            }
+            this@AndroidBikeConnection.target = target
+            identityRepository.select(target.address)
+            session?.cancel()
+            closeLink()
+            session = scope.launch { runSession(target) }
         }
     }
 
-    /**
-     * Tears the link down at the app's request. Sets [intentionalDisconnect] so the
-     * resulting disconnect callback is understood as expected rather than as a lost link
-     * that should be retried.
-     */
     override fun disconnect() {
-        runOnMain {
-            connectionGeneration++
-            intentionalDisconnect = true
-            connectionMonitoringActive = false
-            mainHandler.removeCallbacksAndMessages(ReconnectToken)
-            disconnectInternal(closeOnly = false)
-            mutableConnectionState.value = BikeConnectionState.Disconnected
-            log("Disconnected by app request")
+        scope.launch {
+            session?.cancel()
+            session = null
+            closeLink()
+            mutableState.value = BikeConnectionState.Disconnected
+            journal.record("Disconnected by app request")
         }
     }
 
     override fun notifyStartFailed(message: String) {
-        runOnMain { failLocally(message) }
+        scope.launch { fail(message, "Couldn't connect.") }
     }
 
-    /** Fire-and-forget write. Silently dropped when no authenticated session exists. */
+    /** Fire-and-forget. Dropped when there is no authenticated session. */
     override fun enqueueWrite(characteristic: UUID, payload: ByteArray) {
-        runOnMain { writeInternal(characteristic, payload) }
+        if (!mutableDiagnostics.value.authenticated) return
+        val target = manager.characteristic(characteristic) ?: return
+        captureRecorder.record(BleCaptureDirection.Outbound, characteristic, payload)
+        manager.write(target, payload.copyOf(), BikeWriteMode.Default).done { countWrite() }.enqueue()
     }
 
-    /**
-     * Writes and waits for the framework to confirm it, returning false on any failure.
-     *
-     * Used where the caller needs to know a write actually landed — display sequences that
-     * must not advance on an unconfirmed step. The timeout is a backstop for a stack that
-     * accepts a write and never calls back; abandoning it is not free, which is what
-     * [cancelAwaitedWrite] deals with.
-     */
+    /** Writes and waits for the stack to confirm it; false on any failure or a missing callback. */
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
-        val completion = CompletableDeferred<Boolean>()
-        val requestId = nextWriteRequestId.incrementAndGet()
-        mainHandler.post {
-            if (!diagnosticsRecorder.value.authenticated) {
-                completion.complete(false)
-                return@post
-            }
-            val target = profile[write.characteristic]
-            if (target == null) {
-                completion.complete(false)
-                return@post
-            }
-            operationCoordinator.enqueue(
-                GattOperation.Write(
-                    characteristic = target,
-                    value = write.payload.copyOf(),
-                    mode = write.mode,
-                    completion = completion,
-                    requestId = requestId,
-                ),
-            )
-        }
-        return try {
-            withTimeoutOrNull(AwaitedWriteTimeoutMillis.milliseconds) { completion.await() }
-                ?: cancelAwaitedWrite(requestId, completion)
-        } catch (cancellation: CancellationException) {
-            withContext(NonCancellable) { cancelAwaitedWrite(requestId, completion) }
-            throw cancellation
-        }
+        if (!mutableDiagnostics.value.authenticated) return false
+        val target = manager.characteristic(write.characteristic) ?: return false
+        captureRecorder.record(BleCaptureDirection.Outbound, write.characteristic, write.payload)
+        val delivered = manager.write(target, write.payload.copyOf(), write.mode).await("writing ${write.characteristic.shortName()}")
+        if (delivered) countWrite()
+        return delivered
     }
 
     /**
-     * A caller must never retry while its original write can still reach the cluster. Queued
-     * requests can be removed directly; an in-flight request requires a link reset because GATT
-     * has no per-operation cancellation API.
+     * Attempts until the link is up, holds it until it drops, then tries again. Three attempts
+     * per cycle; a session that authenticated starts the count again when it drops.
      */
-    private suspend fun cancelAwaitedWrite(requestId: Long, completion: CompletableDeferred<Boolean>): Boolean {
-        val cancellationComplete = CompletableDeferred<Unit>()
-        mainHandler.post {
-            if (!completion.isCompleted) {
-                val activeWrite = operationCoordinator.activeWrite()
-                when {
-                    activeWrite?.requestId == requestId -> {
-                        completion.complete(false)
-                        retireLinkAndReconnect(
-                            connectionFailure(
-                                message = "Link lost while writing: awaited write was abandoned after " +
-                                    "${AwaitedWriteTimeoutMillis}ms",
-                                category = ConnectionFailureCategory.LinkLost,
-                            ),
-                        )
-                    }
-
-                    operationCoordinator.removeQueuedWrite(requestId) -> completion.complete(false)
-
-                    else -> {
-                        log("Timed-out write was no longer queued")
-                        completion.complete(false)
-                    }
+    private suspend fun runSession(target: BikeConnectionTarget) {
+        var attempts = 0
+        var silentAttempts = 0
+        while (true) {
+            attempts++
+            mutableState.value = BikeConnectionState.Connecting(target.deviceName, attempts, MaxConnectionAttempts)
+            when (val outcome = attempt(target)) {
+                AttemptOutcome.Ended -> {
+                    attempts = 0
+                    silentAttempts = 0
                 }
-            }
-            cancellationComplete.complete(Unit)
-        }
-        cancellationComplete.await()
-        return completion.await()
-    }
-
-    private fun writeInternal(characteristic: UUID, payload: ByteArray) {
-        if (!diagnosticsRecorder.value.authenticated) return
-        val target = profile[characteristic] ?: return
-        operationCoordinator.enqueue(GattOperation.Write(target, payload.copyOf()))
-    }
-
-    /**
-     * Starts an attempt: checks the local preconditions, resolves the device, and hands off
-     * to the bond coordinator. Also the reconnect entry point, so it runs once per attempt.
-     */
-    private fun connectGatt() {
-        val target = connectionTarget ?: return
-        if (!attemptBudget.beginAttempt()) {
-            scheduleReconnect()
-            return
-        }
-        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            failLocally("Allow Nearby devices to connect to the motorcycle")
-            return
-        }
-
-        val adapter = bluetoothManager.adapter ?: run {
-            failLocally("Bluetooth is unavailable on this phone")
-            return
-        }
-        if (!adapter.isEnabled) {
-            failLocally("Turn on Bluetooth to connect to the motorcycle")
-            return
-        }
-
-        // BLUETOOTH_CONNECT is granted above and MacAddress always yields six bytes, so
-        // neither the permission nor the malformed-address rejection is reachable here.
-        val device = adapter.getRemoteDevice(target.address.toByteArray())
-        val bondState = device.bondState
-        connectedDeviceBonded = bondState == BluetoothDevice.BOND_BONDED
-        connectedDevice = device
-        // A bond that is absent or still forming means the pairing epoch this acceptance was
-        // recorded against is gone, so the stored shortcut must not survive into the new one.
-        if (bondState == BluetoothDevice.BOND_NONE || bondState == BluetoothDevice.BOND_BONDING) {
-            if (protectionAcceptanceStore.isAccepted(target.address)) {
-                log("New pairing epoch (bond ${bondStateSnapshot(bondState)}); stored acceptance cleared")
-            }
-            protectionAcceptanceStore.clear(target.address)
-        }
-        mutableConnectionState.value = BikeConnectionState.Connecting(
-            deviceName,
-            attemptBudget.attemptsStarted,
-            MaxConnectionAttempts,
-        )
-        telemetryStream.clearUiTelemetry()
-        diagnosticsRecorder.beginConnectionAttempt(
-            bonded = connectedDeviceBonded,
-            context = attemptContext(),
-        )
-
-        bondCoordinator.prepare(
-            device = device,
-            initialBondState = bondState,
-            generation = connectionGeneration,
-            deviceName = deviceName.orEmpty(),
-        )
-    }
-
-    private fun onBondReady(device: BluetoothDevice) {
-        connectedDeviceBonded = true
-        diagnosticsRecorder.markBonded()
-        if (attemptTrigger == null) attemptTrigger = ConnectionAttemptTrigger.BondCompleted
-        startGattConnection(device)
-    }
-
-    /**
-     * Opens the GATT client, on whichever form of `connectGatt` the platform offers.
-     *
-     * API 37 deprecated every `Context`/`Handler` overload in favour of a settings object and
-     * an `Executor`. `minSdk` is 36, so the older call is still reachable and is kept behind a
-     * version check rather than suppressed.
-     *
-     * `mainHandler` is on the main looper, so `mainExecutor` dispatches callbacks to exactly
-     * the same thread the old overload did. The settings builder exposes no PHY preference;
-     * dropping the 1M mask lets the stack choose, which is what it already did whenever the
-     * peer disagreed with the request.
-     */
-    private fun BluetoothDevice.connectGattCompat(): BluetoothGatt? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
-            connectGatt(
-                BluetoothGattConnectionSettings.Builder()
-                    .setAutoConnectEnabled(false)
-                    .setTransport(BluetoothDevice.TRANSPORT_LE)
-                    .build(),
-                appContext.mainExecutor,
-                callback,
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            connectGatt(
-                appContext,
-                false,
-                callback,
-                BluetoothDevice.TRANSPORT_LE,
-                BluetoothDevice.PHY_LE_1M_MASK,
-                mainHandler,
-            )
-        }
-
-    /**
-     * Opens the GATT link on a bonded device and arms the overall connection timeout.
-     *
-     * The generation is captured before the framework call and rechecked after it: opening
-     * a GATT is slow enough that the attempt can be superseded in the meantime, and the
-     * instance produced would then be an orphan that still delivers callbacks. Closing it
-     * as unadopted retires it without ever making it current.
-     */
-    private fun startGattConnection(device: BluetoothDevice) {
-        val target = connectionTarget ?: return
-        val requestedGeneration = connectionGeneration
-        val address = target.address.toString()
-        // The generation is logged so overlapping connection requests are visible: the stack
-        // will happily hold more than one outstanding, and a leaked request re-establishes the
-        // link the instant it drops, bypassing the backoff this class thinks it is applying.
-        log(
-            "Connecting to ${deviceName.orEmpty()} (${address.takeLast(5)}), " +
-                "bonded=true, generation=$requestedGeneration",
-        )
-        val newGatt = try {
-            device.connectGattCompat()
-        } catch (error: RuntimeException) {
-            log("GATT start failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}")
-            failLocally("Android could not start the Bluetooth connection")
-            return
-        }
-        if (newGatt == null) {
-            recordConnectionFailure(
-                connectionFailure(
-                    message = "Android could not create a GATT connection",
-                    category = ConnectionFailureCategory.LocalPrecondition,
-                ),
-            )
-            scheduleReconnect()
-            return
-        }
-        if (requestedGeneration != connectionGeneration) {
-            sessions.closeUnadopted(newGatt, SystemClock.elapsedRealtime())
-            return
-        }
-        val session = sessions.open(newGatt, SystemClock.elapsedRealtime())
-        diagnosticsRecorder.updateAttempt(attemptContext())
-        mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        mainHandler.postAtTime({
-            if (requestedGeneration == connectionGeneration && sessions.current() === session &&
-                mutableConnectionState.value !is BikeConnectionState.Connected
-            ) {
-                retireLinkAndReconnect(
-                    connectionFailure(
-                        message = "Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms",
-                        category = ConnectionFailureCategory.LinkLost,
-                    ),
-                )
-            }
-        }, ConnectionTimeoutToken, SystemClock.uptimeMillis() + ConnectionTimeoutMillis)
-    }
-
-    private val callback = AndroidBikeGattCallback(
-        handleConnectionStateChanged = ::onConnectionStateChanged,
-        handleMtuChanged = ::onMtuChanged,
-        handleServicesDiscovered = ::onServicesDiscovered,
-        handleNotification = { callbackGatt, characteristic, value ->
-            onNotification(callbackGatt, characteristic.uuid, value)
-        },
-        handleDescriptorWrite = ::onDescriptorWrite,
-        handleWrite = ::onCharacteristicWrite,
-        handleRssiRead = ::onRssiRead,
-    )
-
-    /**
-     * Link came up or went down.
-     *
-     * A connected state carrying a failure status is not a connection — the framework
-     * reports the failure this way — so it is handled as a loss. Both branches route
-     * through [intentionalDisconnect]: an expected teardown just closes, while an
-     * unexpected one goes back to the reconnect backoff.
-     */
-    private fun onConnectionStateChanged(callbackGatt: BluetoothGatt, status: Int, newState: Int) {
-        if (!isCurrent(callbackGatt)) {
-            discardStaleCallback(callbackGatt, "connection state change")
-            return
-        }
-        val session = sessions.current() ?: return
-        when (newState) {
-            BluetoothProfile.STATE_CONNECTED -> {
-                if (status != BluetoothGatt.GATT_SUCCESS) {
-                    val failure = connectionFailure(
-                        message = "GATT connection failed: " +
-                            "${gattConnectionStatusLabel(status)} ($status)",
-                        category = ConnectionFailureCategory.LinkLost,
-                        statusCode = status,
-                        statusName = gattConnectionStatusLabel(status),
-                    )
-                    if (intentionalDisconnect) {
-                        recordConnectionFailure(failure)
-                        disconnectInternal(closeOnly = true)
-                    } else {
-                        retireLinkAndReconnect(failure, updateConnectingState = false)
-                    }
+                is AttemptOutcome.Retry -> {
+                    recordError(outcome.message)
+                    silentAttempts = if (outcome.silent) silentAttempts + 1 else 0
+                }
+                is AttemptOutcome.Stop -> {
+                    fail(outcome.message, outcome.riderMessage)
                     return
                 }
-                session.markConnected(SystemClock.elapsedRealtime())
-                // No MTU is requested, and neither does the cluster's own app. Every packet is
-                // built to fit the default ATT bearer rather than happening to fit it: the text
-                // rows are sixteen bytes because that is what 23 - 3 header - 1 terminator
-                // leaves, which is also the row width the OEM hardcodes. Negotiating a larger
-                // one is an extra round trip and another failure mode in the connection
-                // sequence, and would not widen the display. The default is recorded here so
-                // diagnostics never shows a blank MTU; if the peer negotiates one anyway,
-                // onMtuChanged overwrites it.
-                diagnosticsRecorder.setAttMtu(DefaultAttMtu)
-                log("GATT connected")
-                discoverServices(callbackGatt)
             }
-
-            BluetoothProfile.STATE_DISCONNECTED -> {
-                val linkAge = session.linkAgeMillis(SystemClock.elapsedRealtime())
-                // Whether any ATT operation completed is recorded but not interpreted. A link that
-                // dropped before the first one may have failed to encrypt — or the motorcycle may
-                // simply have gone away mid-setup. The status cannot tell those apart, so the
-                // journal states the observation and stops there.
-                val message = "Link lost: ${gattConnectionStatusLabel(status)} ($status)" +
-                    linkAge?.let { ", link age ${it / 1_000}s" }.orEmpty() +
-                    if (session.completedAnyOperation) {
-                        ""
-                    } else {
-                        "; lost before the first application operation, so encryption may not have completed"
-                    }
-                if (intentionalDisconnect) {
-                    log(message)
-                    disconnectInternal(closeOnly = true)
-                } else {
-                    retireLinkAndReconnect(
-                        connectionFailure(
-                            message = message,
-                            category = ConnectionFailureCategory.LinkLost,
-                            statusCode = status,
-                            statusName = gattConnectionStatusLabel(status),
-                            linkAgeMillis = linkAge,
-                        ),
-                        updateConnectingState = false,
-                    )
-                }
-            }
-        }
-    }
-
-    private fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
-        if (!isCurrent(callbackGatt)) return
-        if (status == BluetoothGatt.GATT_SUCCESS) {
-            diagnosticsRecorder.setAttMtu(mtu)
-            log("MTU $mtu")
-        }
-    }
-
-    /**
-     * Discovery finished: index the profile, verify it is a compatible cluster, and start
-     * the handshake. An incomplete profile is deterministic — a peer that is not this
-     * vehicle, or a discovery that returned nothing usable — so it fails without retrying.
-     */
-    private fun onServicesDiscovered(callbackGatt: BluetoothGatt, status: Int) {
-        if (!isCurrent(callbackGatt)) return
-        if (status != BluetoothGatt.GATT_SUCCESS) {
-            retireLinkAndReconnect(
-                connectionFailure(
-                    message = "Link lost while discovering services: " +
-                        "${gattStatusName(status)} ($status)",
-                    category = ConnectionFailureCategory.LinkLost,
-                    statusCode = status,
-                    statusName = gattStatusName(status),
-                ),
-            )
-            return
-        }
-        val snapshot = profile.replace(callbackGatt.services)
-        diagnosticsRecorder.setServices(snapshot.serviceCount, snapshot.characteristicLabels)
-        if (snapshot.missingRequiredCharacteristics.isNotEmpty()) {
-            failWithCategory(
-                "Motorcycle companion profile is incomplete (missing ${
-                    snapshot.missingRequiredCharacteristics.joinToString { it.shortName() }
-                })",
-                ConnectionFailureCategory.Deterministic,
-            )
-            return
-        }
-        mutableConnectionState.value = BikeConnectionState.Authenticating(deviceName ?: "Motorcycle")
-        val address = connectionTarget?.address
-        // Re-read the live bond state so a pair that completed between connectGatt() and the
-        // service discovery callback is still recognised for the stored-acceptance shortcut.
-        connectedDevice?.let { device -> connectedDeviceBonded = device.bondState == BluetoothDevice.BOND_BONDED }
-        val previouslyAccepted =
-            address != null && connectedDeviceBonded && protectionAcceptanceStore.isAccepted(address)
-        protectionCoordinator.begin(previouslyAccepted)
-    }
-
-    /** A CCCD write completed, which is how a subscription reports success. */
-    private fun onDescriptorWrite(
-        callbackGatt: BluetoothGatt,
-        descriptor: BluetoothGattDescriptor,
-        status: Int,
-    ) {
-        if (!isCurrent(callbackGatt)) return
-        if (status == BluetoothGatt.GATT_SUCCESS) sessions.current()?.markOperationCompleted()
-        val uuid = descriptor.characteristic.uuid
-        operationCoordinator.complete(
-            status = status,
-            label = "subscribe ${uuid.shortName()}",
-            matchesActiveOperation = { operation ->
-                operation is GattOperation.Subscribe && operation.characteristic.uuid == uuid
-            },
-        ) { completed ->
-            if (completed is GattOperation.Subscribe) {
-                diagnosticsRecorder.countDescriptorWrite()
-                protectionCoordinator.onSubscriptionCompleted(completed.characteristic.uuid)
-            }
-        }
-    }
-
-    private fun onCharacteristicWrite(
-        callbackGatt: BluetoothGatt,
-        characteristic: BluetoothGattCharacteristic,
-        status: Int,
-    ) {
-        if (!isCurrent(callbackGatt)) return
-        if (status == BluetoothGatt.GATT_SUCCESS) sessions.current()?.markOperationCompleted()
-        operationCoordinator.complete(
-            status = status,
-            label = "write ${characteristic.uuid.shortName()}",
-            matchesActiveOperation = { operation ->
-                operation is GattOperation.Write && operation.characteristic.uuid == characteristic.uuid
-            },
-        ) { completed ->
-            if (completed is GattOperation.Write) onWriteCompleted(completed)
-        }
-    }
-
-    /**
-     * Records a signal-strength reading, or notes why there is not one.
-     *
-     * A non-success status leaves the last good value showing rather than blanking the meter —
-     * one failed poll is not evidence the link has degraded. It is logged, because a reading
-     * that never succeeds is otherwise indistinguishable from one that is simply not changing,
-     * and the displayed value would sit frozen at whatever it last managed to read.
-     *
-     * Only the transition is logged. These poll every ten seconds for as long as the session is
-     * up, so logging each failure would bury the rest of the journal on a link that is failing
-     * exactly the way this is meant to reveal.
-     */
-    private fun onRssiRead(callbackGatt: BluetoothGatt, rssi: Int, status: Int) {
-        if (!isCurrent(callbackGatt)) return
-        if (status != BluetoothGatt.GATT_SUCCESS) {
-            if (!rssiReadFailing) {
-                rssiReadFailing = true
-                log("RSSI reads are failing with status $status; the displayed value is stale")
-            }
-            return
-        }
-        if (rssiReadFailing) {
-            rssiReadFailing = false
-            log("RSSI reads recovered")
-        }
-        diagnosticsRecorder.setRssi(rssi)
-        val current = mutableConnectionState.value
-        if (current is BikeConnectionState.Connected) {
-            mutableConnectionState.value = current.copy(rssi = rssi)
-        }
-    }
-
-    private fun discoverServices(gatt: BluetoothGatt) {
-        val started = try {
-            gatt.discoverServices()
-        } catch (error: RuntimeException) {
-            // A GATT closed underneath this call can surface as an IllegalStateException
-            // from native code on some Bluetooth stacks rather than a false return.
-            log("Service discovery threw: ${error.message}")
-            false
-        }
-        if (!started) {
-            retireLinkAndReconnect(
-                connectionFailure(
-                    message = "Link lost while starting service discovery: rejected by the Bluetooth stack",
-                    category = ConnectionFailureCategory.LinkLost,
-                ),
-            )
-        }
-    }
-
-    /**
-     * Routes an inbound notification by characteristic.
-     *
-     * Several branches call `acceptEvidence`: a notification the cluster only sends over an
-     * established session is what promotes the handshake to authenticated, so each decoded
-     * value doubles as proof the link is genuinely up.
-     */
-    private fun onNotification(callbackGatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
-        if (!isCurrent(callbackGatt)) return
-        captureRecorder.record(BleCaptureDirection.Notification, uuid, value)
-        val now = System.currentTimeMillis()
-        val frameLine = "${uuid.shortName()} ${value.toSpacedHex()}"
-        if (uuid != BleCharacteristics.Telemetry) {
-            diagnosticsRecorder.recordNotification(frameLine, now)
-        }
-        when (uuid) {
-            BleCharacteristics.ProtectionChallenge -> protectionCoordinator.onChallenge(value)
-
-            BleCharacteristics.Telemetry -> {
-                val acceptance = telemetryStream.accept(
-                    payload = value,
-                    receivedAtMillis = now,
-                    elapsedRealtime = SystemClock::elapsedRealtime,
-                )
-                diagnosticsRecorder.recordTelemetryNotification(
-                    frameLine = frameLine,
-                    receivedAtMillis = now,
-                    telemetryHz = acceptance.telemetryHz,
-                    droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
-                    malformed = !acceptance.valid,
-                )
-                if (acceptance.valid) protectionCoordinator.acceptEvidence("valid telemetry")
-            }
-
-            BleCharacteristics.Vin -> {
-                val vin = value.decodeBikeVin()
-                if (vin == null) {
-                    log("Ignored malformed VIN frame (${value.size} bytes)")
-                } else {
-                    updateIdentity(vin = vin)
-                    protectionCoordinator.acceptEvidence("VIN")
-                }
-            }
-
-            BleCharacteristics.ClusterSoftwareVersion -> {
-                val version = value.decodeClusterSoftwareVersion()
-                updateIdentity(version = version)
-                if (version.isNotBlank()) protectionCoordinator.acceptEvidence("cluster software version")
-            }
-
-            BleCharacteristics.NavigationControl -> {
-                // The command is byte 1 of a three-byte event, not byte 0. Reading byte 0
-                // instead is what once left the handlebar unable to skip a waypoint or exit;
-                // what byte 0 itself carries has not been established.
-                val command = value.takeIf { it.size >= 3 }?.get(1)?.toInt()?.and(0xFF)
-                when (command) {
-                    1 -> BikeControlEvent.StartNavigation
-                    2 -> BikeControlEvent.SkipManeuver
-                    3 -> BikeControlEvent.ExitNavigation
-                    else -> {
-                        log("Unhandled navigation control ${value.toSpacedHex()}")
-                        null
-                    }
-                }?.let(mutableControls::tryEmit)
-            }
-
-            // Despite the name, this characteristic is not call-only. It carries four
-            // distinct meanings in a single byte: 0 and 1 are handlebar reject and answer,
-            // 2 is the cluster announcing that it has come up and wants the phone's state
-            // resent, and 3 is the cluster asserting that a call is live on its side.
-            BleCharacteristics.CallControl -> when (value.firstOrNull()?.toInt()?.and(0xFF)) {
-                0, 1 -> BikeControlEvent.CallAction(value.first().toInt() and 0xFF)
-                2 -> BikeControlEvent.ClusterReady
-                3 -> BikeControlEvent.ClusterCallActive
-                else -> {
-                    log("Unhandled call control ${value.toSpacedHex()}")
-                    null
-                }
-            }?.let(mutableControls::tryEmit)
-        }
-    }
-
-    /**
-     * The session is fully up. Resets the retry budget — this connection worked, so a later
-     * failure starts its backoff from scratch — cancels the connection timeout, and starts
-     * signal-strength polling.
-     */
-    private fun completeAuthentication(evidence: String, path: ProtectionPath?) {
-        if (diagnosticsRecorder.value.authenticated) return
-        reconnectAttempt = 0
-        attemptBudget.reset()
-        authenticatedAtMillis = System.currentTimeMillis()
-        mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        diagnosticsRecorder.markAuthenticated(path)
-        diagnosticsRecorder.updateAttempt(attemptContext())
-        connectionTarget?.address?.let { address ->
-            bikeIdentityRepository.update(address) { identity ->
-                identity.copy(lastConnectedAtMillis = System.currentTimeMillis())
-            }
-        }
-        mutableConnectionState.value = BikeConnectionState.Connected(deviceName ?: "Motorcycle", null)
-        log("Protected session verified by $evidence")
-        connectionMonitoringActive = true
-        scheduleRssiRead()
-    }
-
-    private fun reconnectAfterProtectionFailure(message: String) {
-        retireLinkAndReconnect(
-            connectionFailure(message, ConnectionFailureCategory.LinkLost),
-        )
-    }
-
-    private fun onWriteCompleted(operation: GattOperation.Write) {
-        diagnosticsRecorder.countWrite()
-        if (operation.isProtectionResponseWrite()) {
-            protectionCoordinator.onProtectionResponseWritten()
-        }
-        operation.completion?.complete(true)
-    }
-
-    /** The single path that retires a live GATT session and hands the link back to the backoff. */
-    private fun retireLinkAndReconnect(
-        failure: ConnectionFailure,
-        updateConnectingState: Boolean = true,
-    ) {
-        noteSecureLinkOutcome(sessions.current())
-        recordConnectionFailure(failure)
-        disconnectInternal(closeOnly = true)
-        if (intentionalDisconnect) return
-        if (updateConnectingState) {
-            mutableConnectionState.value = BikeConnectionState.Connecting(deviceName)
-        }
-        scheduleReconnect()
-    }
-
-    /**
-     * Counts sessions that connected but never managed a single GATT operation.
-     *
-     * Recorded, not acted on: the retry policy is unchanged and no attempt is cut short. All this
-     * decides is *which sentence the rider reads* once the ordinary budget is spent, because
-     * "could not reconnect" sends them looking for a bike that is sitting right there answering
-     * connection requests.
-     *
-     * A captured session of this shape shows the LE encryption procedure starting and never
-     * completing — `Encryption Change` with `Connection Timeout` after 5.2 s, 65 times in one
-     * capture — so the link comes up, the ATT bearer exists, and the first operation needing an
-     * encrypted link is the one that dies. Android surfaces that as `GATT_ERROR` on the first
-     * subscription when services came from its cache, and as a supervision timeout when it did
-     * not. Both look the same from here: connected, bonded, nothing transacted.
-     *
-     * The count is only meaningful consecutively, so any session that does transact clears it.
-     */
-    private fun noteSecureLinkOutcome(session: GattSession<BluetoothGatt>?) {
-        val connectedButSilent = session != null &&
-            connectedDeviceBonded &&
-            session.connectedAtElapsedRealtime != null &&
-            !session.completedAnyOperation
-        if (connectedButSilent) {
-            consecutiveSecureLinkFailures++
-        } else {
-            consecutiveSecureLinkFailures = 0
-        }
-    }
-
-    /**
-     * Last word on an operation that has run out of retries. Returns true when this failure
-     * ends the whole connection rather than just that operation.
-     *
-     * Every step of the handshake qualifies: without it there is no session, so continuing
-     * to drain the queue would leave the link half-established. Anything else — a display
-     * write — is the caller's problem, and the link survives it.
-     */
-    private fun handleExhaustedOperation(operation: GattOperation): Boolean = when {
-        operation.isChallengeSubscription() -> {
-            failWithCategory(
-                "Could not enable motorcycle authentication indications",
-                ConnectionFailureCategory.Deterministic,
-            )
-            true
-        }
-
-        operation.isProtectionResponseWrite() -> {
-            failWithCategory(
-                "Motorcycle authentication response could not be delivered",
-                ConnectionFailureCategory.Deterministic,
-            )
-            true
-        }
-
-        operation.isPostAuthenticationSubscription() -> {
-            val uuid = (operation as GattOperation.Subscribe).characteristic.uuid
-            protectionCoordinator.onRequiredProfileFailure(uuid)
-            true
-        }
-
-        else -> false
-    }
-
-    private fun isChallengeResponsePending(): Boolean =
-        protectionCoordinator.phase == ProtectionPhase.Responding
-
-    /**
-     * Polls signal strength while a session is up, so the UI can show link quality.
-     *
-     * Self-rescheduling, and keeps polling through a refused request: a refusal usually means the
-     * stack is momentarily unregistered, and giving up would leave the meter frozen for the rest
-     * of a session that then recovers. It stops only when the call *throws*, which means the GATT
-     * underneath it is gone.
-     *
-     * There is deliberately no in-flight guard. A guard without a stale timeout turns one lost
-     * callback into permanently stopped polling, and RSSI requests do not contend through
-     * Android's ATT busy guard anyway — see `docs/cluster-link-decisions.md` (D6). Refusals are
-     * logged instead, on the transition only, for the same reason as the callback failures above.
-     */
-    private val rssiRunnable = object : Runnable {
-        override fun run() {
-            if (!connectionMonitoringActive) return
-            val requested = try {
-                sessions.current()?.openTransport()?.readRemoteRssi() ?: false
-            } catch (error: RuntimeException) {
-                // A GATT closed underneath this call can throw from native code rather than
-                // returning false. Stop polling instead of crashing the main handler.
-                connectionMonitoringActive = false
-                log("RSSI read threw, monitoring disabled: ${error.message}")
+            val delayMillis = reconnectDelayMillis(attempts)
+            if (delayMillis == null) {
+                // A link that connects and then never transacts has one known remedy.
+                val reason = if (silentAttempts >= MinSilentAttempts) "Forget and re-pair the bike in Bluetooth settings." else "Couldn't connect."
+                onAttemptsExhausted()
+                mutableState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
+                mutableDiagnostics.update { it.copy(suppressionReason = reason) }
+                journal.record(reason)
                 return
             }
-            if (!requested) {
-                if (!rssiRequestRefused) {
-                    rssiRequestRefused = true
-                    log("RSSI reads are being refused; no callback will arrive for them")
-                }
-            } else if (rssiRequestRefused) {
-                rssiRequestRefused = false
-                log("RSSI reads are being accepted again")
-            }
-            mainHandler.postDelayed(this, RssiIntervalMillis)
+            mutableState.value = BikeConnectionState.Connecting(target.deviceName, attempts + 1, MaxConnectionAttempts)
+            journal.record("Reconnecting in ${delayMillis / 1_000}s (attempt ${attempts + 1}/$MaxConnectionAttempts)")
+            delay(delayMillis.milliseconds)
         }
     }
 
-    /** Whether the last [readRemoteRssi] request was refused, so only transitions are logged. */
-    private var rssiRequestRefused = false
+    private sealed interface AttemptOutcome {
+        /** An authenticated session ran and has now ended. */
+        data object Ended : AttemptOutcome
 
-    /** Whether the last RSSI callback carried a failure status. Transition-logged, as above. */
-    private var rssiReadFailing = false
-
-    private fun scheduleRssiRead() {
-        mainHandler.removeCallbacks(rssiRunnable)
-        if (!connectionMonitoringActive) return
-        mainHandler.postDelayed(rssiRunnable, RssiIntervalMillis)
+        /** [silent] when the link came up but the cluster never sent anything over it. */
+        data class Retry(val message: String, val silent: Boolean = false) : AttemptOutcome
+        data class Stop(val message: String, val riderMessage: String) : AttemptOutcome
     }
 
-    /**
-     * Schedules the next automatic attempt, or reports the budget as spent.
-     *
-     * Exhaustion is deliberately not a new failure: the failure that caused it is already
-     * on record and is what the rider needs to see. Only a fresh appearance of the bike or
-     * an explicit user action resumes from here — see [shouldAutoConnectOnLaunch].
-     */
-    private fun scheduleReconnect() {
-        if (intentionalDisconnect || reconnectScheduled) return
-        val delay = attemptBudget.nextDelayMillis()
-        if (delay == null) {
-            // Two sentences, chosen by what the attempts actually looked like. The default
-            // names no cause, because exhausted retries are equally consistent with the bike
-            // being out of range, switched off, or an adapter problem on this phone.
-            //
-            // But when every attempt connected and then transacted nothing, "could not
-            // reconnect" sends the rider looking for a motorcycle that is sitting there
-            // answering connection requests. That case has one known remedy — re-pairing —
-            // and it is worth naming rather than making them rediscover it. The wording stays
-            // on what was observed; the cluster's reason for it is not ours to assert.
-            val reason = if (consecutiveSecureLinkFailures >= MinSecureLinkFailures) {
-                "Forget and re-pair the bike in Bluetooth settings."
+    private suspend fun attempt(target: BikeConnectionTarget): AttemptOutcome {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return AttemptOutcome.Stop("Allow Nearby devices to connect to the motorcycle", "Allow Nearby devices access.")
+        }
+        val adapter = adapter ?: return AttemptOutcome.Stop("Bluetooth is unavailable on this phone", "Bluetooth isn't available on this phone.")
+        if (!adapter.isEnabled) return AttemptOutcome.Stop("Turn on Bluetooth to connect to the motorcycle", "Turn on Bluetooth.")
+        val device = adapter.getRemoteDevice(target.address.toByteArray())
+
+        // A bond that is absent or forming belongs to a new pairing, which the stored shortcut predates.
+        if (device.bondState != BluetoothDevice.BOND_BONDED) protectionAcceptance.clear(target.address)
+        resetLinkDiagnostics(bonded = device.bondState == BluetoothDevice.BOND_BONDED)
+        awaitBond(device, target.deviceName)?.let { message -> return AttemptOutcome.Stop(message, "Couldn't connect.") }
+        mutableDiagnostics.update { it.copy(bonded = true) }
+
+        journal.record("Connecting to ${target.deviceName} (${target.address.toString().takeLast(5)})")
+        val failed = try {
+            withTimeout(ConnectionTimeoutMillis) {
+                manager.connect(device).useAutoConnect(false).suspend()
+                mutableState.value = BikeConnectionState.Authenticating(target.deviceName)
+                authenticate(target, device)
+            }
+        } catch (_: TimeoutCancellationException) {
+            AttemptOutcome.Retry("Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms", silent = manager.wasConnected && !sawAnyValue)
+        } catch (error: RequestFailedException) {
+            if (manager.profileIncomplete) {
+                AttemptOutcome.Stop("Motorcycle companion profile is incomplete", "Couldn't connect.")
             } else {
-                "Couldn't connect."
+                AttemptOutcome.Retry("Connection failed: ${statusName(error.status)}", silent = manager.wasConnected && !sawAnyValue)
             }
-            // Persist suppression before publishing Failed. A queued presence callback must
-            // not be able to turn the terminal state into a fresh retry budget.
-            onAttemptsExhausted()
-            mutableConnectionState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
-            // The real failure stays on record; this only explains why nothing is retrying.
-            diagnosticsRecorder.recordSuppression(
-                reason = reason,
-                category = ConnectionFailureCategory.LinkLost,
-                context = attemptContext(),
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            AttemptOutcome.Retry("Connection failed: ${error.javaClass.simpleName}", silent = manager.wasConnected && !sawAnyValue)
+        }
+        if (failed != null) {
+            closeLink()
+            return failed
+        }
+
+        completeAuthentication(target)
+        val rssiPolling = scope.launch { pollRssi() }
+        try {
+            val lost = manager.stateAsFlow().first { it is ConnectionState.Disconnected } as ConnectionState.Disconnected
+            journal.record("Link lost: ${lost.reason.name}")
+            recordError("Link lost: ${lost.reason.name}")
+        } finally {
+            rssiPolling.cancel()
+            tearDownSession()
+        }
+        return AttemptOutcome.Ended
+    }
+
+    /**
+     * The protection handshake and the session's subscriptions. Null when the session is up;
+     * otherwise the outcome that ends this attempt.
+     */
+    private suspend fun authenticate(target: BikeConnectionTarget, device: BluetoothDevice): AttemptOutcome? {
+        val storedAcceptance = device.bondState == BluetoothDevice.BOND_BONDED && protectionAcceptance.isAccepted(target.address)
+        journal.record("Services ready; authenticating${if (storedAcceptance) " with stored acceptance" else ""}")
+        val path = if (storedAcceptance) {
+            ProtectionPath.StoredAcceptance
+        } else {
+            val answered = CompletableDeferred<Boolean>().also { challengeAnswered = it }
+            setProtection(ProtectionPhase.SubscribingChallenge)
+            // The challenge can arrive before the subscription's own callback; the value callback
+            // is registered first, so it is answered either way.
+            if (!manager.subscribe(BleCharacteristics.ProtectionChallenge).await("subscribing to the challenge")) {
+                return AttemptOutcome.Retry("Could not enable motorcycle authentication indications", silent = !sawAnyValue)
+            }
+            setProtection(ProtectionPhase.AwaitingChallenge)
+            when (withTimeoutOrNull(ChallengeTimeoutMillis) { answered.await() }) {
+                null -> return AttemptOutcome.Retry("Motorcycle authentication challenge timed out", silent = !sawAnyValue)
+                false -> {
+                    // The bike offered a challenge this build cannot answer, so its stored
+                    // acceptance is no longer valid either.
+                    protectionAcceptance.clear(target.address)
+                    return AttemptOutcome.Stop("Bike sent an unsupported authentication challenge", "Re-pair the bike in Settings.")
+                }
+                true -> Unit
+            }
+            // The cluster will not issue a second challenge after accepting one, so the shortcut
+            // is recorded now rather than once the whole session is up.
+            protectionAcceptance.markAccepted(target.address)
+            ProtectionPath.ChallengeIndication
+        }
+
+        setProtection(ProtectionPhase.Verifying, path)
+        journal.record("Starting post-authentication verification via ${path.name}")
+        for (uuid in BleCharacteristics.PostAuthenticationSubscriptions) {
+            if (!manager.subscribe(uuid).await("subscribing to ${uuid.shortName()}")) {
+                return AttemptOutcome.Stop("Could not enable required motorcycle data (${uuid.shortName()})", "Couldn't connect.")
+            }
+        }
+        journal.record("Required motorcycle subscriptions are ready")
+        if (withTimeoutOrNull(VerificationTimeoutMillis) { sessionEvidence.first { it } } == null) {
+            return AttemptOutcome.Retry("Protected session verification timed out", silent = !sawAnyValue)
+        }
+        protectionAcceptance.markAccepted(target.address)
+        mutableDiagnostics.update { it.copy(protectionPath = path) }
+        return null
+    }
+
+    private fun completeAuthentication(target: BikeConnectionTarget) {
+        mutableDiagnostics.update {
+            it.copy(
+                authenticated = true,
+                protectionPhase = ProtectionPhase.Ready,
+                attMtu = manager.currentMtu,
+                lastError = null,
+                lastErrorAtMillis = null,
+                suppressionReason = null,
             )
-            log(reason)
-            return
         }
-        reconnectAttempt++
-        reconnectScheduled = true
-        attemptTrigger = ConnectionAttemptTrigger.AutomaticReconnect
-        diagnosticsRecorder.updateAttempt(attemptContext())
-        mutableConnectionState.value =
-            BikeConnectionState.Connecting(deviceName, attemptBudget.attemptsStarted + 1, MaxConnectionAttempts)
-        log("Reconnecting in ${delay / 1_000}s (attempt ${attemptBudget.attemptsStarted + 1}/$MaxConnectionAttempts)")
-        mainHandler.postAtTime(
-            {
-                reconnectScheduled = false
-                if (!intentionalDisconnect) connectGatt()
-            },
-            ReconnectToken,
-            SystemClock.uptimeMillis() + delay,
-        )
+        identityRepository.update(target.address) { it.copy(lastConnectedAtMillis = System.currentTimeMillis()) }
+        mutableState.value = BikeConnectionState.Connected(target.deviceName, null)
+        journal.record("Protected session verified")
+    }
+
+    /** Routes one value from the cluster. Runs on the manager's callback thread, the main one. */
+    private fun onValue(uuid: UUID, value: ByteArray) {
+        captureRecorder.record(BleCaptureDirection.Notification, uuid, value)
+        sawAnyValue = true
+        val now = System.currentTimeMillis()
+        val frameLine = "${uuid.shortName()} ${value.toSpacedHex()}"
+        when (uuid) {
+            BleCharacteristics.ProtectionChallenge -> answerChallenge(value)
+
+            BleCharacteristics.Telemetry -> {
+                val acceptance = telemetryStream.accept(value, now, SystemClock::elapsedRealtime)
+                mutableDiagnostics.update {
+                    it.withFrame(frameLine, now).copy(
+                        telemetryHz = acceptance.telemetryHz,
+                        droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
+                        malformedTelemetryFrames = it.malformedTelemetryFrames + if (acceptance.valid) 0 else 1,
+                    )
+                }
+                if (acceptance.valid) sessionEvidence.value = true
+                return
+            }
+
+            BleCharacteristics.Vin -> value.decodeBikeVin()?.let { vin ->
+                updateIdentity(vin = vin)
+                sessionEvidence.value = true
+            } ?: journal.record("Ignored malformed VIN frame (${value.size} bytes)")
+
+            BleCharacteristics.ClusterSoftwareVersion -> value.decodeClusterSoftwareVersion().takeIf(String::isNotBlank)?.let { version ->
+                updateIdentity(version = version)
+                sessionEvidence.value = true
+            }
+
+            // The command is byte 1 of a three-byte event, not byte 0.
+            BleCharacteristics.NavigationControl -> when (value.takeIf { it.size >= 3 }?.get(1)?.toInt()?.and(0xFF)) {
+                1 -> BikeControlEvent.StartNavigation
+                2 -> BikeControlEvent.SkipManeuver
+                3 -> BikeControlEvent.ExitNavigation
+                else -> null.also { journal.record("Unhandled navigation control ${value.toSpacedHex()}") }
+            }?.let(mutableControls::tryEmit)
+
+            // Not call-only: 0 and 1 are handlebar reject and answer, 2 is the cluster announcing it
+            // has come up, and 3 is the cluster asserting a call is live on its side.
+            BleCharacteristics.CallControl -> when (val code = value.firstOrNull()?.toInt()?.and(0xFF)) {
+                0, 1 -> BikeControlEvent.CallAction(code)
+                2 -> BikeControlEvent.ClusterReady
+                3 -> BikeControlEvent.ClusterCallActive
+                else -> null.also { journal.record("Unhandled call control ${value.toSpacedHex()}") }
+            }?.let(mutableControls::tryEmit)
+        }
+        mutableDiagnostics.update { it.withFrame(frameLine, now) }
     }
 
     /**
-     * Single teardown path: cancels every timer, resets each collaborator, and retires the
-     * session. [closeOnly] skips the graceful `disconnect()` — meaningful only while the
-     * link still works, and wasted on one that has already failed.
+     * Answers a challenge. The cluster has been seen to repeat one before the first response
+     * lands; each distinct challenge is answered, an exact repeat is not.
      */
-    private fun disconnectInternal(closeOnly: Boolean) {
-        connectionMonitoringActive = false
-        reconnectScheduled = false
-        mainHandler.removeCallbacks(rssiRunnable)
-        mainHandler.removeCallbacksAndMessages(ReconnectToken)
-        bondCoordinator.cancel()
-        mainHandler.removeCallbacksAndMessages(ConnectionTimeoutToken)
-        protectionCoordinator.reset()
-        operationCoordinator.clear()
-        profile.clear()
+    private fun answerChallenge(challenge: ByteArray) {
+        journal.record("Protection challenge received")
+        if (lastChallenge contentEquals challenge) return
+        lastChallenge = challenge.copyOf()
+        val response = ProtectionHandshake.responseFor(challenge)
+        if (response == null) {
+            challengeAnswered?.complete(false)
+            return
+        }
+        val characteristic = manager.characteristic(BleCharacteristics.ProtectionResponse) ?: return
+        setProtection(ProtectionPhase.Responding, ProtectionPath.ChallengeIndication)
+        captureRecorder.record(BleCaptureDirection.Outbound, BleCharacteristics.ProtectionResponse, response)
+        manager.write(characteristic, response, BikeWriteMode.Default)
+            .done {
+                journal.record("Protection response write completed")
+                challengeAnswered?.complete(true)
+            }
+            .fail { _, status -> journal.record("Protection response write failed: ${statusName(status)}") }
+            .enqueue()
+    }
+
+    /** Polls signal strength while the session is up. A failed read leaves the last value showing. */
+    private suspend fun pollRssi() {
+        while (true) {
+            delay(RssiIntervalMillis.milliseconds)
+            val rssi = runCatching { manager.rssi().suspend() }.getOrNull() ?: continue
+            mutableDiagnostics.update { it.copy(rssi = rssi) }
+            (mutableState.value as? BikeConnectionState.Connected)?.let { mutableState.value = it.copy(rssi = rssi) }
+        }
+    }
+
+    /**
+     * Enqueues a request and waits for its outcome. A request that never calls back leaves the
+     * stack unable to do anything else on this link, so the link is retired.
+     */
+    private suspend fun Request.await(label: String): Boolean {
+        val outcome = withTimeoutOrNull(OperationTimeoutMillis) {
+            suspendCancellableCoroutine { continuation ->
+                done { if (continuation.isActive) continuation.resume(true) }
+                    .fail { _, status ->
+                        journal.record("GATT failure while $label: ${statusName(status)}")
+                        if (continuation.isActive) continuation.resume(false)
+                    }
+                    .invalid { if (continuation.isActive) continuation.resume(false) }
+                    .enqueue()
+            }
+        }
+        if (outcome == null) {
+            journal.record("Link lost while $label: no callback within ${OperationTimeoutMillis}ms")
+            manager.disconnect().enqueue()
+        }
+        return outcome == true
+    }
+
+    private fun resetLinkDiagnostics(bonded: Boolean) {
+        sawAnyValue = false
+        sessionEvidence.value = false
+        challengeAnswered = null
+        lastChallenge = null
+        telemetryStream.clearUiTelemetry()
+        mutableDiagnostics.update {
+            it.copy(
+                authenticated = false,
+                protectionPhase = ProtectionPhase.Idle,
+                protectionPath = null,
+                bonded = bonded,
+                attMtu = null,
+                servicesDiscovered = 0,
+                rssi = null,
+                suppressionReason = null,
+            )
+        }
+    }
+
+    private fun tearDownSession() {
         telemetryStream.reset()
-        val session = sessions.current()
-        diagnosticsRecorder.resetForTeardown(
-            sessionId = session?.id,
-            establishedAtMillis = authenticatedAtMillis,
-            durationMillis = authenticatedAtMillis?.let { (System.currentTimeMillis() - it).coerceAtLeast(0L) },
-        )
-        authenticatedAtMillis = null
-        connectedDevice = null
-        sessions.retireCurrent(disconnectFirst = !closeOnly)
+        mutableDiagnostics.update {
+            it.copy(
+                authenticated = false,
+                protectionPhase = ProtectionPhase.Idle,
+                attMtu = null,
+                rssi = null,
+                telemetryHz = 0.0,
+                lastFrameAtMillis = null,
+            )
+        }
     }
 
-    /**
-     * A callback from a GATT instance the app has already retired. The registry closed it exactly
-     * once when it was retired, so closing again here would be the second close of the same handle.
-     */
-    private fun discardStaleCallback(callbackGatt: BluetoothGatt, description: String) {
-        if (sessions.isRetired(callbackGatt)) {
-            log("Ignoring $description from a retired GATT session")
-            return
-        }
-        log("Closing an unrecognised GATT instance after a $description")
-        sessions.closeUnadopted(callbackGatt, SystemClock.elapsedRealtime())
+    private suspend fun closeLink() {
+        tearDownSession()
+        runCatching { manager.disconnect().suspend() }
     }
+
+    private fun fail(message: String, riderMessage: String) {
+        session?.cancel()
+        tearDownSession()
+        manager.disconnect().enqueue()
+        recordError(message)
+        mutableState.value = BikeConnectionState.Failed(riderMessage)
+    }
+
+    private fun recordError(message: String) {
+        journal.record(message)
+        mutableDiagnostics.update { it.copy(lastError = message, lastErrorAtMillis = System.currentTimeMillis()) }
+    }
+
+    private fun setProtection(phase: ProtectionPhase, path: ProtectionPath? = null) {
+        mutableDiagnostics.update { it.copy(protectionPhase = phase, protectionPath = path ?: it.protectionPath) }
+    }
+
+    private fun countWrite() = mutableDiagnostics.update { it.copy(writesCompleted = it.writesCompleted + 1) }
 
     private fun updateIdentity(vin: String? = null, version: String? = null) {
-        val address = connectionTarget?.address ?: return
-        bikeIdentityRepository.update(address) { identity ->
-            identity.copy(
-                vin = vin?.takeIf(String::isNotBlank) ?: identity.vin,
-                clusterSoftwareVersion = version?.takeIf(String::isNotBlank)
-                    ?: identity.clusterSoftwareVersion,
-            )
+        val address = target?.address ?: return
+        identityRepository.update(address) { identity ->
+            identity.copy(vin = vin ?: identity.vin, clusterSoftwareVersion = version ?: identity.clusterSoftwareVersion)
         }
     }
 
-    /** A failure the phone caused: permissions, adapter state, or a service that would not start. */
-    private fun failLocally(message: String) {
-        failWithCategory(message, ConnectionFailureCategory.LocalPrecondition)
-    }
-
-    private fun failWithCategory(message: String, category: ConnectionFailureCategory) {
-        // Built before teardown so the failure still carries the session it happened in.
-        val failure = connectionFailure(message, category)
-        disconnectInternal(closeOnly = true)
-        mutableConnectionState.value = BikeConnectionState.Failed(
-            riderFacingConnectionFailure(message, category),
-        )
-        recordConnectionFailure(failure)
-    }
-
-    private fun recordConnectionFailure(failure: ConnectionFailure) {
-        diagnosticsRecorder.recordFailure(failure)
-        log(failure.message)
-    }
-
-    private fun connectionFailure(
-        message: String,
-        category: ConnectionFailureCategory,
-        statusCode: Int? = null,
-        statusName: String? = null,
-        linkAgeMillis: Long? = null,
-    ): ConnectionFailure = ConnectionFailure(
-        message = message,
-        category = category,
-        atMillis = System.currentTimeMillis(),
-        statusCode = statusCode,
-        statusName = statusName,
-        context = attemptContext(linkAgeMillis),
-    )
-
     /**
-     * Snapshot of the current attempt, attached to every failure so a diagnostics entry
-     * carries which session, which retry, and what bond state it happened under.
+     * Waits for Android to bond with the bike. The cluster refuses GATT to an unbonded central, so
+     * pairing completes first, as it does in the OEM app. Returns why it could not, or null.
      */
-    private fun attemptContext(linkAgeMillis: Long? = null): ConnectionAttemptContext {
-        val session = sessions.current()
-        return ConnectionAttemptContext(
-            sessionId = session?.id,
-            trigger = attemptTrigger,
-            reconnectAttempt = reconnectAttempt,
-            linkAgeMillis = linkAgeMillis ?: session?.linkAgeMillis(SystemClock.elapsedRealtime()),
-            bondState = bondStateSnapshot(connectedDevice?.bondState),
-        )
+    private suspend fun awaitBond(device: BluetoothDevice, name: String): String? {
+        if (device.bondState == BluetoothDevice.BOND_BONDED) return null
+        journal.record("Starting Android pairing for $name")
+        val states = callbackFlow {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    val changed = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    if (changed?.address == device.address) trySend(device.bondState)
+                }
+            }
+            // Bluetooth broadcasts come from a privileged system app, so this must be exported.
+            ContextCompat.registerReceiver(
+                appContext,
+                receiver,
+                IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+                ContextCompat.RECEIVER_EXPORTED,
+            )
+            // Read after registering: a change between the caller's read and now would be missed.
+            trySend(device.bondState)
+            if (device.bondState == BluetoothDevice.BOND_NONE && !device.createBond()) trySend(BluetoothDevice.BOND_NONE)
+            awaitClose { appContext.unregisterReceiver(receiver) }
+        }
+        var sawBonding = false
+        val result = withTimeoutOrNull(BondTimeoutMillis) {
+            states.first { state ->
+                if (state == BluetoothDevice.BOND_BONDING) sawBonding = true
+                state == BluetoothDevice.BOND_BONDED || (state == BluetoothDevice.BOND_NONE && sawBonding)
+            }
+        }
+        return when (result) {
+            BluetoothDevice.BOND_BONDED -> null.also { journal.record("Motorcycle paired") }
+            null -> "Motorcycle pairing timed out"
+            else -> "Motorcycle pairing was not completed"
+        }
     }
 
-    private fun bondStateSnapshot(bondState: Int?): BondStateSnapshot = when (bondState) {
-        BluetoothDevice.BOND_NONE -> BondStateSnapshot.None
-        BluetoothDevice.BOND_BONDING -> BondStateSnapshot.Bonding
-        BluetoothDevice.BOND_BONDED -> BondStateSnapshot.Bonded
-        else -> BondStateSnapshot.Unknown
-    }
+    /** Nordic's manager, with this profile's characteristics indexed and its values routed to [onValue]. */
+    private inner class BikeBleManager(context: Context) : BleManager(context) {
+        private val characteristics = mutableMapOf<UUID, BluetoothGattCharacteristic>()
+        var profileIncomplete = false
+            private set
+        var wasConnected = false
+            private set
+        val currentMtu: Int get() = mtu
 
-    /** Confines mutable state to one thread; runs inline when already on it. */
-    private fun runOnMain(block: () -> Unit) {
-        if (Looper.myLooper() == mainHandler.looper) block() else mainHandler.post(block)
-    }
+        fun characteristic(uuid: UUID): BluetoothGattCharacteristic? = characteristics[uuid]
 
-    private fun isCurrent(callbackGatt: BluetoothGatt): Boolean = sessions.isCurrent(callbackGatt)
+        /**
+         * Looked up across every service rather than under one: the vendor service UUID is not
+         * advertised and is not guaranteed stable across firmware.
+         */
+        override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
+            wasConnected = true
+            characteristics.clear()
+            gatt.services.flatMap { it.characteristics }.forEach { characteristics[it.uuid] = it }
+            mutableDiagnostics.update { diagnostics ->
+                diagnostics.copy(
+                    servicesDiscovered = gatt.services.size,
+                    serviceSnapshot = gatt.services.flatMap { service ->
+                        service.characteristics.map { "${service.uuid.shortName()}/${it.uuid.shortName()} props=0x${it.properties.toString(16)}" }
+                    },
+                )
+            }
+            val missing = RequiredCharacteristics.filterNot(characteristics::containsKey)
+            profileIncomplete = missing.isNotEmpty()
+            if (profileIncomplete) journal.record("Motorcycle companion profile is incomplete (missing ${missing.joinToString { it.shortName() }})")
+            return !profileIncomplete
+        }
 
-    private fun log(message: String) {
-        connectionEventJournal.record(message)
+        override fun onServicesInvalidated() {
+            characteristics.clear()
+        }
+
+        /** Registers the value callback, then enables indications or notifications, whichever the characteristic has. */
+        fun subscribe(uuid: UUID): Request {
+            val characteristic = characteristics.getValue(uuid)
+            setNotificationCallback(characteristic).with { _, data -> data.value?.let { onValue(uuid, it) } }
+            return if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
+                enableIndications(characteristic)
+            } else {
+                enableNotifications(characteristic)
+            }
+        }
+
+        fun write(characteristic: BluetoothGattCharacteristic, payload: ByteArray, mode: BikeWriteMode) =
+            writeCharacteristic(characteristic, payload, writeType(characteristic.properties, mode))
+
+        fun rssi() = readRssi()
+
+        // Operation-level chatter would bury the journal; warnings and errors explain a failure.
+        override fun getMinLogPriority(): Int = Log.WARN
+
+        override fun log(priority: Int, message: String) {
+            journal.record(message)
+        }
     }
 
     private companion object {
-        // Handler tokens, so each kind of pending work can be cancelled without disturbing
-        // the others posted to the same handler.
-        val ReconnectToken = Any()
-        val ConnectionTimeoutToken = Any()
-
-        /** Signal-strength poll interval. Slow: this is a quality indicator, not telemetry. */
         const val RssiIntervalMillis = 10_000L
+        const val OperationTimeoutMillis = 8_000L
+        const val ChallengeTimeoutMillis = 8_000L
+        const val VerificationTimeoutMillis = 8_000L
 
-        /** Backstop for an awaited write, generous enough to outlast a queue and its retries. */
-        const val AwaitedWriteTimeoutMillis = 30_000L
-
-        /** Bond, connect, discover and authenticate must all complete inside this. */
+        /** Connect, discover and authenticate must all complete inside this. */
         const val ConnectionTimeoutMillis = 20_000L
 
-        /**
-         * Connected-but-silent sessions before the exhaustion message names re-pairing.
-         *
-         * Only consulted after the whole retry budget is spent, so this is not a hair trigger:
-         * it takes six attempts of that shape in a row to reach the message at all.
-         */
-        const val MinSecureLinkFailures = 2
+        /** Long, because first-time pairing may be waiting on the rider to confirm a prompt. */
+        const val BondTimeoutMillis = 60_000L
 
-        /** The ATT default. No larger MTU is requested; see [onConnectionStateChanged]. */
-        const val DefaultAttMtu = 23
+        /** Connected-but-silent attempts before the exhaustion message names re-pairing. */
+        const val MinSilentAttempts = 2
+
+        /** The protection pair and the session's subscription set. HID over GATT is hidden from apps. */
+        val RequiredCharacteristics = listOf(BleCharacteristics.ProtectionChallenge, BleCharacteristics.ProtectionResponse) +
+            BleCharacteristics.PostAuthenticationSubscriptions
     }
+}
+
+/**
+ * The write type for a characteristic. [mode] is a preference only: whichever type the
+ * characteristic declares wins, and the preference decides when it declares both.
+ */
+internal fun writeType(properties: Int, mode: BikeWriteMode): Int {
+    val acknowledged = properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+    val unacknowledged = properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+    return when {
+        mode == BikeWriteMode.NoResponsePreferred && unacknowledged -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        acknowledged -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        else -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+    }
+}
+
+private fun BleDiagnostics.withFrame(frameLine: String, receivedAtMillis: Long) = copy(
+    notificationsReceived = notificationsReceived + 1,
+    lastFrameAtMillis = receivedAtMillis,
+    recentFrames = (listOf(frameLine) + recentFrames).take(30),
+)
+
+private fun statusName(status: Int): String = when (status) {
+    FailCallback.REASON_DEVICE_DISCONNECTED -> "device disconnected"
+    FailCallback.REASON_DEVICE_NOT_SUPPORTED -> "device not supported"
+    FailCallback.REASON_NULL_ATTRIBUTE -> "attribute missing"
+    FailCallback.REASON_REQUEST_FAILED -> "request failed"
+    FailCallback.REASON_TIMEOUT -> "timeout"
+    FailCallback.REASON_BLUETOOTH_DISABLED -> "Bluetooth disabled"
+    BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION -> "GATT_INSUFFICIENT_AUTHENTICATION"
+    BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION -> "GATT_INSUFFICIENT_ENCRYPTION"
+    0x85 -> "GATT_ERROR"
+    else -> "status $status"
 }

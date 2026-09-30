@@ -98,12 +98,8 @@ class BikeConnectionCardTest {
 
     @Test
     fun failedConnectionKeepsTechnicalDetailsOutOfTheCard() {
-        val userMessage = com.spaceboy.ridebuddy.domain.riderFacingConnectionFailure(
-            message = "Link lost while starting service discovery: rejected by the Bluetooth stack (133)",
-            category = com.spaceboy.ridebuddy.domain.ConnectionFailureCategory.LinkLost,
-        )
         show(
-            state = BikeConnectionState.Failed(userMessage, retriesExhausted = true),
+            state = BikeConnectionState.Failed("Couldn't connect.", retriesExhausted = true),
             associated = true,
         )
 

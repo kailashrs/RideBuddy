@@ -39,14 +39,4 @@ class ConnectionRequestPolicyTest {
 
         assertTrue(shouldStartConnection(currentTarget, replacement, BikeConnectionState.Connected("bike", null)))
     }
-
-    @Test
-    fun `disconnect diagnostics explain common controller status codes`() {
-        assertEquals("link supervision timeout", gattConnectionStatusLabel(0x08))
-        assertEquals("peer terminated connection", gattConnectionStatusLabel(0x13))
-        assertEquals("local host terminated connection", gattConnectionStatusLabel(0x16))
-        assertEquals("connection failed to establish", gattConnectionStatusLabel(0x3E))
-        assertEquals("generic GATT error", gattConnectionStatusLabel(0x85))
-        assertEquals("unknown", gattConnectionStatusLabel(0x7F))
-    }
 }

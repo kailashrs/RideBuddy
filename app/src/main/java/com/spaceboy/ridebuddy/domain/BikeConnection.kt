@@ -165,11 +165,7 @@ enum class ProtectionPath {
     ChallengeIndication,
 }
 
-/**
- * Everything the diagnostics screen shows about the link, in one snapshot.
- *
- * Republished on every telemetry frame.
- */
+/** Everything the diagnostics screen shows about the link, in one snapshot. */
 data class BleDiagnostics(
     val authenticated: Boolean = false,
     val protectionPhase: ProtectionPhase = ProtectionPhase.Idle,
@@ -179,8 +175,6 @@ data class BleDiagnostics(
     val servicesDiscovered: Int = 0,
     val notificationsReceived: Long = 0,
     val writesCompleted: Long = 0,
-    val descriptorWritesCompleted: Long = 0,
-    val activeGattOperation: String? = null,
     val malformedTelemetryFrames: Long = 0,
     val droppedRawTelemetryFrames: Long = 0,
     val lastFrameAtMillis: Long? = null,
@@ -189,17 +183,23 @@ data class BleDiagnostics(
     val serviceSnapshot: List<String> = emptyList(),
     val recentFrames: List<String> = emptyList(),
     val recentEvents: List<String> = emptyList(),
-    /** The real failure, retained across automatic reattempts against the same target. */
-    val lastFailure: ConnectionFailure? = null,
-    /** What the last authenticated link negotiated; teardown does not clear it. */
-    val lastSuccessfulLink: LinkSnapshot? = null,
-    /** Context of the attempt currently in flight. */
-    val attempt: ConnectionAttemptContext = ConnectionAttemptContext(),
-    /** Set when the stack deliberately declined to start or continue automatic attempts. */
+    /** The real failure, kept across automatic reattempts so it is still there to read. */
+    val lastError: String? = null,
+    val lastErrorAtMillis: Long? = null,
+    /** Why automatic attempts stopped, when they did. */
     val suppressionReason: String? = null,
-) {
-    val lastError: String? get() = lastFailure?.message
-    val lastErrorAtMillis: Long? get() = lastFailure?.atMillis
+)
+
+/** Why a connection attempt was started, so diagnostics never conflate the retry paths. */
+enum class ConnectionAttemptTrigger {
+    /** The rider asked for this connection, directly or through onboarding. */
+    UserRequest,
+
+    /** A companion BLE_APPEARED edge. */
+    PresenceAppearance,
+
+    /** The one automatic attempt an app launch is allowed to make. */
+    AppLaunch,
 }
 
 /** Something the cluster initiated: a handlebar press, or a statement about its own state. */
