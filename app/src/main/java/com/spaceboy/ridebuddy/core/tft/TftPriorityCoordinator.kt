@@ -1,7 +1,8 @@
 package com.spaceboy.ridebuddy.core.tft
 
 import com.spaceboy.ridebuddy.core.calls.CallBridge
-import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
+import com.spaceboy.ridebuddy.core.navigation.GuidanceState
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -50,7 +51,7 @@ internal fun tftNotificationAllowed(
  * it is lock-guarded, and side effects are performed outside the lock.
  */
 class TftPriorityCoordinator(
-    private val navigationFeed: NavigationFeedRepository,
+    private val guidance: StateFlow<GuidanceState>,
     private val calls: CallBridge,
     private val navigationBridge: TftNavigationBridge,
     private val scope: CoroutineScope,
@@ -80,7 +81,7 @@ class TftPriorityCoordinator(
         // An alert may have been posted while the next turn was still far off. Approaching
         // it revokes that permission mid-display rather than only at the moment of posting.
         scope.launch {
-            navigationFeed.guidance.collect { guidance ->
+            guidance.collect { guidance ->
                 if (tftTurnIsImminent(guidance.active, guidance.distanceToManeuverMetres)) {
                     expireAllAlerts()
                 }
@@ -89,7 +90,7 @@ class TftPriorityCoordinator(
     }
 
     private fun presentationWindowAvailable(): Boolean {
-        val guidance = navigationFeed.guidance.value
+        val guidance = guidance.value
         return tftNotificationAllowed(
             callActive = calls.state.value.active,
             navigationActive = guidance.active,

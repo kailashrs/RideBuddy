@@ -617,11 +617,10 @@ private fun RecordedRouteMap(points: List<Pair<Double, Double>>, modifier: Modif
     val context = LocalContext.current
     var initialized by remember(context) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(context) {
-        // This Activity can be restored directly after process death, without MainViewModel
-        // having loaded the key. Await the shared bootstrap before creating its map.
-        val container = context.appContainer
-        container.navigationKeyBootstrap.await()
-        initialized = container.navigationSdkGateway.isConfiguredInProcess && runCatching {
+        // This Activity can be restored directly after process death; wait for the key load.
+        val key = context.appContainer.navigationApiKey
+        key.awaitLoaded()
+        initialized = key.isApplied && runCatching {
             MapsInitializer.initialize(context.applicationContext) == 0
         }.getOrDefault(false)
     }

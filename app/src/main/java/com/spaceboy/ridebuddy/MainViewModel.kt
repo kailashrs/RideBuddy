@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy
 
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
+
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -8,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
+import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
+import com.spaceboy.ridebuddy.core.navigation.NavigationController
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.InsightsCalculator
 import com.spaceboy.ridebuddy.data.LiveRideMetrics
@@ -21,12 +25,6 @@ import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.calculateLiveRideMetrics
 import com.spaceboy.ridebuddy.data.nextAccelerationG
-import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
-import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
-import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
-import com.spaceboy.ridebuddy.core.navigation.NavigationApiKeyPolicy
-import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
-import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -62,14 +60,12 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class MainViewModel internal constructor(
     savedStateHandle: SavedStateHandle,
-    private val apiKeyStore: SecureNavigationApiKeyStore,
-    private val navigationSdkGateway: GoogleNavigationSdkGateway,
-    private val navigationKeyBootstrap: NavigationKeyBootstrap,
+    private val navigationApiKey: NavigationApiKey,
     private val bikeConnection: BikeConnection,
     private val bleCaptureRecorder: BleCaptureRecorder,
     private val rideRecorder: RideRecorder,
     private val rideRepository: RideRepository,
-    private val navigationFeed: NavigationFeedRepository,
+    navigationController: NavigationController,
     private val appSettings: AppSettingsRepository,
 ) : ViewModel() {
     private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
@@ -104,7 +100,8 @@ class MainViewModel internal constructor(
         .map { it.coerceIn(-1.0, 1.0) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.0)
     val rides = rideRepository.rides
-    val guidance = navigationFeed.guidance
+    val guidance = navigationController.guidance
+    val navigationSession = navigationController.session
     val settings = appSettings.settings
     private val insightPeriod = MutableStateFlow(InsightPeriod.ThirtyDays)
     val selectedInsightPeriod: StateFlow<InsightPeriod> = insightPeriod.asStateFlow()
@@ -114,16 +111,8 @@ class MainViewModel internal constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
 
     init {
-        // Fill in the navigation-key state once the process-wide load finishes — unless the
-        // rider has already saved or removed a key in the meantime, whose result is newer
-        // than the load's.
         viewModelScope.launch {
-            val bootstrapResult = navigationKeyBootstrap.await()
-            mutableUiState.update { state ->
-                if (!state.navigationKey.isLoading) state else state.copy(
-                    navigationKey = navigationKeyStateForBootstrap(bootstrapResult),
-                )
-            }
+            navigationApiKey.state.collect { key -> mutableUiState.update { it.copy(navigationKey = key) } }
         }
     }
 
@@ -167,102 +156,14 @@ class MainViewModel internal constructor(
         mutableUiState.update { it.withFinishedNavigationStartAttempt(attemptId) }
     }
 
-    fun saveNavigationApiKey(value: String) {
-        val apiKey = value.trim()
-        NavigationApiKeyPolicy.validate(apiKey)?.let { validationError ->
-            mutableUiState.update { state ->
-                state.copy(navigationKey = state.navigationKey.copy(errorMessage = validationError))
-            }
-            return
-        }
-        runNavigationKeyOperation {
-            val result = withContext(Dispatchers.IO) {
-                navigationSdkGateway.configureIfNeeded(apiKey).also { outcome ->
-                    if (outcome !is ConfigureResult.Failed) {
-                        apiKeyStore.save(apiKey)
-                        navigationKeyBootstrap.recordSavedKey(apiKey, outcome)
-                    }
-                }
-            }
-            mutableUiState.update { state ->
-                state.copy(
-                    navigationKey = navigationKeyStateFor(result, apiKey, state.navigationKey),
-                    transientMessage = if (result is ConfigureResult.Failed) {
-                        null
-                    } else {
-                        "Navigation API key saved"
-                    },
-                )
-            }
-        }
-    }
+    fun saveNavigationApiKey(value: String) = navigationKeyOperation { navigationApiKey.save(value) }
 
-    fun removeNavigationApiKey() {
-        runNavigationKeyOperation {
-            withContext(Dispatchers.IO) {
-                apiKeyStore.clear()
-                navigationKeyBootstrap.recordRemovedKey(
-                    restartRequired = navigationSdkGateway.isConfiguredInProcess,
-                )
-            }
-            mutableUiState.update { state ->
-                state.copy(
-                    navigationKey = NavigationKeyUiState(
-                        restartRequired = navigationSdkGateway.isConfiguredInProcess,
-                    ),
-                    transientMessage = "Navigation API key removed",
-                )
-            }
-        }
-    }
+    fun removeNavigationApiKey() = navigationKeyOperation { navigationApiKey.remove() }
 
-    fun testNavigationApiKey() {
-        runNavigationKeyOperation {
-            val key = withContext(Dispatchers.IO) { apiKeyStore.load() }
-            if (key == null) {
-                showMessage("Add an API key before testing")
-                return@runNavigationKeyOperation
-            }
-            val result = withContext(Dispatchers.IO) { navigationSdkGateway.configureIfNeeded(key) }
-            showMessage(
-                when (result) {
-                    ConfigureResult.Configured, ConfigureResult.AlreadyConfigured -> "Key configured. Start a route to verify access."
-                    ConfigureResult.RestartRequired -> "Restart the app to test the replacement key"
-                    is ConfigureResult.Failed -> result.message
-                },
-            )
-        }
-    }
+    fun testNavigationApiKey() = navigationKeyOperation { navigationApiKey.test() }
 
-    /**
-     * Runs one navigation-key operation at a time. `isSaving` is the mutex: every caller reaches
-     * this from the main dispatcher, so the check and the set cannot interleave.
-     */
-    private fun runNavigationKeyOperation(operation: suspend () -> Unit) {
-        val current = mutableUiState.value.navigationKey
-        if (current.isLoading || current.isSaving) return
-        mutableUiState.update { state ->
-            state.copy(navigationKey = state.navigationKey.copy(isSaving = true, errorMessage = null))
-        }
-        viewModelScope.launch {
-            try {
-                operation()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                mutableUiState.update { state ->
-                    state.copy(
-                        navigationKey = state.navigationKey.copy(
-                            errorMessage = error.message ?: "Navigation setup failed",
-                        ),
-                    )
-                }
-            } finally {
-                mutableUiState.update { state ->
-                    state.copy(navigationKey = state.navigationKey.copy(isSaving = false))
-                }
-            }
-        }
+    private fun navigationKeyOperation(operation: suspend () -> String?) {
+        viewModelScope.launch { operation()?.let(::showMessage) }
     }
 
     /**
@@ -421,14 +322,12 @@ class MainViewModel internal constructor(
             initializer {
                 MainViewModel(
                     savedStateHandle = createSavedStateHandle(),
-                    apiKeyStore = container.navigationApiKeyStore,
-                    navigationSdkGateway = container.navigationSdkGateway,
-                    navigationKeyBootstrap = container.navigationKeyBootstrap,
+                    navigationApiKey = container.navigationApiKey,
                     bikeConnection = container.bikeConnection,
                     bleCaptureRecorder = container.bleCaptureRecorder,
                     rideRecorder = container.rideRecorder,
                     rideRepository = container.rideRepository,
-                    navigationFeed = container.navigationFeed,
+                    navigationController = container.navigationController,
                     appSettings = container.appSettings,
                 )
             }

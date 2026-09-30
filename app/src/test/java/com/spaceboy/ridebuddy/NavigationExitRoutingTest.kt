@@ -7,8 +7,7 @@ import org.junit.Test
 
 /**
  * The handlebar EXIT is only useful while guidance runs in the background, which is exactly when
- * no navigation screen is in the task. These pin the two halves that made it dead: the byte the
- * command is read from, and the guard that keeps a second stop from racing the first.
+ * no navigation screen is in the task. This pins the byte the command is read from.
  */
 class NavigationExitRoutingTest {
     /**
@@ -27,19 +26,6 @@ class NavigationExitRoutingTest {
     fun `a short event carries no command`() {
         assertNull(navigationControlCommand(byteArrayOf(0x03)))
         assertNull(navigationControlCommand(byteArrayOf(0x01, 0x03)))
-    }
-
-    @Test
-    fun `only the first stop of a burst is acted on`() {
-        val guard = NavigationStartStopGuard()
-
-        val first = guard.beginStop()
-        val second = guard.beginStop()
-
-        assertEquals(null, second)
-        guard.finishStop(requireNotNull(first))
-        // Once the first finishes, a later press may stop again.
-        assertEquals(true, guard.beginStop() != null)
     }
 }
 

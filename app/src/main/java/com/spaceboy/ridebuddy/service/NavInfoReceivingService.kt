@@ -25,7 +25,7 @@ class NavInfoReceivingService : Service() {
         override fun handleMessage(message: Message) {
             if (message.what == TurnByTurnManager.MSG_NAV_INFO) {
                 val info = manager.readNavInfoFromBundle(message.data)
-                appContainer.navigationFeed.accept(info)
+                appContainer.navigationController.onNavInfo(info)
             } else super.handleMessage(message)
         }
     })

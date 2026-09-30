@@ -20,7 +20,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performScrollToNode
 import com.spaceboy.ridebuddy.MainUiState
-import com.spaceboy.ridebuddy.NavigationKeyUiState
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
 import com.spaceboy.ridebuddy.RideDetailContent
 import com.spaceboy.ridebuddy.RideDetailUiData
 import com.spaceboy.ridebuddy.TopLevelDestination

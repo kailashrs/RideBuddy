@@ -10,10 +10,12 @@ import com.spaceboy.ridebuddy.ble.FileConnectionEventStore
 import com.spaceboy.ridebuddy.ble.LinkStateProtectionAcceptanceStore
 import com.spaceboy.ridebuddy.ble.LinkStateStore
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
-import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
-import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
-import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
-import com.google.android.libraries.mapsplatform.turnbyturn.model.NavState
+import com.spaceboy.ridebuddy.core.navigation.GuidanceOutput
+import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
+import com.spaceboy.ridebuddy.core.navigation.NavigationController
+import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
+import com.google.android.libraries.mapsplatform.turnbyturn.model.NavInfo
+import kotlinx.coroutines.flow.filter
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.core.tft.TftNavigationBridge
 import com.spaceboy.ridebuddy.core.tft.TftPriorityCoordinator
@@ -69,7 +71,7 @@ class AppContainer(context: Context) {
     /** Process-scoped: survives Activity destruction because RideBuddy relies on
      *  foreground services that keep the application process alive. Coroutines
      *  launched here are bound to the process, not to any individual Activity. */
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val bleCaptureRecorder = BleCaptureRecorder(applicationScope)
     private val linkState = LinkStateStore.create(context, applicationScope)
     private val protectionAcceptanceStore = LinkStateProtectionAcceptanceStore(linkState)
@@ -114,29 +116,34 @@ class AppContainer(context: Context) {
         settingsRepository = appSettings,
         scope = applicationScope,
     )
-    val navigationApiKeyStore = SecureNavigationApiKeyStore(context)
-    val navigationSdkGateway = GoogleNavigationSdkGateway()
-    internal val navigationKeyBootstrap = NavigationKeyBootstrap(
-        scope = applicationScope,
-        loadKey = navigationApiKeyStore::load,
-        configureKey = navigationSdkGateway::configureIfNeeded,
-    )
+    val navigationApiKey = NavigationApiKey(SecureNavigationApiKeyStore(context), applicationScope)
     val destinationParser = DestinationParser(rideLocationLabeler)
-    val navigationFeed = NavigationFeedRepository()
-    internal val navigationStartStopGuard = NavigationStartStopGuard()
     val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings.settings, applicationScope)
-    internal val navigationGuidanceLifecycle = NavigationGuidanceLifecycle(
-        clearNavigationFeed = navigationFeed::clear,
-        finishTftArrival = tftNavigationBridge::arrivedAndStop,
-    )
-    val navigationStopController = NavigationStopController(
-        application = context.applicationContext as Application,
-        guard = navigationStartStopGuard,
-        guidanceLifecycle = navigationGuidanceLifecycle,
-        clearOutput = {
-            navigationFeed.clear()
-            runCatching(tftNavigationBridge::stop)
-        },
+
+    /** Routes guidance to the cluster. The hazard alert is raised before the reroute frames queue. */
+    private val guidanceOutput: GuidanceOutput = object : GuidanceOutput {
+        override fun preview(destination: NavigationDestination, distanceMetres: Int?, durationSeconds: Int?) =
+            tftNavigationBridge.previewDestination(destination.title, distanceMetres, durationSeconds)
+
+        override fun started(destination: NavigationDestination) = tftNavigationBridge.start(destination.title)
+        override fun update(info: NavInfo) = tftNavigationBridge.accept(info)
+
+        override fun rerouting() {
+            if (ridingAlertMonitor.navigationHazard("The route is being recalculated; check for changed road conditions")) {
+                tftPriorityCoordinator.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")
+            }
+            tftNavigationBridge.rerouting()
+        }
+
+        override fun arrived() = tftNavigationBridge.arrivedAndStop()
+        override fun stopped() = tftNavigationBridge.stop()
+    }
+    val navigationController: NavigationController = NavigationController(
+        application = appContext as Application,
+        connection = bikeConnection,
+        settings = appSettings.settings,
+        output = guidanceOutput,
+        log = connectionEventJournal::record,
         scope = applicationScope,
     )
     private val phoneBatteryPercent: () -> Int = {
@@ -148,8 +155,8 @@ class AppContainer(context: Context) {
     val stationaryTftValidator = StationaryTftValidator(bikeConnection, phoneBatteryPercent)
     internal val notificationIcons = NotificationIcons(bikeConnection, appSettings.settings, phoneBatteryPercent)
     val callBridge = CallBridge(context, bikeConnection, appSettings, applicationScope)
-    val tftPriorityCoordinator =
-        TftPriorityCoordinator(navigationFeed, callBridge, tftNavigationBridge, applicationScope)
+    val tftPriorityCoordinator: TftPriorityCoordinator =
+        TftPriorityCoordinator(navigationController.guidance, callBridge, tftNavigationBridge, applicationScope)
     val ridingAlertMonitor = RidingAlertMonitor(context, bikeConnection, rideRecorder, appSettings, applicationScope)
     val weatherAlertProvider = WeatherAlertProvider(
         rideLocationTracker,
@@ -176,44 +183,10 @@ class AppContainer(context: Context) {
                 .distinctUntilChanged()
                 .collect(connectionEventJournal::setPersistenceEnabled)
         }
-        // The guidance feed drives the cluster display. Routed here rather than from the
-        // feed itself so the feed stays a plain fan-out point with no knowledge of the bike.
-        navigationFeed.acceptTerminalNavInfo = navigationGuidanceLifecycle::acceptAndMarkTerminalFeed
-        navigationFeed.acceptActiveNavInfo = navigationGuidanceLifecycle::acceptsActiveFeed
-        navigationFeed.onNavInfo = { info ->
-            when (info.navState) {
-                NavState.ENROUTE -> tftNavigationBridge.accept(info)
-                NavState.REROUTING -> {
-                    // The alert is raised and published *before* the reroute frames are queued.
-                    // Ordering carries the fix: a reroute batch already in the queue would drain
-                    // over an alert regardless of any guard inside rerouting(), because it does
-                    // not belong to the alert generation the coordinator prunes.
-                    val message = "The route is being recalculated; check for changed road conditions"
-                    if (ridingAlertMonitor.navigationHazard(message)) {
-                        tftPriorityCoordinator.presentTextAlert(
-                            "ROUTE ALERT. Recalculating. Check road conditions.",
-                        )
-                    }
-                    tftNavigationBridge.rerouting()
-                }
-                else -> tftNavigationBridge.stop()
-            }
-        }
         applicationScope.launch {
-            // The handlebar EXIT has to work with the phone stowed and no navigation screen in
-            // the task, so this collector is process-scoped. NavigationActivity keeps its own
-            // handling for skip, which needs the map it owns.
-            bikeConnection.controls.collect { event ->
-                if (event is BikeControlEvent.ClusterReady) {
-                    connectionEventJournal.record("Cluster reported ready; resending navigation and app events")
-                    tftNavigationBridge.republishLast()
-                }
-                if (event is BikeControlEvent.ExitNavigation) {
-                    connectionEventJournal.record("Handlebar exit; stopping navigation")
-                    navigationStopController.stop { result ->
-                        connectionEventJournal.record("Handlebar exit result: $result")
-                    }
-                }
+            bikeConnection.controls.filter { it is BikeControlEvent.ClusterReady }.collect {
+                connectionEventJournal.record("Cluster reported ready; resending navigation and app events")
+                tftNavigationBridge.republishLast()
             }
         }
         applicationScope.launch {
@@ -235,12 +208,8 @@ class AppContainer(context: Context) {
                 callBridge.clearPendingBikeOutput()
                 tftPriorityCoordinator.clearPendingBikeOutput()
                 ridingAlertMonitor.clearPendingBikeOutput()
-                navigationFeed.clear()
                 tftNavigationBridge.clearPendingBikeOutput()
-                connectionEventJournal.record("Connection ended; clearing pending output and navigation")
-                navigationStopController.stop { result ->
-                    connectionEventJournal.record("Navigation stopped after connection ended: $result")
-                }
+                connectionEventJournal.record("Connection ended; clearing pending output")
             }
         }
         notificationIcons.start(appContext, applicationScope)

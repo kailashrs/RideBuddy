@@ -77,8 +77,6 @@ class MainActivity : ComponentActivity() {
     private var preciseLocationGranted by mutableStateOf(false)
     private var backgroundLocationGranted by mutableStateOf(false)
     private var navigationStartJob: Job? = null
-    private val navigationStartStopGuard: NavigationStartStopGuard
-        get() = appContainer.navigationStartStopGuard
     private val viewModel: MainViewModel by viewModels {
         MainViewModel.factory(appContainer)
     }
@@ -495,14 +493,13 @@ class MainActivity : ComponentActivity() {
                 onSuccess = { place ->
                     startActivity(
                         NavigationActivity.intent(
-                            this, place.latitude, place.longitude, place.title,
+                            this, place,
                             // A share only skips the preview when the rider opted into that;
                             // otherwise it still stops on the preview for a Go.
                             autoStartGuidance = autoStartRequestId != null &&
                                 viewModel.settings.value.autoStartSharedDestinations,
                         ),
                     )
-                    navigationStartStopGuard.beginStart()
                     autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
                     viewModel.clearSharedDestination()
                 },
@@ -538,27 +535,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Delegates to the process-scoped controller so the button and the handlebar EXIT take the
-     * same path; only the rider-facing message is added here.
-     */
+    /** The same stop the handlebar EXIT takes. */
     private fun stopNavigation() {
         navigationStartJob?.cancel()
-        appContainer.navigationStopController.stop { result ->
-            when (result) {
-                NavigationStopResult.Stopped,
-                NavigationStopResult.AlreadyStopping,
-                -> Unit
-
-                NavigationStopResult.CleanupIncomplete ->
-                    appContainer.connectionEventJournal.record(
-                        "Navigation ended; Google Navigation cleanup was incomplete",
-                    )
-
-                NavigationStopResult.Failed ->
-                    viewModel.showMessage(getString(R.string.navigation_end_request_failed))
-            }
-        }
+        appContainer.applicationScope.launch { appContainer.navigationController.stop() }
     }
 
     private fun exportDiagnostics() {

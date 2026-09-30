@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy
 
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
+
 import androidx.lifecycle.SavedStateHandle
 
 // A shared destination arrives in one of two shapes and they are mutually exclusive.

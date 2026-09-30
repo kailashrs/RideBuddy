@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.ui
 
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
 import android.graphics.Bitmap
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.foundation.layout.fillMaxSize

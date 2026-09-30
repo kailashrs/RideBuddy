@@ -98,7 +98,7 @@ class BikeConnectionService : Service() {
         locationDemandJob = scope.launch {
             combine(
                 container.rideRecorder.activeRide,
-                container.navigationFeed.guidance,
+                container.navigationController.guidance,
             ) { activeRide, guidance -> activeRide != null || guidance.active }
                 .distinctUntilChanged()
                 .collect {
@@ -245,7 +245,7 @@ class BikeConnectionService : Service() {
         val shouldTrack = shouldTrackRideLocation(
             locationForegroundEnabled = locationForegroundEnabled,
             hasActiveRide = container.rideRecorder.activeRide.value != null,
-            hasActiveNavigation = container.navigationFeed.guidance.value.active,
+            hasActiveNavigation = container.navigationController.guidance.value.active,
         )
         if (shouldTrack == locationTrackerRunning) return
         if (shouldTrack) {
@@ -351,7 +351,6 @@ class BikeConnectionService : Service() {
             val appContainer = appContext.appContainer
             appContainer.bikeConnectionDemand.suppressAutomaticConnections()
             appContainer.connectionEventJournal.record("Manual disconnect requested")
-            appContainer.navigationStopController.stop()
             appContainer.bikeConnection.disconnect()
             // Deliberately no stopService() and no notification cancel here. The Disconnected
             // state reaches the service's own collector, which stops through the path that first

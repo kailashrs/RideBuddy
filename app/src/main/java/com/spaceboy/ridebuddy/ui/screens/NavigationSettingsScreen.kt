@@ -48,7 +48,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.spaceboy.ridebuddy.NavigationKeyUiState
+import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
 import com.spaceboy.ridebuddy.ui.components.SectionHeader
 
 /**

@@ -25,7 +25,14 @@ import javax.crypto.spec.GCMParameterSpec
  * different threads, and an interleaved save would pair one operation's ciphertext with
  * another's IV.
  */
-class SecureNavigationApiKeyStore(context: Context) {
+/** Where the Navigation SDK key is kept. */
+interface NavigationApiKeyStore {
+    fun load(): String?
+    fun save(apiKey: String)
+    fun clear()
+}
+
+class SecureNavigationApiKeyStore(context: Context) : NavigationApiKeyStore {
     private val preferences = context.getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
 
     /**
@@ -36,7 +43,7 @@ class SecureNavigationApiKeyStore(context: Context) {
      * prompts the rider to re-enter it, which is the only recovery available anyway.
      */
     @Synchronized
-    fun load(): String? {
+    override fun load(): String? {
         val encryptedValue = preferences.getString(EncryptedValueKey, null) ?: return null
         val initializationVector = preferences.getString(InitializationVectorKey, null) ?: return null
 
@@ -59,7 +66,7 @@ class SecureNavigationApiKeyStore(context: Context) {
      */
     @Synchronized
     @Suppress("UseKtx") // The KTX edit helper discards commit(), so its failure cannot be checked.
-    fun save(apiKey: String) {
+    override fun save(apiKey: String) {
         val cipher = Cipher.getInstance(Transformation)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
         val encryptedValue = cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
@@ -75,7 +82,7 @@ class SecureNavigationApiKeyStore(context: Context) {
 
     @Synchronized
     @Suppress("UseKtx") // The KTX edit helper discards commit(), so its failure cannot be checked.
-    fun clear() {
+    override fun clear() {
         requirePreferenceCommit(
             preferences.edit()
                 .remove(EncryptedValueKey)
