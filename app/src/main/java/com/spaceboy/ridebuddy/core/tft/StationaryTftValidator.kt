@@ -64,37 +64,16 @@ class StationaryTftValidator(
     }
 
     /**
-     * A complete guidance sequence: enter the session, draw one turn with distances, text
-     * and a speed limit, then clear it all back off the display.
-     *
-     * The sequence mirrors what [TftNavigationBridge] transmits for a route started without a
-     * preview: session [RouteRequested], status [NavigationActive], then session
-     * [GuidanceActive]. A test that walked a different sequence would confirm the cluster
-     * accepts frames the app never sends.
-     *
-     * The transitional [RouteRequested] is included deliberately. In production it is dirty
-     * state, not a queued packet, so it reaches the cluster only when the worker drains between
-     * the route request and the first guidance update — but that is a real production sequence,
-     * and it is the one nothing else exercises. Emitting it here is what makes this phase a test
-     * of the `80` to `87` transition rather than only of its coalesced outcome.
-     *
-     * Two absences are also deliberate: no preview `83`, because a direct start never passes
-     * through it; and no status `0`, because that value is a sentinel that suppresses its own
-     * write rather than being transmitted.
-     *
-     * Distances and times are chosen to be unmistakable to someone looking at the cluster —
-     * a round 120 m, an ETA ten minutes out — so a mis-decoded field reads as obviously
-     * wrong rather than plausible. The maneuver ids are real turns, in opposite directions,
-     * so the arrow mapping is genuinely exercised: the rider is looking for a right arrow now
-     * and a left one queued next, and either arrow being wrong is visible at a glance. This
-     * is the part of the protocol least confirmed by capture, so a fallback pictogram here
-     * would make the phase silent about exactly what it exists to check.
+     * The sequence [ClusterDisplay] sends for a route started without a preview — session 80,
+     * status, session 87 — then one turn with distances, text and a speed limit, then the clear.
+     * The two maneuvers are real turns in opposite directions so a wrong arrow mapping is
+     * visible at a glance, and the figures are chosen to look wrong if a field is mis-decoded.
      */
     private fun navigationFrames(nowMillis: Long): List<Frame> {
         return buildList {
-            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(RouteRequested)))
-            add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(NavigationActive)))
-            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(GuidanceActive)))
+            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionRouteRequested)))
+            add(Frame(BleCharacteristics.NavigationStatus, TftPacketEncoder.status(StatusNavigationActive)))
+            add(Frame(BleCharacteristics.NavigationSession, TftPacketEncoder.session(SessionGuidanceActive)))
             add(
                 Frame(
                     BleCharacteristics.NavigationManeuver,
@@ -231,11 +210,6 @@ class StationaryTftValidator(
          * at the cluster and read it, short enough that the whole parked test stays brief.
          */
         val DisplayHold = 2_500.milliseconds
-
-        // Session and status values; see TftNavigationBridge for the full vocabulary.
-        const val RouteRequested = 80
-        const val GuidanceActive = 87
-        const val NavigationActive = 132
 
         /** Above idle sensor noise, far below any speed a bike could actually be moving at. */
         const val MaxStationarySpeedKph = 0.5

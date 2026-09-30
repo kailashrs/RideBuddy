@@ -130,8 +130,8 @@ Exports carry the raw values, not your display units, so a file means the same t
 app was set to when you took it. A GPX track is named for where the ride went — "Koramangala to
 Electronic City" — falling back to the ride's number when the geocoder resolved nothing.
 
-**Backup** is Android's own. The app keeps a summary snapshot current and the backup rules name
-that file and the rider's preferences, nothing else — the Navigation API key and everything
+**Backup** is Android's own. The backup rules name the ride-summary database and the rider's
+settings, nothing else — the Navigation API key and everything
 describing the pairing with a specific motorcycle are outside the backup set by construction.
 Backups are free, do not count against Drive quota, and are encrypted with the device lock screen
 on Android 9 and above; a device with no lock screen is not backed up at all. Restoring onto a new
@@ -144,6 +144,8 @@ Decisions and measurements behind all of this are in
 
 ## Project references
 
+- [Architecture](docs/architecture.md)
 - [Stationary vehicle validation checklist](docs/hardware-validation.md)
+- [Cluster link decisions](docs/cluster-link-decisions.md)
 - [Ride storage and backup decisions](docs/ride-storage-decisions.md)
 - [Material You product design](docs/app-ui-design.md)

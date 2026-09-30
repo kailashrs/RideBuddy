@@ -140,7 +140,7 @@ object TftPacketEncoder {
     /** Wipes the navigation area. The only packet that does not start with a field tag. */
     fun clear(): ByteArray = byteArrayOf(0xFF.toByte(), End.toByte())
 
-    /** Moves the display between navigation screens; see [TftNavigationBridge] for the values. */
+    /** Moves the display between navigation screens; see [SessionRouteReady] and its neighbours for the values. */
     fun session(state: Int): ByteArray = byteArrayOf(5, 0xFF.toByte(), state.coerceIn(0, 255).toByte(), End.toByte())
 
     /** Status word accompanying an active session. */

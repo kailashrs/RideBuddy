@@ -153,6 +153,10 @@ delayed `132` or `87` lands afterwards. The OEM never clears `R` on preview tear
 **Revisit when.** A parked test shows the cluster requires a distinct preview-to-guidance transition,
 or that one-control-per-tick entry behaves differently from a batched one.
 
+**1.1.** `ClusterDisplay` implements this as a desired screen diffed against what the cluster has
+acknowledged: session and status are fields of that screen, so the same rules fall out without
+separate dirty flags.
+
 <a id="d4"></a>
 
 ### D4 — Identity reads are deleted; the values arrive only as indications
@@ -238,6 +242,9 @@ since RSSI requests do not contend through Android's `mDeviceBusy` ATT guard. (T
 statement; contention at other layers has not been examined either way.)
 
 **Revisit when.** Diagnostics show RSSI callbacks routinely failing or never arriving.
+
+**Superseded in 1.1.** RSSI is read through Nordic's request queue, which serialises it with the
+other operations; a failed read leaves the last value showing.
 
 ---
 
@@ -357,3 +364,27 @@ Questions the source cannot answer. Each needs a parked bike.
 - What prompts the `8810` indication? It arrived about ten minutes into one capture and not at all
   in a later 955-second session, so it is not on a fixed timer. Far later than
   `8910`, and nothing establishes whether that is a timer, an event, or coincidence.
+
+## 1.1 decisions
+
+### D9 — Notification icons follow the OEM app
+
+Shown on every post and hidden when the last notification behind the icon is dismissed; never
+gated by navigation or calls, and never timed out. Unlike the OEM app, every live notification is
+tracked, so dismissing one of several keeps the icon, and icons are relit when the bike connects.
+The battery level travels in the same packet, so a battery change relights the current icons
+rather than sending the OEM's bare event 0, which clears them. WhatsApp lights the Messages icon;
+the OEM app sends nothing for it.
+
+### D10 — The cluster is driven from its desired state
+
+One writer compares the screen the cluster should show with what it has acknowledged and sends
+the difference, rereading the desired state between writes. This replaces the bridge's queues and
+generation counters: a stale frame cannot be sent because nothing stale is ever computed.
+
+### D11 — GATT through Nordic's BLE library
+
+Nordic's `BleManager` serialises operations and correlates callbacks. Requests are still awaited
+with an 8 s deadline, and a missing callback retires the link, because the library itself sets no
+per-operation timeout.
+

@@ -20,9 +20,7 @@ enum class BikeWriteMode {
 /**
  * One value bound for one characteristic.
  *
- * `equals`/`hashCode` are written out because [payload] is an array, whose identity-based
- * defaults would make two writes of the same bytes compare unequal — and these values are
- * compared and used as map keys throughout the display bridge.
+ * `equals`/`hashCode` compare [payload] by content; an array's defaults compare identity.
  */
 data class BikeWrite(
     val characteristic: UUID,
@@ -44,7 +42,7 @@ data class BikeWrite(
 /**
  * The app's whole view of the motorcycle link.
  *
- * An interface so everything above it — recording, display bridges, the UI — can be
+ * An interface so everything above it — recording, the cluster display, the UI — can be
  * exercised without a Bluetooth stack. The implementation is
  * [com.spaceboy.ridebuddy.ble.AndroidBikeConnection].
  */

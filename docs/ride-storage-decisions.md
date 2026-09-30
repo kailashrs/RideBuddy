@@ -28,6 +28,10 @@ Insights. See [S4](#s4).
 
 ## S2 — Stored samples use fixed-point integers, relative time, and no surrogate key
 
+**Superseded in 1.1.** Each ride's samples are one gzipped ProtoBuf blob with offsets from the
+ride's start; nothing queries individual samples, so per-row columns bought nothing.
+
+
 Before: 98.1 bytes per sample, 1.35 MiB per riding hour, 492 MiB a year at an hour a day.
 
 Three changes, none of which alter what is displayed:
@@ -118,6 +122,10 @@ restore cannot bring a deleted ride back.
 ---
 
 ## S5 — Android's backup service carries a summary snapshot, not the database
+
+**Superseded in 1.1.** Summaries and samples are separate Room databases, so the backup rules
+include `ride_history.db` directly and leave `ride_samples.db` out; the snapshot file is gone.
+
 
 The database cannot be backed up. Auto Backup allows an app 25 MB in total, and the sample series
 is 0.137 MiB per riding hour — about 18 hours of riding at the old size, 180 at the new one, after

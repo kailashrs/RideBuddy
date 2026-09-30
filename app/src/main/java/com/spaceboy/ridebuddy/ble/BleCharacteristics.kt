@@ -8,7 +8,7 @@ import java.util.UUID
  * Every characteristic in the vehicle profile shares one 128-bit UUID family and differs
  * only in the final four hex digits, so each entry below is built from its suffix. The
  * suffixes are the stable names used throughout the code, the logs, and
- * `docs/aprilia-rs457-ble-protocol.md`.
+ * the OEM app's own characteristic table.
  *
  * Direction is fixed per characteristic: phone→bike entries are written, bike→phone
  * entries are subscribed to and arrive through the GATT notification callback.
@@ -79,7 +79,7 @@ object BleCharacteristics {
      * Set membership is fixed by the vehicle profile; the *order* is this app's choice.
      * Enabling them as a deterministic queue — rather than in whatever order the GATT
      * service scan happens to yield — keeps failures reproducible and lets
-     * [PostAuthenticationGate] know exactly which subscriptions are still outstanding.
+     * the connection report exactly which one failed.
      */
     val PostAuthenticationSubscriptions: List<UUID> = listOf(
         NavigationControl,

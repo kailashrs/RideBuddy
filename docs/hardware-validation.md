@@ -45,3 +45,16 @@ appears during a validation run, record when, and what had happened just before.
 ## Evidence to retain
 
 Capture the Diagnostics export, Android version, device model, and a timestamped video or photo of each TFT state. Treat any unknown payload, warning lamp, implausible telemetry, or delayed callback as a stop condition and disable all vehicle-display outputs.
+
+## 1.1 checks
+
+- Ride history, settings and pairing survive the upgrade from 1.0 without re-pairing.
+- First pairing on a fresh bond: the challenge is answered and the link reaches Connected.
+- Reconnecting to a bonded bike takes the stored-acceptance path (no challenge wait).
+- Losing the link mid-ride reconnects within the three-attempt cycle and the ride continues.
+- With the bike switched off, attempts stop after three with "Couldn't connect."
+- Stationary test: navigation, call screen and notification icons all appear.
+- Handlebar GO starts a staged route and EXIT ends it with the phone stowed.
+- The dashboard battery reading updates on a long ride with no notifications.
+- A saved contact's name, not the number, appears for an incoming call.
+
