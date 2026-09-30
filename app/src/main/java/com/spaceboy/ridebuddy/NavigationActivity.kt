@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy
 
+import androidx.compose.runtime.getValue
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -30,7 +31,6 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +52,6 @@ import com.google.android.libraries.navigation.NavigationView
 import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.core.navigation.NavigationSession
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
 import java.util.Locale
 import kotlinx.coroutines.launch

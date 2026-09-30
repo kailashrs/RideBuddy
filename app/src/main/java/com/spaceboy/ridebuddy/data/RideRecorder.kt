@@ -1,7 +1,7 @@
 package com.spaceboy.ridebuddy.data
 
 import android.util.Log
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.TelemetryReading
@@ -83,7 +83,7 @@ class RideRecorder(
     /** Begins watching telemetry. Called once, at app start. */
     fun start() {
         scope.launch(RecordingDispatcher) {
-            bikeConnection.rawTelemetry.collect(::record)
+            bikeConnection.readings.collect(::record)
         }
         // A ride ends when the link is genuinely over — not while it is being re-established.
         // Automatic reconnection passes through the transient states below, so finalizing on

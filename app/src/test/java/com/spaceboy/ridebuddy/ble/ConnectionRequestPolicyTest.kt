@@ -3,7 +3,6 @@ package com.spaceboy.ridebuddy.ble
 import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import android.net.MacAddress
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

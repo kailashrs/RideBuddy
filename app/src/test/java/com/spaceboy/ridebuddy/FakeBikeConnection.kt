@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy
 
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
@@ -19,9 +18,8 @@ internal open class FakeBikeConnection(
 ) : BikeConnection {
     val writes = mutableListOf<BikeWrite>()
     override val connectionState = MutableStateFlow(state)
-    override val rawTelemetry = MutableSharedFlow<TelemetryReading>(extraBufferCapacity = 64)
-    override val telemetry = MutableStateFlow<TelemetryFrame?>(null)
-    override val latestTelemetryReading = MutableStateFlow<TelemetryReading?>(null)
+    override val readings = MutableSharedFlow<TelemetryReading>(extraBufferCapacity = 64)
+    override val latestReading = MutableStateFlow<TelemetryReading?>(null)
     override val identity = MutableStateFlow(BikeIdentity())
     override val diagnostics = MutableStateFlow(BleDiagnostics(authenticated = true))
     override val controls = MutableSharedFlow<BikeControlEvent>(extraBufferCapacity = 8)

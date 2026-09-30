@@ -12,7 +12,8 @@ import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -36,8 +37,8 @@ class RidingAlertMonitor(
     private val notifications = appContext.getSystemService(NotificationManager::class.java)
     private val lastAlertAt = mutableMapOf<String, Long>()
 
-    /** Ends the session's phone alerts and cooldowns along with its pending bike output. */
-    fun clearPendingBikeOutput() = synchronized(lastAlertAt) {
+    /** Ends the session's phone alerts and cooldowns. */
+    private fun clearSessionAlerts() = synchronized(lastAlertAt) {
         lastAlertAt.keys.forEach { notifications.cancel(it.hashCode()) }
         lastAlertAt.clear()
     }
@@ -46,10 +47,17 @@ class RidingAlertMonitor(
     fun start() {
         createChannel()
         scope.launch {
+            // A lost link ends the session's alerts; brief reconnects keep them.
+            connection.connectionState
+                .map { it is BikeConnectionState.Failed || it is BikeConnectionState.Disconnected }
+                .distinctUntilChanged()
+                .collect { ended -> if (ended) clearSessionAlerts() }
+        }
+        scope.launch {
             // The body never suspends, so collectLatest only bought four coroutine
             // cancellations a second.
-            connection.telemetry.collect { frame ->
-                frame ?: return@collect
+            connection.latestReading.collect { reading ->
+                val frame = reading?.frame ?: return@collect
                 val preferences = settings.settings.value
                 if (preferences.overspeedAlerts && frame.speedKilometresPerHour >= preferences.overspeedThresholdKph) {
                     alert(

@@ -1,9 +1,9 @@
 package com.spaceboy.ridebuddy.data
 
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.ble.parseTelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,7 +27,7 @@ class RideDistanceIntegrationTest {
 
     @Test fun `decodes bike mileage and integrates litres by distance`() {
         val rawFrame = byteArrayOf(0x10, 0x10, 0x0E, 10, 125, 0x10, 0x27, 0, 0)
-        val frame = requireNotNull(TelemetryFrame.parse(rawFrame))
+        val frame = requireNotNull(parseTelemetryFrame(rawFrame))
         val ride = ActiveRide.started(0L, 0L, frame).add(frame, 1_000L).toRide()
         assertEquals(25.0, requireNotNull(frame.instantaneousMileageKilometresPerLitre), 0.000_001)
         assertEquals(0.0004, requireNotNull(ride.estimatedFuelLitres), 0.000_001)

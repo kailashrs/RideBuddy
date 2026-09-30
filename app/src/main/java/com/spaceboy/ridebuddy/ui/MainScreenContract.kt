@@ -4,7 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.spaceboy.ridebuddy.MainUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
 import com.spaceboy.ridebuddy.ble.BleCaptureState
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide

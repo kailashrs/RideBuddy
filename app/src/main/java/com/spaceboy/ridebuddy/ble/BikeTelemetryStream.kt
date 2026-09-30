@@ -22,7 +22,7 @@ internal data class TelemetryAcceptance(
 )
 
 /**
- * Publishes full-rate ride data and a separately mileage-smoothed UI stream.
+ * Publishes every decoded frame for recording, and the newest one for everything else.
  *
  * The cluster sends telemetry at about 4 Hz and [RideRecorder][com.spaceboy.ridebuddy.data.RideRecorder]
  * is its only consumer, so [rawBufferCapacity] is several seconds of slack. Frames are handed over
@@ -37,16 +37,13 @@ internal class BikeTelemetryStream(
     rawBufferCapacity: Int = RawTelemetryBufferCapacity,
 ) {
     private val timestamps = ArrayDeque<Long>()
-    private val mileageSmoother = LiveMileageSmoother()
     private var droppedRawTelemetryFrames = 0L
     private val mutableRawTelemetry = MutableSharedFlow<TelemetryReading>(
         extraBufferCapacity = rawBufferCapacity,
     )
-    private val mutableTelemetry = MutableStateFlow<TelemetryFrame?>(null)
     private val mutableLatestReading = MutableStateFlow<TelemetryReading?>(null)
 
-    val rawTelemetry: SharedFlow<TelemetryReading> = mutableRawTelemetry
-    val telemetry: StateFlow<TelemetryFrame?> = mutableTelemetry.asStateFlow()
+    val readings: SharedFlow<TelemetryReading> = mutableRawTelemetry
     val latestReading: StateFlow<TelemetryReading?> = mutableLatestReading.asStateFlow()
 
     /**
@@ -69,7 +66,7 @@ internal class BikeTelemetryStream(
             timestamps.removeFirst()
         }
         val telemetryHz = timestamps.size / (TelemetryWindowMillis / 1_000.0)
-        val frame = TelemetryFrame.parse(payload)
+        val frame = parseTelemetryFrame(payload)
             ?: return TelemetryAcceptance(
                 valid = false,
                 telemetryHz = telemetryHz,
@@ -81,7 +78,6 @@ internal class BikeTelemetryStream(
             receivedAtElapsedRealtime = monotonicNow,
         )
         mutableLatestReading.value = reading
-        mutableTelemetry.value = mileageSmoother.smooth(frame)
         if (!mutableRawTelemetry.tryEmit(reading)) droppedRawTelemetryFrames++
         return TelemetryAcceptance(
             valid = true,
@@ -93,9 +89,7 @@ internal class BikeTelemetryStream(
     /** Full teardown between sessions: rate window, filter state, counters and both streams. */
     fun reset() {
         timestamps.clear()
-        mileageSmoother.reset()
         droppedRawTelemetryFrames = 0L
-        mutableTelemetry.value = null
         mutableLatestReading.value = null
     }
 
@@ -105,7 +99,7 @@ internal class BikeTelemetryStream(
      * speed without the rate history being thrown away.
      */
     fun clearUiTelemetry() {
-        mutableTelemetry.value = null
+        mutableLatestReading.value = null
     }
 
     private companion object {

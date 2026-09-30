@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,11 +51,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,7 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
 import com.spaceboy.ridebuddy.R
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.DistanceUnits

@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.data
 
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryReading
 import kotlin.math.roundToInt
 
 /**
@@ -75,3 +77,22 @@ internal fun List<RideSample>.accelerationPeaks(): Pair<Double?, Double?> {
     }
     return peakAcceleration to peakBraking
 }
+
+/**
+ * The live display's frame, with its mileage smoothed.
+ *
+ * The raw km/L figure swings with every throttle movement and is unreadable as a live number,
+ * so the display shows a moving average of it. Recorded samples keep the raw value. A missing
+ * reading shows as missing without resetting the average; a new link starts it again.
+ */
+internal data class LiveTelemetry(val frame: TelemetryFrame? = null, val averageMileage: Double? = null) {
+    fun next(reading: TelemetryReading?): LiveTelemetry {
+        val frame = reading?.frame ?: return LiveTelemetry()
+        val sample = frame.instantaneousMileageKilometresPerLitre?.takeIf { it.isFinite() && it > 0.0 }
+            ?: return copy(frame = frame.copy(instantaneousMileageKilometresPerLitre = null))
+        val average = averageMileage?.let { it + MileageSmoothing * (sample - it) } ?: sample
+        return LiveTelemetry(frame.copy(instantaneousMileageKilometresPerLitre = average), average)
+    }
+}
+
+private const val MileageSmoothing = 0.2

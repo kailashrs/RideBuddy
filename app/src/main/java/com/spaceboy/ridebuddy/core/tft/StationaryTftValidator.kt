@@ -194,7 +194,7 @@ class StationaryTftValidator(
         if (!connection.diagnostics.value.authenticated) {
             return StationaryTftSafetyReason.NotAuthenticated
         }
-        val reading = connection.latestTelemetryReading.value
+        val reading = connection.latestReading.value
             ?: return StationaryTftSafetyReason.TelemetryUnavailable
         val readingAgeMillis = elapsedRealtimeMillis() - reading.receivedAtElapsedRealtime
         if (readingAgeMillis !in 0..MaxTelemetryAgeMillis) {

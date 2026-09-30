@@ -1,7 +1,6 @@
 package com.spaceboy.ridebuddy.ui
 
 import com.spaceboy.ridebuddy.MainUiState
-import com.spaceboy.ridebuddy.core.navigation.NavigationKeyUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
 import com.spaceboy.ridebuddy.ble.BleCaptureState
 import android.net.MacAddress

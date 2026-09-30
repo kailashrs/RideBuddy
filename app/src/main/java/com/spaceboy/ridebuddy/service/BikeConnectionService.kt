@@ -1,31 +1,23 @@
 package com.spaceboy.ridebuddy.service
 
-import com.spaceboy.ridebuddy.appContainer
-
-import android.app.Service
+import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.IBinder
-import android.util.Log
-import android.Manifest
 import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-import androidx.core.app.ServiceCompat
-import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
+import android.content.pm.ServiceInfo
 import android.net.MacAddress
+import android.util.Log
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
+import com.spaceboy.ridebuddy.appContainer
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -43,291 +35,169 @@ import kotlinx.coroutines.launch
  * every rider, including those who never record a route.
  *
  * The service stops itself as soon as there is nothing to keep alive — see
- * [connectionServiceStateAction] — rather than lingering with a notification the rider
+ * [stop] — rather than lingering with a notification the rider
  * cannot explain.
  */
-class BikeConnectionService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+class BikeConnectionService : LifecycleService() {
     private val container get() = appContainer
     private val notifications by lazy { BikeConnectionNotifications(this) }
+    private var promoted = false
     private var stateJob: Job? = null
-    private var locationDemandJob: Job? = null
-    private var receivedStartCommand = false
-    private var locationForegroundEnabled = false
-    private var locationTrackerRunning = false
-    private var locationPermissionMissing = false
-    private var foregroundPromotionSucceeded = false
-    private var foregroundPromotionFailed = false
-    private var shuttingDown = false
     private var shutdownJob: Job? = null
-    /** The newest start command, so a delayed stop cannot retire a connection asked for since. */
     private var latestStartId = 0
+    private var locationForeground = false
+    private var locationTracking = false
+    private var locationPermissionMissing = false
 
     /**
-     * Promotes to the foreground immediately.
-     *
-     * This has to happen in `onCreate`, before any command is processed: a started service
-     * that has not promoted within the platform's window is killed. A refused promotion is
-     * terminal, so the failure is reported and the service stops rather than running as a
-     * background service the platform will kill anyway.
+     * Promotes to the foreground before any command is processed: a started service that has not
+     * promoted within the platform's window is killed. A refused promotion is terminal.
      */
     override fun onCreate() {
         super.onCreate()
         notifications.createChannel()
-        val foregroundFailure = runCatching {
+        promoted = runCatching {
             ServiceCompat.startForeground(
                 this,
                 NotificationId,
                 notifications.build("Preparing bike connection"),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
             )
-        }.exceptionOrNull()
-        if (foregroundFailure != null) {
-            foregroundPromotionFailed = true
-            Log.e("BikeConnectionService", "Unable to promote bike connection service", foregroundFailure)
+        }.onFailure { error ->
+            Log.e("BikeConnectionService", "Unable to promote bike connection service", error)
             container.bikeConnection.notifyStartFailed("Unable to keep the bike connection active")
             stopSelf()
-            return
-        }
-        foregroundPromotionSucceeded = true
-        stateJob = scope.launch {
-            container.bikeConnection.connectionState.collect { state ->
-                handleConnectionState(state)
-            }
-        }
-        locationDemandJob = scope.launch {
-            combine(
-                container.rideRecorder.activeRide,
-                container.navigationController.guidance,
-            ) { activeRide, guidance -> activeRide != null || guidance.active }
-                .distinctUntilChanged()
-                .collect {
-                    synchronizeRideLocationTracking()
-                }
+        }.isSuccess
+        if (!promoted) return
+        // GPS runs only while a ride or navigation needs it.
+        lifecycleScope.launch {
+            combine(container.rideRecorder.activeRide, container.navigationController.guidance) { ride, guidance ->
+                ride != null || guidance.active
+            }.distinctUntilChanged().collect { syncLocationTracking() }
         }
     }
 
     /**
-     * Routes a start command.
-     *
-     * `START_NOT_STICKY` throughout, and a null intent stops the service. A sticky restart
-     * arrives with no intent and no way to tell whether the rider still wants a connection;
-     * treating that as "reconnect" would restart an out-of-range retry loop after every
-     * process death. A genuine reconnect comes from presence observation instead, which
-     * only fires when the motorcycle is actually there.
+     * `START_NOT_STICKY` throughout, and an unknown or null intent stops the service: a sticky
+     * restart cannot tell whether the rider still wants a connection, and presence observation
+     * is what reconnects when the motorcycle is actually there.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!foregroundPromotionSucceeded) {
+        super.onStartCommand(intent, flags, startId)
+        if (!promoted) {
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
         latestStartId = startId
-        cancelPendingShutdown()
-        receivedStartCommand = true
+        // A new command supersedes a shutdown still waiting on a ride save.
+        shutdownJob?.cancel()
+        shutdownJob = null
         when (intent?.action) {
-            ActionEnableLocation -> enableLocationTrackingIfAllowed(launchedFromVisibleActivity = true)
-            ActionRestartConnect -> {
-                val trigger = intent.connectionTriggerExtra()
-                val automatic = trigger.isAutomatic()
-                if (automatic && !container.bikeConnectionDemand.canStartAutomaticConnection()) {
-                    container.connectionEventJournal.record(
-                        "Automatic connection request ignored while paused",
-                    )
-                    stopForegroundAndSelf()
-                    return START_NOT_STICKY
+            ActionEnableLocation -> enableLocationIfAllowed(launchedFromVisibleActivity = true)
+            ActionRestartConnect -> if (!startConnection(intent)) return START_NOT_STICKY.also { stop() }
+            else -> return START_NOT_STICKY.also { stop() }
+        }
+        if (stateJob == null) {
+            stateJob = lifecycleScope.launch {
+                container.bikeConnection.connectionState.collect { state ->
+                    if (state is BikeConnectionState.Disconnected || state is BikeConnectionState.Failed) {
+                        stop()
+                    } else if (shutdownJob == null) {
+                        publishNotification(state)
+                    }
                 }
-                val address = intent.addressExtra()
-                val name = intent.getStringExtra(ExtraName)
-                if (address != null && !name.isNullOrBlank()) {
-                    if (!automatic) container.bikeConnectionDemand.allowExplicitConnection()
-                    enableLocationTrackingIfAllowed(
-                        launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false),
-                    )
-                    container.bikeConnection.connect(
-                        BikeConnectionTarget(
-                            address = address,
-                            deviceName = name,
-                            trigger = trigger,
-                        ),
-                    )
-                } else {
-                    container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
-                    stopForegroundAndSelf()
-                    return START_NOT_STICKY
-                }
-            }
-            else -> {
-                // CompanionDeviceService starts a fresh automatic connection when BLE presence returns.
-                // A null intent here is an Android service recreation and must not start an
-                // unbounded out-of-range reconnect loop.
-                stopForegroundAndSelf()
-                return START_NOT_STICKY
             }
         }
-        handleConnectionState(container.bikeConnection.connectionState.value)
         return START_NOT_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    private fun startConnection(intent: Intent): Boolean {
+        val trigger = intent.getStringExtra(ExtraTrigger)
+            ?.let { name -> ConnectionAttemptTrigger.entries.firstOrNull { it.name == name } }
+            ?: ConnectionAttemptTrigger.UserRequest
+        val automatic = trigger != ConnectionAttemptTrigger.UserRequest
+        if (automatic && !container.bikeConnectionDemand.canStartAutomaticConnection()) {
+            container.connectionEventJournal.record("Automatic connection request ignored while paused")
+            return false
+        }
+        val address = intent.getParcelableExtra(ExtraAddress, MacAddress::class.java)
+        val name = intent.getStringExtra(ExtraName)
+        if (address == null || name.isNullOrBlank()) {
+            container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
+            return false
+        }
+        if (!automatic) container.bikeConnectionDemand.allowExplicitConnection()
+        enableLocationIfAllowed(launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false))
+        container.bikeConnection.connect(BikeConnectionTarget(address, name, trigger))
+        return true
+    }
 
-    /**
-     * Tears down. The GATT link is only disconnected if it was actually up — see
-     * [connectionRequiresGattShutdown] — and never after a failed foreground promotion,
-     * where the service is stopping without having owned anything.
-     */
     override fun onDestroy() {
-        shuttingDown = true
-        stateJob?.cancel()
-        locationDemandJob?.cancel()
-        if (locationTrackerRunning) container.rideLocationTracker.stop()
-        locationTrackerRunning = false
-        scope.cancel()
+        if (locationTracking) container.rideLocationTracker.stop()
         removeForegroundNotification()
-        if (!foregroundPromotionFailed && connectionRequiresGattShutdown(
-                container.bikeConnection.connectionState.value,
-            )
-        ) {
+        val state = container.bikeConnection.connectionState.value
+        if (promoted && state !is BikeConnectionState.Disconnected && state !is BikeConnectionState.Failed) {
             container.bikeConnection.disconnect()
         }
         super.onDestroy()
     }
 
     /**
-     * Adds the location foreground-service type, if permitted.
-     *
-     * Background location is required *unless* the request came from a visible Activity,
-     * which mirrors the platform's own rule for starting location work: while the rider is
-     * looking at the app, foreground location is enough.
-     *
-     * A refusal is not an error. Location is optional — a ride records perfectly well
-     * without it — so the shortfall is surfaced on the notification and everything else
-     * carries on.
+     * Adds the location service type when permitted. Background location is required unless the
+     * request came from a visible Activity, mirroring the platform's own rule. A refusal is not an
+     * error: rides record without GPS, and the notification says what is missing.
      */
-    private fun enableLocationTrackingIfAllowed(launchedFromVisibleActivity: Boolean) {
-        if (locationForegroundEnabled) {
-            synchronizeRideLocationTracking()
-            return
+    private fun enableLocationIfAllowed(launchedFromVisibleActivity: Boolean) {
+        if (!locationForeground) {
+            val granted = { permission: String -> ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED }
+            locationForeground = granted(Manifest.permission.ACCESS_FINE_LOCATION) &&
+                (launchedFromVisibleActivity || granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) &&
+                runCatching {
+                    ServiceCompat.startForeground(
+                        this,
+                        NotificationId,
+                        notifications.build("Preparing bike connection"),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+                    )
+                }.isSuccess
+            locationPermissionMissing = !locationForeground
         }
-        val hasFineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        val hasBackgroundLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!hasFineLocation || (!launchedFromVisibleActivity && !hasBackgroundLocation)) {
-            locationPermissionMissing = true
-            updateNotificationSilently()
-            return
-        }
-        runCatching {
-            ServiceCompat.startForeground(
-                this,
-                NotificationId,
-                notifications.build("Preparing bike connection"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-            )
-        }.onFailure {
-            locationPermissionMissing = true
-            updateNotificationSilently()
-            return
-        }
-        locationForegroundEnabled = true
-        locationPermissionMissing = false
-        synchronizeRideLocationTracking()
-        updateNotificationSilently()
+        syncLocationTracking()
+        if (shutdownJob == null) publishNotification(container.bikeConnection.connectionState.value)
     }
 
-    /**
-     * Starts or stops GPS to match demand. Tracking only runs while a ride or navigation is
-     * actually in progress; leaving it on between rides would drain the battery for
-     * nothing.
-     */
-    private fun synchronizeRideLocationTracking() {
-        val shouldTrack = shouldTrackRideLocation(
-            locationForegroundEnabled = locationForegroundEnabled,
-            hasActiveRide = container.rideRecorder.activeRide.value != null,
-            hasActiveNavigation = container.navigationController.guidance.value.active,
-        )
-        if (shouldTrack == locationTrackerRunning) return
-        if (shouldTrack) {
-            locationTrackerRunning = container.rideLocationTracker.start()
-        } else {
-            container.rideLocationTracker.stop()
-            locationTrackerRunning = false
-        }
-    }
-
-    private fun updateNotificationSilently() {
-        val state = container.bikeConnection.connectionState.value
-        if (!shuttingDown && connectionServiceStateAction(state, receivedStartCommand) ==
-            ConnectionServiceStateAction.PublishNotification
-        ) {
-            publishNotification(state)
-        }
-    }
-
-    private fun handleConnectionState(state: BikeConnectionState) {
-        if (shuttingDown) return
-        when (connectionServiceStateAction(state, receivedStartCommand)) {
-            ConnectionServiceStateAction.WaitForStartCommand -> Unit
-            ConnectionServiceStateAction.PublishNotification -> publishNotification(state)
-            ConnectionServiceStateAction.StopService -> stopForegroundAndSelf()
-        }
+    private fun syncLocationTracking() {
+        val wanted = locationForeground &&
+            (container.rideRecorder.activeRide.value != null || container.navigationController.guidance.value.active)
+        if (wanted == locationTracking) return
+        locationTracking = if (wanted) container.rideLocationTracker.start() else false.also { container.rideLocationTracker.stop() }
     }
 
     private fun publishNotification(state: BikeConnectionState) {
+        if (state is BikeConnectionState.Disconnected || state is BikeConnectionState.Failed) return
         notifications.publish(connectionNotificationStatus(state, locationPermissionMissing))
     }
 
     /**
-     * Stops the service, but not before the last ride is on disk.
-     *
-     * The connection state that ends a ride — a disconnect, or reconnection giving up — is the
-     * same one that stops this service, and the ride is written asynchronously. Dropping the
-     * foreground notification first hands the OS a killable process holding an unwritten ride,
-     * which is exactly the ride a rider most expects to find afterwards.
-     *
+     * Stops, but only once the last ride is on disk: the state that ends a ride is the same one
+     * that stops this service, and dropping the foreground first would leave the process
+     * killable holding an unwritten ride. Foreground stays unless Android accepts this stop,
+     * since a newer start may already be on its way.
      */
-    private fun stopForegroundAndSelf() {
-        if (shuttingDown) return
-        shuttingDown = true
-        val stopId = latestStartId
+    private fun stop() {
+        if (shutdownJob != null) return
+        val startId = latestStartId
         notifications.publish("Saving ride")
-        shutdownJob = scope.launch {
-            stopConnectionServiceAfterSave(
-                stopId = stopId,
-                saveRides = container.rideRecorder::finalizeAndAwaitSaves,
-                stopIfCurrent = ::stopSelfResult,
-                removeForeground = ::removeForegroundNotification,
-            )
+        shutdownJob = lifecycleScope.launch {
+            container.rideRecorder.finalizeAndAwaitSaves()
+            if (stopSelfResult(startId)) removeForegroundNotification()
         }
-    }
-
-    /**
-     * Abandons a shutdown that has not completed, because a new start command supersedes it.
-     *
-     * The wait above can last seconds. Without this, a rider tapping Connect during that window
-     * would have their connection ignored — state handling stays gated on [shuttingDown] — and
-     * then torn down when the old shutdown finally ran.
-     */
-    private fun cancelPendingShutdown() {
-        shutdownJob?.cancel()
-        shutdownJob = null
-        shuttingDown = false
     }
 
     private fun removeForegroundNotification() {
-        if (foregroundPromotionSucceeded) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        }
+        if (promoted) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         notifications.cancel()
     }
-
-    private fun Intent.addressExtra(): MacAddress? = getParcelableExtra(ExtraAddress, MacAddress::class.java)
-
-    private fun Intent.connectionTriggerExtra(): ConnectionAttemptTrigger =
-        getStringExtra(ExtraTrigger)?.let { name ->
-            ConnectionAttemptTrigger.entries.firstOrNull { trigger -> trigger.name == name }
-        } ?: ConnectionAttemptTrigger.UserRequest
 
     companion object {
         internal const val NotificationId = 457
@@ -385,7 +255,7 @@ class BikeConnectionService : Service() {
             trigger: ConnectionAttemptTrigger = ConnectionAttemptTrigger.UserRequest,
         ): Boolean {
             val appContainer = context.applicationContext.appContainer
-            if (trigger.isAutomatic() && !appContainer.bikeConnectionDemand.canStartAutomaticConnection()) {
+            if (trigger != ConnectionAttemptTrigger.UserRequest && !appContainer.bikeConnectionDemand.canStartAutomaticConnection()) {
                 appContainer.connectionEventJournal.record(
                     "Automatic connection request ignored while paused",
                 )
@@ -412,90 +282,9 @@ class BikeConnectionService : Service() {
             startSafely(intent) { context.startService(intent) }
         }
     }
+
 }
 
-/**
- * Keeps foreground protection through the ride save and any newer start command.
- * Android may already know about a newer start before delivering its onStartCommand: removing
- * foreground status before stopSelfResult accepts this id would demote that new session.
- */
-internal suspend fun stopConnectionServiceAfterSave(
-    stopId: Int,
-    saveRides: suspend () -> Unit,
-    stopIfCurrent: (Int) -> Boolean,
-    removeForeground: () -> Unit,
-) {
-    saveRides()
-    currentCoroutineContext().ensureActive()
-    if (stopIfCurrent(stopId)) removeForeground()
-}
-
-/**
- * Whether the stack, rather than the rider, asked for this attempt. Automatic attempts are the ones
- * a manual disconnect suppresses; an explicit request clears that suppression instead.
- */
-internal fun ConnectionAttemptTrigger.isAutomatic(): Boolean = this != ConnectionAttemptTrigger.UserRequest
-
-/**
- * GPS runs only when the foreground service is permitted to use location *and* something
- * needs it. Either condition alone is not enough.
- */
-internal fun shouldTrackRideLocation(
-    locationForegroundEnabled: Boolean,
-    hasActiveRide: Boolean,
-    hasActiveNavigation: Boolean,
-): Boolean = locationForegroundEnabled && (hasActiveRide || hasActiveNavigation)
-
-/** What a connection-state change means for the service. */
-internal enum class ConnectionServiceStateAction {
-    /** Created but not yet commanded; there is nothing to report. */
-    WaitForStartCommand,
-
-    PublishNotification,
-
-    /** Nothing left to keep alive. */
-    StopService,
-}
-
-/**
- * Maps connection state onto a service action.
- *
- * Note this does not stop the service between automatic retries: the connection reports
- * [BikeConnectionState.Connecting] while its backoff is pending, so the service stays up
- * and keeps the process alive across the whole retry schedule. Disconnected and Failed mean
- * the schedule is over — exhausted or abandoned — and there is genuinely nothing left to
- * hold the service open for.
- */
-internal fun connectionServiceStateAction(
-    state: BikeConnectionState,
-    receivedStartCommand: Boolean,
-): ConnectionServiceStateAction = when {
-    !receivedStartCommand -> ConnectionServiceStateAction.WaitForStartCommand
-    state is BikeConnectionState.Disconnected || state is BikeConnectionState.Failed ->
-        ConnectionServiceStateAction.StopService
-
-    else -> ConnectionServiceStateAction.PublishNotification
-}
-
-/**
- * Whether teardown should also disconnect GATT. Already-settled states have no link to
- * close, and calling disconnect on one would emit a spurious teardown event.
- */
-internal fun connectionRequiresGattShutdown(state: BikeConnectionState): Boolean = when (state) {
-    BikeConnectionState.Disconnected,
-    is BikeConnectionState.Failed,
-    -> false
-
-    is BikeConnectionState.Connecting,
-    is BikeConnectionState.Authenticating,
-    is BikeConnectionState.Connected,
-    -> true
-}
-
-/**
- * Android refuses a service start outright in several background states, and the refusal is an
- * exception rather than a return value. Callers need "did it start", not a crash.
- */
 private fun startSafely(intent: Intent, start: () -> Unit): Boolean = runCatching {
     start()
     true

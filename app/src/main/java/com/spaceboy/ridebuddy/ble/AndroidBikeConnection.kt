@@ -94,9 +94,8 @@ internal class AndroidBikeConnection(
     private var sawAnyValue = false
 
     override val connectionState: StateFlow<BikeConnectionState> = mutableState.asStateFlow()
-    override val rawTelemetry = telemetryStream.rawTelemetry
-    override val telemetry = telemetryStream.telemetry
-    override val latestTelemetryReading = telemetryStream.latestReading
+    override val readings = telemetryStream.readings
+    override val latestReading = telemetryStream.latestReading
     override val identity = identityRepository.identity
     override val diagnostics: StateFlow<BleDiagnostics> = mutableDiagnostics.asStateFlow()
     override val controls: SharedFlow<BikeControlEvent> = mutableControls
@@ -117,6 +116,8 @@ internal class AndroidBikeConnection(
             }
             this@AndroidBikeConnection.target = target
             identityRepository.select(target.address)
+            // Reported before anything suspends, so an observer never sees the idle state between.
+            mutableState.value = BikeConnectionState.Connecting(target.deviceName, 1, MaxConnectionAttempts)
             session?.cancel()
             closeLink()
             session = scope.launch { runSession(target) }

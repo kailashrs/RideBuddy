@@ -13,7 +13,6 @@ import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GuidanceOutput
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
 import com.spaceboy.ridebuddy.core.navigation.NavigationController
-import kotlinx.coroutines.flow.filter
 import com.spaceboy.ridebuddy.core.security.SecureNavigationApiKeyStore
 import com.spaceboy.ridebuddy.core.tft.ClusterDisplay
 import com.spaceboy.ridebuddy.core.tft.StationaryTftValidator
@@ -22,7 +21,6 @@ import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
 import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
-import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.service.NotificationIcons
 import com.spaceboy.ridebuddy.data.LegacyRideImporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
@@ -34,28 +32,16 @@ import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.core.alerts.RidingAlertMonitor
 import com.spaceboy.ridebuddy.core.alerts.WeatherAlertProvider
 import com.spaceboy.ridebuddy.domain.BikeConnection
-import com.spaceboy.ridebuddy.domain.BikeConnectionState
-import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Manual dependency graph for the whole process, plus the wiring between its parts.
- *
- * Hand-rolled rather than generated: the graph is a single flat set of process-scoped
- * singletons in a fixed construction order, which a DI framework would not simplify.
- *
- * The `init` block is the more interesting half. It connects components that must not
- * depend on each other directly — the navigation feed to the cluster bridge, handlebar
- * controls to navigation, settings to the diagnostics recorders — so each stays testable in
- * isolation and this file is the one place the app's cross-cutting behaviour is described.
+ * The process's dependency graph: one flat set of process-scoped singletons in a fixed
+ * construction order, which a DI framework would not simplify.
  */
 class AppContainer(context: Context) {
     /**
@@ -166,14 +152,6 @@ class AppContainer(context: Context) {
                 .map { it.persistConnectionDiagnostics }
                 .distinctUntilChanged()
                 .collect(connectionEventJournal::setPersistenceEnabled)
-        }
-        applicationScope.launch {
-            // A lost link ends the session's phone-side alerts; brief reconnects keep them.
-            bikeConnection.connectionState
-                .map { it is BikeConnectionState.Failed || it is BikeConnectionState.Disconnected }
-                .distinctUntilChanged()
-                .filter { it }
-                .collect { ridingAlertMonitor.clearPendingBikeOutput() }
         }
         notificationIcons.start(appContext, applicationScope)
         rideRecorder.start()

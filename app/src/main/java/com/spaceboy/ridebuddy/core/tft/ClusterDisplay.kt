@@ -313,7 +313,7 @@ class ClusterDisplay(
         }
         // The first telemetry frame is the other sign the cluster's side is up.
         scope.launch {
-            connection.telemetry.collect { frame -> if (frame != null && transportReady) callReady.value = true }
+            connection.latestReading.collect { reading -> if (reading != null && transportReady) callReady.value = true }
         }
         scope.launch {
             var wasActive = false

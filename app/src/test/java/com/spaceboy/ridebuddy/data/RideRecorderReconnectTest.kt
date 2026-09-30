@@ -2,11 +2,10 @@ package com.spaceboy.ridebuddy.data
 
 import androidx.room.Room
 import com.spaceboy.ridebuddy.InMemoryDataStore
-import androidx.test.core.app.ApplicationProvider
 import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
 import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
 import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.domain.BikeConnection
@@ -104,9 +103,8 @@ class RideRecorderReconnectTest {
 private class RecordingBikeConnection : BikeConnection {
     override val connectionState = MutableStateFlow<BikeConnectionState>(BikeConnectionState.Disconnected)
     val raw = MutableSharedFlow<TelemetryReading>(extraBufferCapacity = 16)
-    override val rawTelemetry: SharedFlow<TelemetryReading> = raw
-    override val telemetry: StateFlow<TelemetryFrame?> = MutableStateFlow(null)
-    override val latestTelemetryReading: StateFlow<TelemetryReading?> = MutableStateFlow(null)
+    override val readings: SharedFlow<TelemetryReading> = raw
+    override val latestReading: StateFlow<TelemetryReading?> = MutableStateFlow(null)
     override val identity: StateFlow<BikeIdentity> = MutableStateFlow(BikeIdentity())
     override val diagnostics: StateFlow<BleDiagnostics> = MutableStateFlow(BleDiagnostics())
     override val controls: SharedFlow<BikeControlEvent> = MutableSharedFlow()

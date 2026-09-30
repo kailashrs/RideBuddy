@@ -2,7 +2,7 @@ package com.spaceboy.ridebuddy.core.tft
 
 import com.google.android.libraries.mapsplatform.turnbyturn.model.Maneuver
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
@@ -353,12 +353,11 @@ private class RecordingConnection(
     val writes = mutableListOf<Write>()
     override val connectionState: StateFlow<BikeConnectionState> =
         MutableStateFlow(BikeConnectionState.Connected("RS 457", null))
-    override val rawTelemetry: SharedFlow<TelemetryReading> = MutableSharedFlow()
-    override val telemetry: StateFlow<TelemetryFrame?> = MutableStateFlow(null)
+    override val readings: SharedFlow<TelemetryReading> = MutableSharedFlow()
     private val mutableLatestTelemetryReading = MutableStateFlow<TelemetryReading?>(
         reading(speedKph = 0.0, receivedAtElapsedRealtime = receivedAtElapsedRealtime),
     )
-    override val latestTelemetryReading: StateFlow<TelemetryReading?> = mutableLatestTelemetryReading
+    override val latestReading: StateFlow<TelemetryReading?> = mutableLatestTelemetryReading
     override val identity: StateFlow<BikeIdentity> = MutableStateFlow(BikeIdentity())
     override val diagnostics: StateFlow<BleDiagnostics> = MutableStateFlow(BleDiagnostics(authenticated = true))
     override val controls: SharedFlow<BikeControlEvent> = MutableSharedFlow()

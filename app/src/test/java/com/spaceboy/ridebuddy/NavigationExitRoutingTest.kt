@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy
 
-import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

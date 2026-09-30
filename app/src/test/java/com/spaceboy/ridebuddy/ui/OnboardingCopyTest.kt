@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -13,9 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import java.io.File
 import org.junit.Assert.assertTrue

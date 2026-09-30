@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.domain
 
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import android.net.MacAddress
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -43,20 +42,6 @@ data class BikeWrite(
 }
 
 /**
- * A telemetry frame with both clocks attached.
- *
- * [receivedAtMillis] is wall-clock, for recording and display. [receivedAtElapsedRealtime]
- * is monotonic, and is the one to use for freshness: wall-clock time can jump backwards on
- * a time-zone or NTP correction, which would make a current reading look arbitrarily old
- * and trip a staleness check for reasons that have nothing to do with the bike.
- */
-data class TelemetryReading(
-    val frame: TelemetryFrame,
-    val receivedAtMillis: Long,
-    val receivedAtElapsedRealtime: Long,
-)
-
-/**
  * The app's whole view of the motorcycle link.
  *
  * An interface so everything above it — recording, display bridges, the UI — can be
@@ -65,11 +50,11 @@ data class TelemetryReading(
  */
 interface BikeConnection {
     val connectionState: StateFlow<BikeConnectionState>
-    /** Every valid frame, without StateFlow equality conflation. UI consumers should use [telemetry]. */
-    val rawTelemetry: SharedFlow<TelemetryReading>
-    val telemetry: StateFlow<TelemetryFrame?>
-    /** Unthrottled frame and receipt times for freshness-sensitive decisions. */
-    val latestTelemetryReading: StateFlow<TelemetryReading?>
+    /** Every valid frame, without StateFlow conflation, for recording. */
+    val readings: SharedFlow<TelemetryReading>
+
+    /** The newest frame, or null when the link has none. */
+    val latestReading: StateFlow<TelemetryReading?>
     val identity: StateFlow<BikeIdentity>
     val diagnostics: StateFlow<BleDiagnostics>
     val controls: SharedFlow<BikeControlEvent>

@@ -20,7 +20,7 @@ class TelemetryFrameTest {
             0x23,
         )
 
-        val frame = requireNotNull(TelemetryFrame.parse(payload))
+        val frame = requireNotNull(parseTelemetryFrame(payload))
 
         assertEquals(72.0, frame.speedKilometresPerHour, 0.001)
         assertEquals(38, frame.throttlePercent)
@@ -32,7 +32,7 @@ class TelemetryFrameTest {
     fun `accepts the nine bytes consumed by the OEM parser`() {
         val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 20, 0x10, 0x27, 0x00, 0x00)
 
-        val frame = requireNotNull(TelemetryFrame.parse(payload))
+        val frame = requireNotNull(parseTelemetryFrame(payload))
 
         assertEquals(1.0, frame.speedKilometresPerHour, 0.001)
         assertEquals(10_000L, frame.engineRpm)
@@ -42,19 +42,19 @@ class TelemetryFrameTest {
     fun `ignores trailing bytes not consumed by the OEM parser`() {
         val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 20, 0x10, 0x27, 0x00, 0x00, 0x7F, 0x55)
 
-        assertEquals(1.0, requireNotNull(TelemetryFrame.parse(payload)).speedKilometresPerHour, 0.001)
+        assertEquals(1.0, requireNotNull(parseTelemetryFrame(payload)).speedKilometresPerHour, 0.001)
     }
 
     @Test
     fun `treats zero mileage as unavailable`() {
         val payload = byteArrayOf(0x10, 0x64, 0x00, 10, 0, 0x10, 0x27, 0x00, 0x00)
 
-        assertNull(requireNotNull(TelemetryFrame.parse(payload)).instantaneousMileageKilometresPerLitre)
+        assertNull(requireNotNull(parseTelemetryFrame(payload)).instantaneousMileageKilometresPerLitre)
     }
 
     @Test
     fun `rejects a short frame or wrong header`() {
-        assertNull(TelemetryFrame.parse(ByteArray(8)))
-        assertNull(TelemetryFrame.parse(ByteArray(9)))
+        assertNull(parseTelemetryFrame(ByteArray(8)))
+        assertNull(parseTelemetryFrame(ByteArray(9)))
     }
 }

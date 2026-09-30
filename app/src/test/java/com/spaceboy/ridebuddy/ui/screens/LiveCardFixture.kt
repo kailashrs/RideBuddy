@@ -1,7 +1,7 @@
 package com.spaceboy.ridebuddy.ui.screens
 
 import androidx.compose.runtime.Composable
-import com.spaceboy.ridebuddy.ble.TelemetryFrame
+import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.DistanceUnits
