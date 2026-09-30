@@ -50,3 +50,28 @@ private fun estimatePacketGapPercent(samples: List<RideSample>): Int? {
 
 /** Below this, the median interval is not a meaningful baseline. */
 private const val MinimumPacketGapSamples = 4
+
+private const val StandardGravity = 9.80665
+
+/** Weight of each new sample in the acceleration reading; the OEM app's own smoothing. */
+private const val AccelerationSmoothing = 0.2
+
+/**
+ * The next smoothed longitudinal acceleration, in g, from wheel-speed change. Unclamped: the
+ * gauge caps it at ±1 g for display, while ride peaks keep the real figure.
+ */
+internal fun nextAccelerationG(previousG: Double, sample: RideSample): Double =
+    previousG + AccelerationSmoothing * (sample.accelerationMetresPerSecondSquared / StandardGravity - previousG)
+
+/** A ride's strongest smoothed acceleration and braking, in g; braking as a positive figure. */
+internal fun List<RideSample>.accelerationPeaks(): Pair<Double?, Double?> {
+    var g = 0.0
+    var peakAcceleration: Double? = null
+    var peakBraking: Double? = null
+    forEach { sample ->
+        g = nextAccelerationG(g, sample)
+        if (g > 0.0) peakAcceleration = maxOf(peakAcceleration ?: 0.0, g)
+        if (g < 0.0) peakBraking = maxOf(peakBraking ?: 0.0, -g)
+    }
+    return peakAcceleration to peakBraking
+}

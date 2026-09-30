@@ -20,6 +20,7 @@ import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.calculateLiveRideMetrics
+import com.spaceboy.ridebuddy.data.nextAccelerationG
 import com.spaceboy.ridebuddy.core.navigation.NavigationFeedRepository
 import com.spaceboy.ridebuddy.core.navigation.ConfigureResult
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -97,6 +99,10 @@ class MainViewModel internal constructor(
         .map(::calculateLiveRideMetrics)
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveRideMetrics())
+    val accelerationG: StateFlow<Double> = rideRecorder.liveSampleEvents
+        .runningFold(0.0) { g, sample -> nextAccelerationG(g, sample) }
+        .map { it.coerceIn(-1.0, 1.0) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.0)
     val rides = rideRepository.rides
     val guidance = navigationFeed.guidance
     val settings = appSettings.settings

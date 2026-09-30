@@ -111,6 +111,11 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Contacts are what turn a caller's number into their name on the cluster. */
+    private val contactsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
     private val appNotificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -139,7 +144,14 @@ class MainActivity : ComponentActivity() {
             val settingsActions = remember {
                 MoreSettingsActions(
                     onNotificationPackageChanged = viewModel::setNotificationPackageEnabled,
-                    onCallerDisplayChanged = viewModel::setCallerDisplay,
+                    onCallerDisplayChanged = { enabled ->
+                        viewModel.setCallerDisplay(enabled)
+                        if (enabled && checkSelfPermission(Manifest.permission.READ_CONTACTS) !=
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
+                            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                        }
+                    },
                     onTftCallControlsChanged = viewModel::setTftCallControls,
                     onRideStartSpeedChanged = viewModel::setRideStartSpeed,
                     onRideStopSpeedChanged = viewModel::setRideStopSpeed,
@@ -248,6 +260,7 @@ class MainActivity : ComponentActivity() {
                 activeRide = viewModel.activeRide,
                 rideSamples = viewModel.liveRideSamples,
                 rideMetrics = viewModel.liveRideMetrics,
+                accelerationG = viewModel.accelerationG,
             )
         }
         MainScreenContent(

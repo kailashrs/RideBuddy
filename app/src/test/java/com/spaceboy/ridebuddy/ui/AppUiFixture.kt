@@ -19,7 +19,7 @@ internal object AppUiFixture {
         28.6, 28.6, 82.0, 4500.0, 8000, 28.0, 1.1, startArea = "Home", endArea = "Marina Beach")
     val live = LiveTelemetryStreams(MutableStateFlow(LiveCardFixture.Frame), MutableStateFlow(BleDiagnostics()),
         MutableStateFlow(LiveCardFixture.recording()),
-        MutableStateFlow(emptyList()), MutableStateFlow(LiveRideMetrics()))
+        MutableStateFlow(emptyList()), MutableStateFlow(LiveRideMetrics()), MutableStateFlow(0.12))
     fun state(ui: MainUiState) = MainScreenState(
         uiState = ui,
         connectionState = BikeConnectionState.Connected("Aprilia RS 457", -60),

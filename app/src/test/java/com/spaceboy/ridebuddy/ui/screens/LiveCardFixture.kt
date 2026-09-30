@@ -90,6 +90,7 @@ internal object LiveCardFixture {
                 activeRide = MutableStateFlow(ride),
                 rideSamples = MutableStateFlow(samples),
                 rideMetrics = MutableStateFlow(calculateLiveRideMetrics(samples)),
+                accelerationG = MutableStateFlow(-0.35),
             ),
             lastRide = null,
             guidance = guidance,

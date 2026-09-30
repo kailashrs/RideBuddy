@@ -257,7 +257,8 @@ private fun TelemetrySection(
     if (connectionState !is BikeConnectionState.Connected) return
     val frame = live.telemetry.collectAsStateWithLifecycle().value ?: return
     val activeRide = live.activeRide.collectAsStateWithLifecycle().value
-    TelemetryCard(frame, activeRide, units, onDetails, onEndRide)
+    val accelerationG = live.accelerationG.collectAsStateWithLifecycle().value
+    TelemetryCard(frame, activeRide, accelerationG, units, onDetails, onEndRide)
 }
 
 /**
@@ -335,6 +336,7 @@ internal fun ConnectionCard(
 private fun TelemetryCard(
     frame: TelemetryFrame,
     activeRide: ActiveRide?,
+    accelerationG: Double,
     units: DistanceUnits,
     onDetails: () -> Unit,
     onEndRide: () -> Unit,
@@ -396,6 +398,14 @@ private fun TelemetryCard(
                 fraction = frame.throttlePercent / 100f,
                 color = MaterialTheme.colorScheme.secondary,
                 reading = "${frame.throttlePercent} percent",
+            )
+            // Braking and accelerating read the same way, so the direction is in the colour.
+            Gauge(
+                label = if (accelerationG < 0) "Braking" else "Acceleration",
+                value = "%.2f g".format(locale, kotlin.math.abs(accelerationG)),
+                fraction = kotlin.math.abs(accelerationG).toFloat(),
+                color = if (accelerationG < 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
+                reading = "%.2f g %s".format(locale, kotlin.math.abs(accelerationG), if (accelerationG < 0) "braking" else "acceleration"),
             )
             // Stacks rather than clips at large display scales.
             FlowRow(

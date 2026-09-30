@@ -1,5 +1,8 @@
 package com.spaceboy.ridebuddy.core.navigation
 
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -13,6 +16,8 @@ import org.junit.Test
  * seconds path, neither of which the parser read, so both fell through to the geocoder with
  * the whole URL as the query and came back "could not find that destination".
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class SharedMapsLinkTest {
     @Test
     fun namedPlaceKeepsItsNameAlongsideExactCoordinates() {
@@ -191,5 +196,20 @@ class SharedMapsLinkTest {
     @Test
     fun aTypedAddressIsPassedThroughUntouched() {
         assertEquals("100 Feet Road, Indiranagar", geocodableText("  100 Feet Road, Indiranagar  "))
+    }
+
+    @Test
+    fun parsesPercentEncodedCoordinatesWithoutGeocoding() {
+        val destination = directNavigationDestination(
+            "https://www.google.com/maps/dir/?api=1&destination=12.9716%2C77.5946",
+        )
+
+        assertEquals(12.9716, destination?.latitude ?: 0.0, 0.0)
+        assertEquals(77.5946, destination?.longitude ?: 0.0, 0.0)
+    }
+
+    @Test
+    fun rejectsOutOfRangeEncodedCoordinates() {
+        assertNull(directNavigationDestination("https://www.google.com/maps/search/?api=1&query=91.0%2C181.0"))
     }
 }

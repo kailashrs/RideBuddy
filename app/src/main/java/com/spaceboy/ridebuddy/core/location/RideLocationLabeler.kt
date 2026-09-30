@@ -14,7 +14,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * Turns coordinates into a short place name for ride history — "Camden, London" rather
  * than a latitude and longitude the rider has to decode.
  */
-class RideLocationLabeler internal constructor(private val geocoder: Geocoder) {
+class RideLocationLabeler(val geocoder: Geocoder) {
     constructor(context: Context) : this(Geocoder(context.applicationContext, Locale.getDefault()))
 
     /** Coordinates are a last resort; a later visit to the ride can retry the name lookup. */
@@ -23,34 +23,40 @@ class RideLocationLabeler internal constructor(private val geocoder: Geocoder) {
         return placeName(latitude, longitude) ?: "%.4f, %.4f".format(Locale.US, latitude, longitude)
     }
 
-    /** Optional enrichment: failure must not prevent navigation to known coordinates. */
-    suspend fun placeName(latitude: Double, longitude: Double): String? {
-        val address = try {
-            withTimeoutOrNull(GeocoderTimeoutMillis.milliseconds) {
-                suspendCancellableCoroutine<Address?> { continuation ->
-                    geocoder.getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
-                        override fun onGeocode(addresses: MutableList<Address>) {
-                            if (continuation.isActive) continuation.resume(addresses.firstOrNull())
-                        }
-
-                        override fun onError(errorMessage: String?) {
-                            if (continuation.isActive) continuation.resume(null)
-                        }
-                    })
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
-        return address?.shortPlaceLabel()
-    }
-
-    private companion object {
-        const val GeocoderTimeoutMillis = 5_000L
-    }
+    /** Optional enrichment: a failed or slow lookup yields null rather than an error. */
+    suspend fun placeName(latitude: Double, longitude: Double): String? =
+        geocoder.awaitAddress(GeocoderTimeoutMillis) { listener -> getFromLocation(latitude, longitude, 1, listener) }
+            ?.shortPlaceLabel()
 }
+
+/**
+ * The first address from one of the listener-based [Geocoder] calls, or null on error, no
+ * result, or [timeoutMillis]. The blocking overloads are deprecated and have no timeout.
+ */
+internal suspend fun Geocoder.awaitAddress(
+    timeoutMillis: Long,
+    request: Geocoder.(Geocoder.GeocodeListener) -> Unit,
+): Address? = try {
+    withTimeoutOrNull(timeoutMillis.milliseconds) {
+        suspendCancellableCoroutine { continuation ->
+            request(object : Geocoder.GeocodeListener {
+                override fun onGeocode(addresses: MutableList<Address>) {
+                    if (continuation.isActive) continuation.resume(addresses.firstOrNull())
+                }
+
+                override fun onError(errorMessage: String?) {
+                    if (continuation.isActive) continuation.resume(null)
+                }
+            })
+        }
+    }
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    null
+}
+
+private const val GeocoderTimeoutMillis = 5_000L
 
 /** Some providers return a road or address without locality fields. Use it before coordinates. */
 internal fun Address.shortPlaceLabel(): String? {

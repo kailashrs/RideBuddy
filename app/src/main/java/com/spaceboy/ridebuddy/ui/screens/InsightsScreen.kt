@@ -122,6 +122,8 @@ fun InsightsScreen(
                 InsightMetric("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
                 insights.bestZeroToSixtyMillis?.let { InsightMetric("0–60 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
                 insights.bestZeroToHundredMillis?.let { InsightMetric("0–100 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                insights.peakAccelerationG?.let { InsightMetric("Peak acceleration", "%.2f g".format(locale, it), Icons.Outlined.Speed) },
+                insights.peakBrakingG?.let { InsightMetric("Peak braking", "%.2f g".format(locale, it), Icons.Outlined.Speed) },
             ),
         )
     }

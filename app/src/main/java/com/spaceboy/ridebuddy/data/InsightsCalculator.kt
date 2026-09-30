@@ -82,6 +82,8 @@ object InsightsCalculator {
             distanceChangePercent = distanceChange,
             bestZeroToSixtyMillis = current.mapNotNull(Ride::zeroToSixtyMillis).minOrNull(),
             bestZeroToHundredMillis = current.mapNotNull(Ride::zeroToHundredMillis).minOrNull(),
+            peakAccelerationG = current.mapNotNull(Ride::peakAccelerationG).maxOrNull(),
+            peakBrakingG = current.mapNotNull(Ride::peakBrakingG).maxOrNull(),
             distanceTrendKilometres = current
                 .sortedBy(Ride::startedAtMillis)
                 .takeLast(DistanceTrendRides)

@@ -36,8 +36,12 @@ internal class LegacyRideImporter(
                 Log.w(LogTag, "Legacy ride database is version ${legacy.version}; only $SupportedVersion is imported")
                 return 0
             }
-            val rides = legacy.readRides()
-            val series = legacy.readSampleSeries(rides.associate { it.id to it.startedAtMillis })
+            val series = legacy.readSampleSeries(legacy.startTimes())
+            // Peaks did not exist before 1.1; they are derived from whatever samples survived.
+            val rides = legacy.readRides().map { ride ->
+                val (acceleration, braking) = series[ride.id]?.samples.orEmpty().accelerationPeaks()
+                ride.copy(peakAccelerationG = acceleration, peakBrakingG = braking)
+            }
             try {
                 history.withTransaction { history.rides().insertAll(rides) }
                 sampleStore.withTransaction {
@@ -75,6 +79,11 @@ internal class LegacyRideImporter(
     private class LegacySeries(val startedAtMillis: Long, val samples: List<RideSample>) {
         fun series(rideId: Long) = RideSampleSeries(rideId, startedAtMillis, encodeSampleSeries(startedAtMillis, samples))
     }
+
+    private fun SQLiteDatabase.startTimes(): Map<Long, Long> =
+        rawQuery("SELECT id, started_at FROM rides", null).use { cursor ->
+            buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), cursor.getLong(1)) }
+        }
 
     private fun SQLiteDatabase.readRides(): List<Ride> =
         rawQuery("SELECT * FROM rides ORDER BY id", null).use { cursor ->

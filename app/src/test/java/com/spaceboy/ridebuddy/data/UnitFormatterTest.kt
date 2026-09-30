@@ -1,5 +1,9 @@
 package com.spaceboy.ridebuddy.data
 
+import org.junit.Assert.assertNull
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -7,6 +11,8 @@ import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class UnitFormatterTest {
     @Test
     fun convertsMetricTelemetryToImperial() {

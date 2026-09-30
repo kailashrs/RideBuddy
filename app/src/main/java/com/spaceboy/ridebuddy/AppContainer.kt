@@ -25,7 +25,7 @@ import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
 import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
-import com.spaceboy.ridebuddy.service.NotificationIconWriter
+import com.spaceboy.ridebuddy.service.NotificationIcons
 import com.spaceboy.ridebuddy.data.LegacyRideImporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
@@ -90,11 +90,11 @@ class AppContainer(context: Context) {
         onAttemptsExhausted = bikeConnectionDemand::onConnectionAttemptsExhausted,
     )
     val rideLocationTracker = RideLocationTracker(context)
+    private val rideLocationLabeler = RideLocationLabeler(context)
     private val rideHistoryDatabase = RideHistoryDatabase.open(context)
     private val rideSamplesDatabase = RideSamplesDatabase.open(context)
     val rideRepository = RideRepository(rideHistoryDatabase, rideSamplesDatabase, applicationScope)
     val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, bikeIdentityRepository)
-    private val rideLocationLabeler = RideLocationLabeler(context)
     val rideRecorder = RideRecorder(
         bikeConnection,
         rideRepository,
@@ -121,7 +121,7 @@ class AppContainer(context: Context) {
         loadKey = navigationApiKeyStore::load,
         configureKey = navigationSdkGateway::configureIfNeeded,
     )
-    val destinationParser = DestinationParser(context)
+    val destinationParser = DestinationParser(rideLocationLabeler)
     val navigationFeed = NavigationFeedRepository()
     internal val navigationStartStopGuard = NavigationStartStopGuard()
     val tftNavigationBridge = TftNavigationBridge(bikeConnection, appSettings.settings, applicationScope)
@@ -146,10 +146,7 @@ class AppContainer(context: Context) {
             ?: 0
     }
     val stationaryTftValidator = StationaryTftValidator(bikeConnection, phoneBatteryPercent)
-    internal val notificationIconWriter = NotificationIconWriter(
-        batteryPercent = phoneBatteryPercent,
-        write = { payload -> bikeConnection.enqueueWrite(BleCharacteristics.AppEvent, payload) },
-    )
+    internal val notificationIcons = NotificationIcons(bikeConnection, appSettings.settings, phoneBatteryPercent)
     val callBridge = CallBridge(context, bikeConnection, appSettings, applicationScope)
     val tftPriorityCoordinator =
         TftPriorityCoordinator(navigationFeed, callBridge, tftNavigationBridge, applicationScope)
@@ -210,10 +207,6 @@ class AppContainer(context: Context) {
                 if (event is BikeControlEvent.ClusterReady) {
                     connectionEventJournal.record("Cluster reported ready; resending navigation and app events")
                     tftNavigationBridge.republishLast()
-                    // Clear *and* re-light: the cluster has forgotten what it was showing, so a
-                    // bare clear would leave still-live notifications with no icon until each
-                    // one is dismissed and replaced.
-                    notificationIconWriter.clearAndReplay()
                 }
                 if (event is BikeControlEvent.ExitNavigation) {
                     connectionEventJournal.record("Handlebar exit; stopping navigation")
@@ -240,7 +233,6 @@ class AppContainer(context: Context) {
                 // Brief reconnection attempts preserve the ride. A terminal session discards
                 // every app-side queue, including timers that could otherwise replay old alerts.
                 callBridge.clearPendingBikeOutput()
-                notificationIconWriter.clearPendingBikeOutput()
                 tftPriorityCoordinator.clearPendingBikeOutput()
                 ridingAlertMonitor.clearPendingBikeOutput()
                 navigationFeed.clear()
@@ -251,6 +243,7 @@ class AppContainer(context: Context) {
                 }
             }
         }
+        notificationIcons.start(appContext, applicationScope)
         rideRecorder.start()
         rideHistoryMaintenance.start()
         ridingAlertMonitor.start()

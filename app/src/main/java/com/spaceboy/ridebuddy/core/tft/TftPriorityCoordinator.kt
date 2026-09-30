@@ -88,12 +88,6 @@ class TftPriorityCoordinator(
         }
     }
 
-    /** Whether a notification icon may be shown right now. */
-    fun canPresentNotification(): Boolean {
-        if (synchronized(activeAlerts) { TextAlertKey in activeAlerts }) return false
-        return presentationWindowAvailable()
-    }
-
     private fun presentationWindowAvailable(): Boolean {
         val guidance = navigationFeed.guidance.value
         return tftNotificationAllowed(
@@ -101,41 +95,6 @@ class TftPriorityCoordinator(
             navigationActive = guidance.active,
             distanceToManeuverMetres = guidance.distanceToManeuverMetres,
         )
-    }
-
-    /**
-     * Registers a notification that has been put on the display, so it can be cleared again.
-     *
-     * The timer is created lazily and only started once the alert is actually accepted;
-     * building it first keeps the whole accept-or-reject decision inside a single locked
-     * section. A rejected alert has its `onExpire` invoked immediately so the caller's
-     * cleanup runs on every path.
-     */
-    fun notificationPresented(eventId: Int, onExpire: () -> Unit) {
-        val job = scope.launch(start = CoroutineStart.LAZY) {
-            delay(AlertDurationMillis.milliseconds)
-            expireAlert(notificationKey(eventId))
-        }
-        var accepted = false
-        val previous = synchronized(activeAlerts) {
-            if (canPresentNotification()) {
-                accepted = true
-                activeAlerts.put(notificationKey(eventId), ActiveAlert(job, onExpire))
-            } else null
-        }
-        if (!accepted) {
-            job.cancel()
-            onExpire()
-            return
-        }
-        previous?.job?.cancel()
-        job.start()
-    }
-
-    /** The source notification is gone — drop its alert and give the display back. */
-    fun notificationRemoved(eventId: Int) {
-        synchronized(activeAlerts) { activeAlerts.remove(notificationKey(eventId)) }?.job?.cancel()
-        resumeNavigationIfAllowed()
     }
 
     /**
@@ -207,8 +166,6 @@ class TftPriorityCoordinator(
     private fun resumeNavigationIfAllowed() {
         if (!calls.state.value.active) navigationBridge.republishLast()
     }
-
-    private fun notificationKey(eventId: Int): String = "notification:$eventId"
 
     private data class ActiveAlert(val job: Job, val onExpire: () -> Unit)
 

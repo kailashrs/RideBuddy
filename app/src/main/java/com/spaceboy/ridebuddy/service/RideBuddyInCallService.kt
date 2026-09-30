@@ -1,5 +1,9 @@
 package com.spaceboy.ridebuddy.service
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.ContactsContract
 import android.telecom.Call
 import android.telecom.InCallService
 import android.telecom.VideoProfile
@@ -28,6 +32,9 @@ import com.spaceboy.ridebuddy.core.calls.tftCallStateForTelecom
 class RideBuddyInCallService : InCallService() {
     private val callbacks = mutableMapOf<Call, Call.Callback>()
 
+    /** Looked up once per number while calls are live, not on every details change. */
+    private val contactNames = mutableMapOf<String, String?>()
+
     override fun onCallAdded(call: Call) {
         val callback = object : Call.Callback() {
             override fun onStateChanged(changed: Call, state: Int) = publish()
@@ -40,6 +47,7 @@ class RideBuddyInCallService : InCallService() {
 
     override fun onCallRemoved(call: Call) {
         callbacks.remove(call)?.let(call::unregisterCallback)
+        if (callbacks.isEmpty()) contactNames.clear()
         publish()
     }
 
@@ -64,16 +72,40 @@ class RideBuddyInCallService : InCallService() {
         appContainer.callBridge.onTelecomCallChanged(tracked)
     }
 
+    /**
+     * The saved contact's name where there is one. Telecom resolves it itself for apps that
+     * can read contacts; the direct lookup covers builds that withhold it from this service.
+     * The network-supplied name comes last: in many regions it is empty.
+     */
+    private fun Call.callerName(number: String?): String? =
+        details.contactDisplayName?.trim()?.takeIf(String::isNotEmpty)
+            ?: number?.let { contactNames.getOrPut(it) { lookUpContactName(it) } }
+            ?: details.callerDisplayName?.trim()?.takeIf(String::isNotEmpty)
+
+    private fun lookUpContactName(number: String): String? {
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        return runCatching {
+            contentResolver.query(
+                Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number)),
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull()?.trim()?.takeIf(String::isNotEmpty)
+    }
+
     private fun Call.toTrackedCall(): TrackedCall? {
         val incoming = details.callDirection != Call.Details.DIRECTION_OUTGOING
         val trackedState = tftCallStateForTelecom(details.state, incoming) ?: return null
         val handle = details.handle
+        val number = telecomCallerNumber(handle?.scheme, handle?.schemeSpecificPart)
         return TrackedCall(
             // Telecom's own call id is not public API. Creation time plus the handle is stable
             // for the life of a call and distinguishes it from the next one.
             id = "${details.creationTimeMillis}:${handle?.schemeSpecificPart.orEmpty()}",
-            callerName = details.callerDisplayName?.trim()?.takeIf { it.isNotEmpty() },
-            callerNumber = telecomCallerNumber(handle?.scheme, handle?.schemeSpecificPart),
+            callerName = callerName(number),
+            callerNumber = number,
             state = trackedState,
             answer = { runCatching { answer(VideoProfile.STATE_AUDIO_ONLY) } },
             // reject() is only legal while ringing; disconnect() is what "end this call"

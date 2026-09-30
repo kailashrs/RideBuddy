@@ -514,6 +514,8 @@ internal fun RideDetailContent(
                         "Peak RPM" to ride.maximumRpm.toString(),
                         ride.zeroToSixtyMillis?.let { "0–60 km/h" to "%.1f s".format(locale, it / 1_000.0) },
                         ride.zeroToHundredMillis?.let { "0–100 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+                        ride.peakAccelerationG?.let { "Peak acceleration" to "%.2f g".format(locale, it) },
+                        ride.peakBrakingG?.let { "Peak braking" to "%.2f g".format(locale, it) },
                     )
                     metrics.chunked(2).forEach { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

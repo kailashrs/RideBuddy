@@ -1,7 +1,8 @@
 package com.spaceboy.ridebuddy.data
 
 import android.content.Context
-import androidx.compose.runtime.Immutable
+import android.icu.util.LocaleData
+import android.icu.util.ULocale
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.DataStoreFactory
@@ -30,11 +31,14 @@ enum class DistanceUnits {
     Imperial;
 
     companion object {
-        /** Road distance and speed defaults. A saved preference always takes precedence. */
-        fun defaultFor(locale: Locale): DistanceUnits = when (locale.country.uppercase(Locale.ROOT)) {
-            "US", "GB", "LR", "MM" -> Imperial
-            else -> Metric
-        }
+        /** The locale's road units, from ICU. A saved preference always takes precedence. */
+        fun defaultFor(locale: Locale): DistanceUnits =
+            if (measurementSystem(locale) == LocaleData.MeasurementSystem.SI) Metric else Imperial
+
+        /** Whether the locale's gallon is the US one; the UK's is about 20% larger. */
+        fun usesUsGallons(locale: Locale): Boolean = measurementSystem(locale) == LocaleData.MeasurementSystem.US
+
+        private fun measurementSystem(locale: Locale) = LocaleData.getMeasurementSystem(ULocale.forLocale(locale))
     }
 }
 enum class ThemeMode { System, Light, Dark }
@@ -73,10 +77,10 @@ enum class SampleRetention(val days: Int?, val label: String) {
  * vehicle ([callerDisplay], [tftCallControls], [tftNavigationOutputEnabled]) and everything
  * touching diagnostics capture is off until the rider turns it on.
  */
-@Immutable
 @Serializable
 data class AppSettings(
-    val distanceUnits: DistanceUnits = DistanceUnits.defaultFor(Locale.getDefault()),
+    /** The store's default value replaces this with the locale's units; see [AppSettingsRepository]. */
+    val distanceUnits: DistanceUnits = DistanceUnits.Metric,
     val voiceGuidance: Boolean = true,
     val avoidTolls: Boolean = false,
     val avoidHighways: Boolean = false,
@@ -139,7 +143,10 @@ class AppSettingsRepository(
 
         fun create(context: Context, scope: CoroutineScope): AppSettingsRepository = AppSettingsRepository(
             DataStoreFactory.create(
-                serializer = JsonSerializer(AppSettings.serializer(), AppSettings()),
+                serializer = JsonSerializer(
+                    AppSettings.serializer(),
+                    AppSettings(distanceUnits = DistanceUnits.defaultFor(Locale.getDefault())),
+                ),
                 migrations = listOf(legacySettingsMigration(context)),
                 scope = CoroutineScope(scope.coroutineContext + Dispatchers.IO),
                 produceFile = { context.dataStoreFile(FileName) },

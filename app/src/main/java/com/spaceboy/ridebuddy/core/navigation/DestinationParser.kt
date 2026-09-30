@@ -1,22 +1,15 @@
 package com.spaceboy.ridebuddy.core.navigation
 
-import android.content.Context
-import android.location.Address
-import android.location.Geocoder
+import com.spaceboy.ridebuddy.core.location.awaitAddress
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.util.Locale
-import kotlin.coroutines.resume
-import kotlin.time.Duration.Companion.milliseconds
 
 data class NavigationDestination(val latitude: Double, val longitude: Double, val title: String)
 
@@ -30,8 +23,7 @@ data class NavigationDestination(val latitude: Double, val longitude: Double, va
  * all. Only a recognised short link is expanded, and only then is geocoding used. Every
  * network step is deadline-bounded, because this runs while a rider is waiting to set off.
  */
-class DestinationParser(context: Context) {
-    private val appContext = context.applicationContext
+class DestinationParser(private val labeler: RideLocationLabeler) {
 
     /** Resolves [rawValue] to a destination, or fails with a rider-readable reason. */
     suspend fun parse(rawValue: String): Result<NavigationDestination> = try {
@@ -48,7 +40,7 @@ class DestinationParser(context: Context) {
         val namedDestination = if (destination.title == "Destination") {
             // Naming a pin is optional; do not hold up a valid route for a slow lookup.
             val name = withTimeoutOrNull(1_500L) {
-                RideLocationLabeler(appContext).placeName(destination.latitude, destination.longitude)
+                labeler.placeName(destination.latitude, destination.longitude)
             }
             destination.copy(title = name ?: destination.title)
         } else destination
@@ -63,41 +55,25 @@ class DestinationParser(context: Context) {
         URI(value).host?.lowercase(Locale.ROOT) in ShortLinkHosts
     }.getOrDefault(false)
 
-    private suspend fun expandWithinDeadline(value: String): String =
-        withTimeoutOrNull(MaxExpansionMillis) {
-            expand(value, System.nanoTime() + MaxExpansionMillis * NanosecondsPerMillisecond)
-        } ?: throw DestinationExpansionTimeoutException()
-
     /**
-     * Follows redirects manually to recover the full URL behind a short link.
-     *
-     * Manually rather than via `instanceFollowRedirects`, because each hop's timeout has to
-     * be recomputed from the shared deadline — otherwise a chain of slow redirects could
-     * each take the full timeout and blow well past it. The hop count is capped separately
-     * against a redirect loop.
+     * The full URL behind a short link. The platform follows the redirects; one deadline bounds
+     * the whole chain, and each connection's own timeouts bound a single stalled hop.
      */
-    private suspend fun expand(value: String, deadlineNanos: Long): String = withContext(Dispatchers.IO) {
-        var current = URL(value)
-        repeat(MaxRedirects) {
-            currentCoroutineContext().ensureActive()
-            val connection = current.openConnection() as HttpURLConnection
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = remainingExpansionTimeoutMillis(deadlineNanos)
-            connection.readTimeout = connection.connectTimeout
-            connection.setRequestProperty("User-Agent", "RideBuddy/1")
-            val location = try {
-                connection.connect()
-                currentCoroutineContext().ensureActive()
-                connection.readTimeout = remainingExpansionTimeoutMillis(deadlineNanos)
-                connection.getHeaderField("Location")
+    private suspend fun expandWithinDeadline(value: String): String = withTimeoutOrNull(MaxExpansionMillis) {
+        runInterruptible(Dispatchers.IO) {
+            val connection = URL(value).openConnection() as HttpURLConnection
+            try {
+                connection.instanceFollowRedirects = true
+                connection.connectTimeout = HopTimeoutMillis
+                connection.readTimeout = HopTimeoutMillis
+                connection.setRequestProperty("User-Agent", "RideBuddy/1")
+                connection.responseCode
+                connection.url.toString()
             } finally {
                 connection.disconnect()
             }
-            if (location.isNullOrBlank()) return@withContext current.toString()
-            current = URL(current, location)
         }
-        current.toString()
-    }
+    } ?: throw DestinationExpansionTimeoutException()
 
     /**
      * Last resort: ask the platform geocoder to resolve an address.
@@ -107,19 +83,8 @@ class DestinationParser(context: Context) {
      * there is no destination, and the rider needs the same message.
      */
     private suspend fun geocode(query: String): Result<NavigationDestination> {
-        val geocoder = Geocoder(appContext, Locale.getDefault())
-        val address = withTimeoutOrNull(TimeoutMillis.toLong().milliseconds) {
-            suspendCancellableCoroutine { continuation ->
-                geocoder.getFromLocationName(query, 1, object : Geocoder.GeocodeListener {
-                    override fun onGeocode(addresses: MutableList<Address>) {
-                        if (continuation.isActive) continuation.resume(addresses.firstOrNull())
-                    }
-
-                    override fun onError(errorMessage: String?) {
-                        if (continuation.isActive) continuation.resume(null)
-                    }
-                })
-            }
+        val address = labeler.geocoder.awaitAddress(TimeoutMillis) { listener ->
+            getFromLocationName(query, 1, listener)
         }
         return if (address == null) Result.failure(IllegalArgumentException("Could not find that destination"))
         else Result.success(
@@ -135,15 +100,12 @@ class DestinationParser(context: Context) {
         /** Hosts worth a network round trip to expand. Anything else is used as-is. */
         val ShortLinkHosts = setOf("maps.app.goo.gl", "goo.gl")
 
-        /** Redirect hops before giving up, against a loop. */
-        const val MaxRedirects = 5
-
         /** Geocoder deadline. */
-        const val TimeoutMillis = 8_000
+        const val TimeoutMillis = 8_000L
 
         /** Total budget for expanding a short link, across all its hops. */
         const val MaxExpansionMillis = 15_000L
-        const val NanosecondsPerMillisecond = 1_000_000L
+        const val HopTimeoutMillis = 8_000
     }
 }
 
@@ -158,21 +120,3 @@ internal class DestinationExpansionTimeoutException : IllegalArgumentException(
 internal class UnreadableLinkException : IllegalArgumentException(
     "That link doesn't say where to go. In Google Maps, open the place and share it again.",
 )
-
-/**
- * Timeout for the next redirect hop: whatever is left of the shared budget, capped.
- *
- * Rounded *up* and floored at 1 ms, because `HttpURLConnection` reads a timeout of zero as
- * "wait forever" — the exact opposite of what an almost-expired deadline means. An expired
- * deadline throws rather than returning a value.
- */
-internal fun remainingExpansionTimeoutMillis(
-    deadlineNanos: Long,
-    nowNanos: Long = System.nanoTime(),
-    maximumMillis: Int = 8_000,
-): Int {
-    val remainingNanos = deadlineNanos - nowNanos
-    if (remainingNanos <= 0L) throw DestinationExpansionTimeoutException()
-    val roundedUpMillis = (remainingNanos + 999_999L) / 1_000_000L
-    return roundedUpMillis.coerceAtMost(maximumMillis.toLong()).toInt().coerceAtLeast(1)
-}

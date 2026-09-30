@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.data
 
-import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -12,7 +11,6 @@ import androidx.room.PrimaryKey
  * [estimatedFuelLitres] is likewise nullable — it is accumulated from the vehicle's
  * reported mileage, which is not always available.
  */
-@Immutable
 @Entity(tableName = "rides")
 data class Ride(
     @PrimaryKey(autoGenerate = true) val id: Long,
@@ -36,6 +34,9 @@ data class Ride(
     val zeroToHundredMillis: Long? = null,
     /** Time covered by measured telemetry intervals; null for legacy records. */
     val telemetryDurationMillis: Long? = null,
+    /** Strongest smoothed acceleration and braking over the ride, in g. See [accelerationPeaks]. */
+    val peakAccelerationG: Double? = null,
+    val peakBrakingG: Double? = null,
 ) {
     /** Clamped at zero, so a clock adjustment mid-ride cannot produce a negative duration. */
     val durationMillis: Long get() = (endedAtMillis - startedAtMillis).coerceAtLeast(0)
@@ -98,7 +99,6 @@ enum class InsightPeriod(val days: Int?) {
  * when the period holds too little data — a change percentage needs a previous period to
  * compare against, and the acceleration bests need a ride that actually reached the speed.
  */
-@Immutable
 data class RideInsights(
     val rideCount: Int = 0,
     val totalDistanceKilometres: Double = 0.0,
@@ -115,6 +115,8 @@ data class RideInsights(
     val distanceChangePercent: Double? = null,
     val bestZeroToSixtyMillis: Long? = null,
     val bestZeroToHundredMillis: Long? = null,
+    val peakAccelerationG: Double? = null,
+    val peakBrakingG: Double? = null,
     /** Distance of the most recent rides in the period, oldest first, for the trend chart. */
     val distanceTrendKilometres: List<Double> = emptyList(),
 )

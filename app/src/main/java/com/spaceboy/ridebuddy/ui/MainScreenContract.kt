@@ -36,6 +36,8 @@ data class LiveTelemetryStreams(
     val activeRide: StateFlow<ActiveRide?>,
     val rideSamples: StateFlow<List<RideSample>>,
     val rideMetrics: StateFlow<LiveRideMetrics>,
+    /** Smoothed longitudinal acceleration in g, capped at ±1 g for the gauge. */
+    val accelerationG: StateFlow<Double>,
 )
 
 /**

@@ -1,7 +1,7 @@
 package com.spaceboy.ridebuddy.core.navigation
 
 import java.net.URI
-import java.net.URLDecoder
+import android.net.Uri
 
 // Reading a shared Maps link. Pure text in, coordinates or a searchable place name out; no
 // network, no Android. The network side of resolving a destination - expanding a short link
@@ -16,7 +16,7 @@ import java.net.URLDecoder
  * minutes and seconds come last because only a decoded link can contain them.
  */
 internal fun directNavigationDestination(value: String): NavigationDestination? {
-    val decoded = percentDecoded(value)
+    val decoded = Uri.decode(value)
     val coordinates = coordinateFromText(value)
         ?: coordinateFromText(extractNavigationQuery(value))
         ?: coordinateFromText(decoded)
@@ -27,8 +27,7 @@ internal fun directNavigationDestination(value: String): NavigationDestination? 
 
 /** Keep the shared place name even when the link also supplies exact coordinates. */
 internal fun navigationPlaceName(value: String): String? {
-    val query = queryParameters(value).let { it["destination"] ?: it["query"] ?: it["q"] }
-    return sequenceOf(query, mapsPathDestination(value))
+    return sequenceOf(navigationQuery(value), mapsPathDestination(value))
         .filterNotNull()
         .map { it.trim().removePrefix("loc:") }
         .firstOrNull { it.isNotBlank() && coordinateFromText(it) == null && degreesMinutesSecondsFrom(it) == null }
@@ -46,10 +45,6 @@ private fun coordinateFromText(value: String): NavigationDestination? {
     }
     return null
 }
-
-/** Percent-decoded text, or the input unchanged when it is not encoded or is malformed. */
-private fun percentDecoded(value: String): String =
-    runCatching { URLDecoder.decode(value, Charsets.UTF_8.name()) }.getOrDefault(value)
 
 /**
  * A degrees/minutes/seconds pair, which is how Maps names a dropped pin or a saved parking
@@ -78,15 +73,14 @@ private fun sexagesimalDegrees(degrees: String, minutes: String, seconds: String
  * The destination parameter out of a Maps-style URL, or the input unchanged when it is not
  * a URL — which is the normal case for a typed address.
  */
-private fun extractNavigationQuery(value: String): String =
-    queryParameters(value).let { it["destination"] ?: it["query"] ?: it["q"] } ?: value
+private fun extractNavigationQuery(value: String): String = navigationQuery(value) ?: value
 
-private fun queryParameters(value: String): Map<String, String> = runCatching {
-    URI(value).rawQuery.orEmpty().split('&').associate {
-        val parts = it.split('=', limit = 2)
-        parts.first() to URLDecoder.decode(parts.getOrElse(1) { "" }, Charsets.UTF_8.name())
-    }
-}.getOrDefault(emptyMap())
+/** The decoded place parameter of a Maps-style URL, whichever name the link used for it. */
+private fun navigationQuery(value: String): String? = runCatching {
+    val uri = Uri.parse(value)
+    if (!uri.isHierarchical) return null
+    listOf("destination", "query", "q").firstNotNullOfOrNull(uri::getQueryParameter)
+}.getOrNull()
 
 /**
  * What is worth handing to the geocoder, or null when the input is a link with no place in it.
@@ -102,8 +96,7 @@ internal fun geocodableText(value: String): String? {
     val uri = runCatching { URI(trimmed) }.getOrNull()
     if (uri?.scheme == null) return trimmed
 
-    val parameter = queryParameters(trimmed).let { it["destination"] ?: it["query"] ?: it["q"] }
-    parameter?.trim()?.takeIf { it.isNotEmpty() }?.let { return it.removePrefix("loc:") }
+    navigationQuery(trimmed)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it.removePrefix("loc:") }
 
     return mapsPathDestination(trimmed)
 }
@@ -125,7 +118,7 @@ internal fun mapsPathDestination(value: String): String? {
     val anchor = segments.indexOfFirst { it == "dir" || it == "place" || it == "search" }
     if (anchor < 0) return null
     val stops = segments.drop(anchor + 1)
-        .map { percentDecoded(it).replace('+', ' ').trim() }
+        .map { Uri.decode(it).replace('+', ' ').trim() }
         .filter { stop ->
             stop.isNotEmpty() &&
                 !stop.startsWith("@") &&

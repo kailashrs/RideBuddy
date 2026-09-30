@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  *
  * Imperial is not one system here. Distance and speed are the same everywhere, but a
  * gallon is not: US and imperial gallons differ by about 20%, so fuel and mileage
- * additionally branch on the locale's country. Every conversion takes an explicit [Locale]
+ * additionally branch on the locale's measurement system. Every conversion takes an explicit [Locale]
  * rather than reading the default, both for that reason and so the decimal separator is
  * the rider's.
  */
@@ -52,7 +52,7 @@ object UnitFormatter {
         locale: Locale = Locale.getDefault(),
     ): Double? = kilometresPerLitre?.takeIf { it.isFinite() && it > 0.0 }?.let { value ->
         if (units == DistanceUnits.Metric) value
-        else if (locale.country.equals("US", ignoreCase = true)) value * KilometresPerLitreToUsMpg
+        else if (DistanceUnits.usesUsGallons(locale)) value * KilometresPerLitreToUsMpg
         else value * KilometresPerLitreToImperialMpg
     }
 
@@ -100,9 +100,8 @@ object UnitFormatter {
     private const val FeetPerMetre = 3.280839895
     private const val MinimumDisplayedMiles = 0.1
 
-    /** US and imperial gallons differ by roughly 20%, so the country decides. */
     private fun gallonsPerLitre(locale: Locale): Double =
-        if (locale.country.equals("US", ignoreCase = true)) LitresToUsGallons else LitresToImperialGallons
+        if (DistanceUnits.usesUsGallons(locale)) LitresToUsGallons else LitresToImperialGallons
 
     // Platform date formatting throughout, so dates follow the phone's locale and
     // 12/24-hour setting rather than a hardcoded pattern.

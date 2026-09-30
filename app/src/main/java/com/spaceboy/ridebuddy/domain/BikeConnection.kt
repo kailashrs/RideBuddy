@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.domain
 
-import androidx.compose.runtime.Immutable
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import android.net.MacAddress
 import kotlinx.coroutines.flow.StateFlow
@@ -169,11 +168,8 @@ enum class ProtectionPath {
 /**
  * Everything the diagnostics screen shows about the link, in one snapshot.
  *
- * `@Immutable` because it is republished on every telemetry frame; without it Compose
- * would treat each new instance as unconditionally changed and recompose everything
- * reading any part of it.
+ * Republished on every telemetry frame.
  */
-@Immutable
 data class BleDiagnostics(
     val authenticated: Boolean = false,
     val protectionPhase: ProtectionPhase = ProtectionPhase.Idle,

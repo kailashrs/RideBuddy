@@ -253,6 +253,7 @@ class RideRecorder(
         val route = completedSamples.routePreview()
         val zeroToSixty = completedSamples.accelerationTime(60.0)
         val zeroToHundred = completedSamples.accelerationTime(100.0)
+        val (peakAcceleration, peakBraking) = completedSamples.accelerationPeaks()
         val completedRide = active.toRide().copy(
             startLatitude = start?.latitude,
             startLongitude = start?.longitude,
@@ -261,6 +262,8 @@ class RideRecorder(
             routePreview = route,
             zeroToSixtyMillis = zeroToSixty,
             zeroToHundredMillis = zeroToHundred,
+            peakAccelerationG = peakAcceleration,
+            peakBrakingG = peakBraking,
         )
         // Thinned only now, after the figures that need full resolution have been taken
         // from the complete series. See decimatedForStorage.

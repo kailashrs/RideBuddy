@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.core.alerts
 import com.spaceboy.ridebuddy.core.location.RideLocation
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
+import android.location.Location
 import android.net.Uri
 import java.net.HttpURLConnection
 import java.util.Locale
@@ -15,10 +16,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * A forecast reading, reduced to the parts that matter on a motorcycle.
@@ -145,15 +142,10 @@ class WeatherAlertProvider(
         )
     }
 
-    /** Great-circle distance (haversine). Only used against a coarse threshold. */
     private fun distanceKilometres(first: RideLocation, second: RideLocation): Double {
-        val latitudeDelta = Math.toRadians(second.latitude - first.latitude)
-        val longitudeDelta = Math.toRadians(second.longitude - first.longitude)
-        val firstLatitude = Math.toRadians(first.latitude)
-        val secondLatitude = Math.toRadians(second.latitude)
-        val a = sin(latitudeDelta / 2) * sin(latitudeDelta / 2) +
-            cos(firstLatitude) * cos(secondLatitude) * sin(longitudeDelta / 2) * sin(longitudeDelta / 2)
-        return EarthRadiusKilometres * 2 * atan2(sqrt(a), sqrt(1 - a))
+        val metres = FloatArray(1)
+        Location.distanceBetween(first.latitude, first.longitude, second.latitude, second.longitude, metres)
+        return metres[0] / 1_000.0
     }
 
     private companion object {
@@ -167,7 +159,6 @@ class WeatherAlertProvider(
         const val RefreshDistanceKilometres = 10.0
 
         const val NetworkTimeoutMillis = 10_000
-        const val EarthRadiusKilometres = 6_371.0
     }
 }
 

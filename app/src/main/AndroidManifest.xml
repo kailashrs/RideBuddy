@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Caller names on the cluster: Telecom's contact name, or a lookup of the number. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- What actually lets Telecom bind our InCallService. InCallController binds a
          third-party non-UI service only when it holds CONTROL_INCALL_EXPERIENCE, which is
          signature|privileged and so out of reach, or when this one passes its app-op check.
