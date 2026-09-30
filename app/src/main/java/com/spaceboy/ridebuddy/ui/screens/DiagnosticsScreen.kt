@@ -111,7 +111,7 @@ fun DiagnosticsScreen(
 
         Header("Connection")
         Readout("State", state.connectionState.diagnosticLabel())
-        Readout("Device", state.bikeAssociation.bike?.address ?: "Not paired")
+        Readout("Device", state.bikeAssociation.bike?.address?.toString()?.uppercase() ?: "Not paired")
         Readout("Last successful link", identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime) ?: "None recorded")
         Readout("Companion link", stringResource(if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready))
         Readout("Protection phase", stringResource(diagnostics.protectionPhase.labelResource()))

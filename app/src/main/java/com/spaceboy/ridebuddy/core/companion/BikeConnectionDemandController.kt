@@ -1,7 +1,6 @@
 package com.spaceboy.ridebuddy.core.companion
 
-import android.content.Context
-import androidx.core.content.edit
+import com.spaceboy.ridebuddy.ble.LinkStateStore
 
 /** Whether the app may connect on its own, without the rider asking. */
 internal enum class AutomaticConnectionDemand {
@@ -102,20 +101,18 @@ internal fun bikeConnectionDemandTransition(
  * callback into an immediate reconnect. A genuine BLE disappearance arms automatic connection
  * for the next appearance, while an explicit Connect action always overrides suppression.
  */
-internal class BikeConnectionDemandController(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PreferencesName,
-        Context.MODE_PRIVATE,
-    )
+internal class BikeConnectionDemandController(private val linkState: LinkStateStore) {
     private val lock = Any()
-    private var state = BikeConnectionDemandState(
-        automaticConnectionDemand = if (preferences.getBoolean(KeySuppressed, false)) {
-            AutomaticConnectionDemand.SuppressedUntilBleDisappears
-        } else {
-            AutomaticConnectionDemand.Allowed
-        },
-        awaitingBleAppearance = preferences.getBoolean(KeyAwaitingBleAppearance, false),
-    )
+    private var state = linkState.state.value.let { stored ->
+        BikeConnectionDemandState(
+            automaticConnectionDemand = if (stored.automaticConnectionSuppressed) {
+                AutomaticConnectionDemand.SuppressedUntilBleDisappears
+            } else {
+                AutomaticConnectionDemand.Allowed
+            },
+            awaitingBleAppearance = stored.awaitingBleAppearance,
+        )
+    }
 
     /** The rider asked to connect. Always clears suppression. */
     fun allowExplicitConnection() {
@@ -153,21 +150,12 @@ internal class BikeConnectionDemandController(context: Context) {
         bikeConnectionDemandTransition(state, event).also { transition ->
             state = transition.state
             if (state != previous) {
-                preferences.edit {
-                    putBoolean(
-                        KeySuppressed,
-                        state.automaticConnectionDemand ==
-                            AutomaticConnectionDemand.SuppressedUntilBleDisappears,
-                    )
-                    putBoolean(KeyAwaitingBleAppearance, state.awaitingBleAppearance)
+                val suppressed = state.automaticConnectionDemand == AutomaticConnectionDemand.SuppressedUntilBleDisappears
+                val awaiting = state.awaitingBleAppearance
+                linkState.update {
+                    it.copy(automaticConnectionSuppressed = suppressed, awaitingBleAppearance = awaiting)
                 }
             }
         }
-    }
-
-    private companion object {
-        const val PreferencesName = "bike_connection_demand"
-        const val KeySuppressed = "automatic_connection_suppressed"
-        const val KeyAwaitingBleAppearance = "awaiting_ble_appearance"
     }
 }

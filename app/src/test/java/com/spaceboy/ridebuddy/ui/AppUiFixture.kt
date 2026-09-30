@@ -4,7 +4,7 @@ import com.spaceboy.ridebuddy.MainUiState
 import com.spaceboy.ridebuddy.NavigationKeyUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
 import com.spaceboy.ridebuddy.ble.BleCaptureState
-import com.spaceboy.ridebuddy.ble.BluetoothAddress
+import android.net.MacAddress
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
 import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
@@ -34,7 +34,7 @@ internal object AppUiFixture {
         guidance = GuidanceState(),
         settings = AppSettings(distanceUnits = DistanceUnits.Metric, dynamicColor = false, onboardingComplete = true),
         bikeAssociation = BikeAssociationState(supported = true,
-            bike = AssociatedBike(requireNotNull(BluetoothAddress.fromLong(1)), "Aprilia RS 457"), observingPresence = true),
+            bike = AssociatedBike(MacAddress.fromString("00:00:00:00:00:01"), "Aprilia RS 457", associationId = 1), observingPresence = true),
         notificationAccessEnabled = true,
         backgroundLocationGranted = true,
     )

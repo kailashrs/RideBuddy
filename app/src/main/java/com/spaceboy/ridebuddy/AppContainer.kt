@@ -6,9 +6,9 @@ import com.spaceboy.ridebuddy.ble.AndroidBikeConnection
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.ble.BikeIdentityRepository
 import com.spaceboy.ridebuddy.ble.ConnectionEventJournal
-import com.spaceboy.ridebuddy.ble.SharedPreferencesConnectionEventStore
-import com.spaceboy.ridebuddy.ble.SharedPreferencesBikeIdentityStore
-import com.spaceboy.ridebuddy.ble.SharedPreferencesProtectionAcceptanceStore
+import com.spaceboy.ridebuddy.ble.FileConnectionEventStore
+import com.spaceboy.ridebuddy.ble.LinkStateProtectionAcceptanceStore
+import com.spaceboy.ridebuddy.ble.LinkStateStore
 import com.spaceboy.ridebuddy.core.navigation.DestinationParser
 import com.spaceboy.ridebuddy.core.navigation.GoogleNavigationSdkGateway
 import com.spaceboy.ridebuddy.core.navigation.NavigationKeyBootstrap
@@ -71,15 +71,13 @@ class AppContainer(context: Context) {
      *  launched here are bound to the process, not to any individual Activity. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val bleCaptureRecorder = BleCaptureRecorder(applicationScope)
-    private val protectionAcceptanceStore = SharedPreferencesProtectionAcceptanceStore(context)
-    private val bikeIdentityRepository = BikeIdentityRepository(
-        store = SharedPreferencesBikeIdentityStore(context),
-        scope = applicationScope,
-    )
-    val appSettings = AppSettingsRepository(context)
-    internal val bikeConnectionDemand = BikeConnectionDemandController(context)
+    private val linkState = LinkStateStore.create(context, applicationScope)
+    private val protectionAcceptanceStore = LinkStateProtectionAcceptanceStore(linkState)
+    private val bikeIdentityRepository = BikeIdentityRepository(linkState, applicationScope)
+    val appSettings = AppSettingsRepository.create(context, applicationScope)
+    internal val bikeConnectionDemand = BikeConnectionDemandController(linkState)
     internal val connectionEventJournal = ConnectionEventJournal(
-        store = SharedPreferencesConnectionEventStore(context),
+        store = FileConnectionEventStore.create(context),
         scope = applicationScope,
         initialPersistenceEnabled = appSettings.settings.value.persistConnectionDiagnostics,
     )
@@ -95,12 +93,7 @@ class AppContainer(context: Context) {
     private val rideHistoryDatabase = RideHistoryDatabase.open(context)
     private val rideSamplesDatabase = RideSamplesDatabase.open(context)
     val rideRepository = RideRepository(rideHistoryDatabase, rideSamplesDatabase, applicationScope)
-    val bikeCompanionManager = BikeCompanionManager(
-        context,
-        protectionAcceptanceStore,
-        bikeIdentityRepository,
-        applicationScope,
-    )
+    val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, bikeIdentityRepository)
     private val rideLocationLabeler = RideLocationLabeler(context)
     val rideRecorder = RideRecorder(
         bikeConnection,

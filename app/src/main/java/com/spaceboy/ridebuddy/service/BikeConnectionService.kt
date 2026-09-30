@@ -12,10 +12,9 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.core.app.ServiceCompat
-import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
-import com.spaceboy.ridebuddy.ble.BluetoothAddress
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
+import android.net.MacAddress
 import com.spaceboy.ridebuddy.core.companion.AssociatedBike
-import com.spaceboy.ridebuddy.core.companion.AssociatedBikeStore
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.ConnectionAttemptTrigger
 import kotlinx.coroutines.CoroutineScope
@@ -137,14 +136,13 @@ class BikeConnectionService : Service() {
                     stopForegroundAndSelf()
                     return START_NOT_STICKY
                 }
-                val address = intent.bluetoothAddressExtra()
+                val address = intent.addressExtra()
                 val name = intent.getStringExtra(ExtraName)
                 if (address != null && !name.isNullOrBlank()) {
                     if (!automatic) container.bikeConnectionDemand.allowExplicitConnection()
                     enableLocationTrackingIfAllowed(
                         launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false),
                     )
-                    rememberBike(address, name)
                     container.bikeConnection.connect(
                         BikeConnectionTarget(
                             address = address,
@@ -324,19 +322,7 @@ class BikeConnectionService : Service() {
         notifications.cancel()
     }
 
-    /**
-     * Records the motorcycle a connection was requested for, preserving the existing
-     * association id — the connect intent carries an address and a name, not the id, and
-     * dropping it would break presence observation.
-     */
-    private fun rememberBike(address: BluetoothAddress, name: String) {
-        val store = AssociatedBikeStore(this)
-        val current = store.read()
-        store.write(AssociatedBike(address, name, current?.associationId))
-    }
-
-    private fun Intent.bluetoothAddressExtra(): BluetoothAddress? =
-        BluetoothAddress.fromBytes(getByteArrayExtra(ExtraAddressBytes))
+    private fun Intent.addressExtra(): MacAddress? = getParcelableExtra(ExtraAddress, MacAddress::class.java)
 
     private fun Intent.connectionTriggerExtra(): ConnectionAttemptTrigger =
         getStringExtra(ExtraTrigger)?.let { name ->
@@ -348,7 +334,7 @@ class BikeConnectionService : Service() {
         internal const val ActionDisconnect = "com.spaceboy.ridebuddy.action.DISCONNECT_BIKE"
         private const val ActionEnableLocation = "enable_location"
         private const val ActionRestartConnect = "restart_connect"
-        private const val ExtraAddressBytes = "address_bytes"
+        private const val ExtraAddress = "address"
         private const val ExtraName = "name"
         private const val ExtraVisibleActivityLaunch = "visible_activity_launch"
         private const val ExtraTrigger = "attempt_trigger"
@@ -408,7 +394,7 @@ class BikeConnectionService : Service() {
             }
             val intent = Intent(context, BikeConnectionService::class.java)
                 .setAction(ActionRestartConnect)
-                .putExtra(ExtraAddressBytes, bike.bluetoothAddress.toByteArray())
+                .putExtra(ExtraAddress, bike.address)
                 .putExtra(ExtraName, bike.name)
                 .putExtra(ExtraVisibleActivityLaunch, launchedFromVisibleActivity)
                 .putExtra(ExtraTrigger, trigger.name)

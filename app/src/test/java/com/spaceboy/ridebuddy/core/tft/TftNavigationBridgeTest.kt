@@ -1,6 +1,6 @@
 package com.spaceboy.ridebuddy.core.tft
 
-import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.data.AppSettings

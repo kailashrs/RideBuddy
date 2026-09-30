@@ -1,5 +1,7 @@
 package com.spaceboy.ridebuddy.ble
 
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
+import android.net.MacAddress
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
@@ -338,7 +340,7 @@ internal class AndroidBikeConnection(
             return
         }
 
-        // BLUETOOTH_CONNECT is granted above and BluetoothAddress always yields six bytes, so
+        // BLUETOOTH_CONNECT is granted above and MacAddress always yields six bytes, so
         // neither the permission nor the malformed-address rejection is reachable here.
         val device = adapter.getRemoteDevice(target.address.toByteArray())
         val bondState = device.bondState

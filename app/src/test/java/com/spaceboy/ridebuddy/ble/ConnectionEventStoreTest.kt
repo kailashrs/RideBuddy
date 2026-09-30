@@ -1,56 +1,43 @@
 package com.spaceboy.ridebuddy.ble
 
-import java.time.LocalDateTime
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class ConnectionEventStoreTest {
+    private val file = Files.createTempDirectory("journal").resolve("connection_journal.txt").toFile()
+
     @Test
-    fun `event encoding round-trips ordering, unicode, separators and control characters`() {
-        val events = listOf(
-            "2026-08-25 10:00:00  BLE appeared",
-            "event with unicode — motorcycle 🏍",
-            "event with a quote \" slash \\ and\na line break",
-            "event with a percent 100% and a tab\tinside",
-            "event with a control character \u0001 in it",
-        )
+    fun `events round-trip in order, with line breaks flattened`() {
+        val store = FileConnectionEventStore(file)
+        val events = listOf("2026-08-25 10:00:00  BLE appeared", "unicode — motorcycle 🏍", "a line\nbreak")
 
-        val encoded = encodeConnectionEvents(events)
+        assertTrue(store.write(events))
 
-        // The encoded form is pure ASCII, so nothing in a log line can reach the preferences XML
-        // as a raw control character or an unpaired surrogate.
-        assertTrue(encoded.all { it.code in 0x20..0x7E || it == '\n' })
-        assertEquals(events, decodeConnectionEvents(encoded))
+        assertEquals(listOf(events[0], events[1], "a line break"), FileConnectionEventStore(file).read())
     }
 
     @Test
-    fun `an empty journal round-trips`() {
-        assertEquals(emptyList<String>(), decodeConnectionEvents(encodeConnectionEvents(emptyList())))
+    fun `the legacy journal is read only while no file exists`() {
+        val store = FileConnectionEventStore(file) { listOf("legacy event") }
+
+        assertEquals(listOf("legacy event"), store.read())
+        store.write(listOf("new event"))
+        assertEquals(listOf("new event"), store.read())
     }
 
     @Test
-    fun `unreadable stored data is treated as an empty journal`() {
-        assertEquals(emptyList<String>(), decodeConnectionEvents("%"))
-        assertEquals(emptyList<String>(), decodeConnectionEvents("%zz"))
-    }
+    fun `writes are capped at the journal limit`() {
+        val store = FileConnectionEventStore(file)
 
-    @Test
-    fun `journal remains bounded and newest first`() {
-        val existing = (0 until ConnectionEventLimit).map { "event $it" }
-        val updated = prependConnectionEvent(existing, "new event")
+        store.write((1..ConnectionEventLimit + 20).map { "event $it" })
 
-        assertEquals(ConnectionEventLimit, updated.size)
-        assertEquals("new event", updated.first())
-        assertFalse("event ${ConnectionEventLimit - 1}" in updated)
-    }
-
-    @Test
-    fun `durable timestamps include the date`() {
-        assertEquals(
-            "2026-08-25 12:34:56  GATT disconnected",
-            formatConnectionEvent(LocalDateTime.of(2026, 8, 25, 12, 34, 56), "GATT disconnected"),
-        )
+        assertEquals(ConnectionEventLimit, store.read().size)
     }
 }

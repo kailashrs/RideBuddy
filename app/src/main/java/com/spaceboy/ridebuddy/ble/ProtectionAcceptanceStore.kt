@@ -1,54 +1,33 @@
 package com.spaceboy.ridebuddy.ble
 
-import android.content.Context
-import androidx.core.content.edit
-
+import android.net.MacAddress
 /**
  * Remembers that a motorcycle has already accepted a protection response.
  *
- * The challenge step only has to run once per bond: on later connections the cluster
- * expects the app to go straight to the normal subscription set, and waiting for a
- * challenge that will never arrive would stall the connection.
- *
- * This is a reconnect hint, not a trust decision. Nothing is skipped on the basis of it
- * except the challenge exchange itself — every connection still verifies the full
- * companion profile before the session is exposed as ready — and the flag is dropped
- * whenever the Android bond for that address goes away.
+ * The challenge step only has to run once per bond: on later connections the cluster expects
+ * the app to go straight to the normal subscription set, and waiting for a challenge that
+ * will never arrive would stall the connection. This is a reconnect hint, not a trust
+ * decision — every connection still verifies the full profile — and it is dropped whenever
+ * the Android bond for that address goes away.
  */
 internal interface ProtectionAcceptanceStore {
-    fun isAccepted(address: BluetoothAddress): Boolean
-    fun markAccepted(address: BluetoothAddress)
-    fun clear(address: BluetoothAddress)
+    fun isAccepted(address: MacAddress): Boolean
+    fun markAccepted(address: MacAddress)
+    fun clear(address: MacAddress)
 }
 
-/**
- * Shared-preferences implementation. Exactly one address is remembered at a time: the app
- * pairs with one motorcycle, and storing the address rather than a bare boolean means
- * associating a different bike implicitly invalidates the flag.
- */
-internal class SharedPreferencesProtectionAcceptanceStore(
-    context: Context,
-    preferencesName: String = PreferencesName,
-) : ProtectionAcceptanceStore {
-    private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
+/** One address at a time: associating a different bike implicitly invalidates the flag. */
+internal class LinkStateProtectionAcceptanceStore(private val linkState: LinkStateStore) : ProtectionAcceptanceStore {
+    override fun isAccepted(address: MacAddress): Boolean =
+        linkState.state.value.protectionAcceptedAddress == address.toString()
 
-    override fun isAccepted(address: BluetoothAddress): Boolean =
-        preferences.getLong(KeyAddress, InvalidAddress) == address.toLong()
-
-    override fun markAccepted(address: BluetoothAddress) {
-        preferences.edit { putLong(KeyAddress, address.toLong()) }
+    override fun markAccepted(address: MacAddress) {
+        linkState.update { it.copy(protectionAcceptedAddress = address.toString()) }
     }
 
-    /** No-op unless [address] is the remembered one, so clearing a stale address is safe. */
-    override fun clear(address: BluetoothAddress) {
-        if (isAccepted(address)) preferences.edit { remove(KeyAddress) }
-    }
-
-    internal companion object {
-        const val PreferencesName = "ble_protection_trust"
-        const val KeyAddress = "trusted_address"
-
-        /** Sentinel for "nothing stored"; no real address encodes to -1. */
-        const val InvalidAddress = -1L
+    override fun clear(address: MacAddress) {
+        linkState.update { state ->
+            if (state.protectionAcceptedAddress == address.toString()) state.copy(protectionAcceptedAddress = null) else state
+        }
     }
 }

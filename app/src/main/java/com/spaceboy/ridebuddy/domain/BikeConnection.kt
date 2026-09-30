@@ -2,8 +2,7 @@ package com.spaceboy.ridebuddy.domain
 
 import androidx.compose.runtime.Immutable
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
-import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
-import com.spaceboy.ridebuddy.ble.BluetoothAddress
+import android.net.MacAddress
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import java.util.UUID
@@ -91,6 +90,17 @@ interface BikeConnection {
      */
     suspend fun writeAndAwait(write: BikeWrite): Boolean
 }
+
+/**
+ * A connection request for the associated motorcycle. [trigger] travels with it so diagnostics
+ * can tell a rider's connect from one a presence callback asked for; automatic retries are owned
+ * by the connection itself and never expressed as a new target.
+ */
+data class BikeConnectionTarget(
+    val address: MacAddress,
+    val deviceName: String,
+    val trigger: ConnectionAttemptTrigger = ConnectionAttemptTrigger.UserRequest,
+)
 
 /** Where the link is. Drives both the UI and the decision to start another attempt. */
 sealed interface BikeConnectionState {

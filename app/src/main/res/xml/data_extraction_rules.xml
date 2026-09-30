@@ -16,13 +16,12 @@
                            half a megabyte for every hour ridden against a 25 MB allowance for
                            the whole app, so it would blow the budget in a couple of days and
                            then stop backing anything up at all.
-      app_settings.xml     the rider's preferences. Nothing secret, nothing tied to a device.
+      settings.json        the rider's preferences. Nothing secret, nothing tied to a device.
 
     Everything else stays behind, and the two kinds that matter are worth naming.
-    secure_navigation_settings holds the Navigation API key. bike_identity, associated_bike,
-    ble_protection_trust, bike_connection_demand and connection_diagnostics each describe one
-    bond between this phone and one motorcycle, so restoring them onto a different phone would
-    describe a pairing that does not exist.
+    secure_navigation_settings holds the Navigation API key. link_state.json and
+    connection_journal.txt describe one bond between this phone and one motorcycle, so
+    restoring them onto a different phone would describe a pairing that does not exist.
 
     disableIfNoEncryptionCapabilities keeps ride history, which is location data, off any
     device that cannot encrypt the backup with the rider's own lock screen.
@@ -30,7 +29,7 @@
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
         <include domain="database" path="ride_history.db" />
-        <include domain="sharedpref" path="app_settings.xml" />
+        <include domain="file" path="datastore/settings.json" />
     </cloud-backup>
 
     <!--
@@ -40,6 +39,6 @@
     -->
     <device-transfer>
         <include domain="database" path="ride_history.db" />
-        <include domain="sharedpref" path="app_settings.xml" />
+        <include domain="file" path="datastore/settings.json" />
     </device-transfer>
 </data-extraction-rules>

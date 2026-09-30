@@ -3,7 +3,7 @@ package com.spaceboy.ridebuddy.core.tft
 import com.google.android.libraries.mapsplatform.turnbyturn.model.Maneuver
 import com.spaceboy.ridebuddy.ble.BleCharacteristics
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
-import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent

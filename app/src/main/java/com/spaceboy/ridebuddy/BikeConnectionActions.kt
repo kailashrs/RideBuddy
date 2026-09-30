@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy
 
 import android.Manifest
+import android.net.MacAddress
 import android.app.Activity
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
@@ -18,7 +19,7 @@ internal class BikeConnectionActions(
     private val onPermissionResult: () -> Unit = {},
 ) {
     private val container get() = activity.appContainer
-    private var lastAssociationAddress: String? = null
+    private var lastAssociationAddress: MacAddress? = null
 
     private val permissionLauncher = activity.registerForActivityResult(
         ActivityResultContracts.RequestPermission(),

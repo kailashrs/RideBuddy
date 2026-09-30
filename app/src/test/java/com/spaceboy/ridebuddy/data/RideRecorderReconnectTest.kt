@@ -1,10 +1,11 @@
 package com.spaceboy.ridebuddy.data
 
 import androidx.room.Room
+import com.spaceboy.ridebuddy.InMemoryDataStore
 import androidx.test.core.app.ApplicationProvider
 import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
 import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
-import com.spaceboy.ridebuddy.ble.BikeConnectionTarget
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.ble.TelemetryFrame
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
@@ -50,7 +51,8 @@ class RideRecorderReconnectTest {
             scope,
         )
         val recorder = RideRecorder(bike, repository,
-            scope, RideLocationTracker(context), AppSettingsRepository(context), RideLocationLabeler(context))
+            scope, RideLocationTracker(context), AppSettingsRepository(InMemoryDataStore(AppSettings()), scope),
+            RideLocationLabeler(context))
         try {
             recorder.start()
             withTimeout(3_000) { bike.raw.subscriptionCount.first { it > 0 } }

@@ -1,14 +1,21 @@
 package com.spaceboy.ridebuddy.ble
 
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
+import android.net.MacAddress
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class ConnectionRequestPolicyTest {
-    private val firstAddress = requireNotNull(BluetoothAddress.parse("CC:B3:1E:C1:E1:B7"))
-    private val secondAddress = requireNotNull(BluetoothAddress.parse("CC:B3:1E:C1:E1:B8"))
+    private val firstAddress = requireNotNull(MacAddress.fromString("CC:B3:1E:C1:E1:B7"))
+    private val secondAddress = requireNotNull(MacAddress.fromString("CC:B3:1E:C1:E1:B8"))
     private val currentTarget = BikeConnectionTarget(firstAddress, "RS457_IDE1B7")
 
     @Test

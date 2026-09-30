@@ -2,6 +2,7 @@ package com.spaceboy.ridebuddy.ble
 
 import android.bluetooth.BluetoothGatt
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 
 /**
  * Total attempts in one connection cycle, including the first attempt.

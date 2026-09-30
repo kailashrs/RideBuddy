@@ -1,13 +1,29 @@
 package com.spaceboy.ridebuddy.data
 
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.compose.runtime.Immutable
-import androidx.core.content.edit
+import androidx.datastore.core.CorruptionException
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataStoreFactory
+import androidx.datastore.core.Serializer
+import androidx.datastore.dataStoreFile
+import androidx.datastore.migrations.SharedPreferencesMigration
+import androidx.datastore.migrations.SharedPreferencesView
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.Locale
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 enum class DistanceUnits {
     Metric,
@@ -58,6 +74,7 @@ enum class SampleRetention(val days: Int?, val label: String) {
  * touching diagnostics capture is off until the rider turns it on.
  */
 @Immutable
+@Serializable
 data class AppSettings(
     val distanceUnits: DistanceUnits = DistanceUnits.defaultFor(Locale.getDefault()),
     val voiceGuidance: Boolean = true,
@@ -98,139 +115,106 @@ data class AppSettings(
 )
 
 /**
- * Reads and writes [AppSettings].
+ * Reads and writes [AppSettings] through a DataStore.
  *
- * Loaded once at construction and held in a flow, so reads are synchronous and free —
- * settings are consulted on hot paths like telemetry handling. Writes go through [update],
- * which is synchronized because settings are changed from the UI while being read from
- * background collectors.
+ * Settings are read on hot paths like telemetry handling, so the current value is held in a
+ * [StateFlow]; the first value is loaded before construction returns. Writes run one at a time
+ * in call order.
  */
-class AppSettingsRepository(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(Name, Context.MODE_PRIVATE)
-    private val mutableSettings = MutableStateFlow(read())
-    val settings: StateFlow<AppSettings> = mutableSettings.asStateFlow()
+class AppSettingsRepository(
+    private val store: DataStore<AppSettings>,
+    private val scope: CoroutineScope,
+) {
+    val settings: StateFlow<AppSettings> =
+        store.data.stateIn(scope, SharingStarted.Eagerly, runBlocking { store.data.first() })
 
-    /**
-     * Applies [transform] and persists the result.
-     *
-     * Every key is rewritten rather than just the changed one. It costs nothing at this
-     * size and removes a whole class of bug where a new field is added to [AppSettings] and
-     * silently never persisted.
-     */
-    @Synchronized
+    private val writeDispatcher = Dispatchers.IO.limitedParallelism(1)
+
     fun update(transform: (AppSettings) -> AppSettings) {
-        val updated = transform(mutableSettings.value)
-        preferences.edit {
-            putString(KeyUnits, updated.distanceUnits.name)
-            putBoolean(KeyVoice, updated.voiceGuidance)
-            putBoolean(KeyTolls, updated.avoidTolls)
-            putBoolean(KeyHighways, updated.avoidHighways)
-            putBoolean(KeyFerries, updated.avoidFerries)
-            putBoolean(KeyAutoStartV2, updated.autoStartSharedDestinations)
-            putBoolean(KeyCallerDisplay, updated.callerDisplay)
-            putBoolean(KeyTftCallControls, updated.tftCallControls)
-            putBoolean(KeyTftNavigationOutput, updated.tftNavigationOutputEnabled)
-            putBoolean(KeyBleCaptureEnabled, updated.bleCaptureEnabled)
-            putBoolean(KeyPersistConnectionDiagnostics, updated.persistConnectionDiagnostics)
-            putBoolean(KeyOnboarding, updated.onboardingComplete)
-            putFloat(KeyRideStart, updated.rideStartSpeedKph.toFloat())
-            putFloat(KeyRideStop, updated.rideStopSpeedKph.toFloat())
-            putInt(KeyRideStopDelay, updated.rideStopDelaySeconds)
-            putBoolean(KeyOverspeedAlerts, updated.overspeedAlerts)
-            putInt(KeyOverspeedThreshold, updated.overspeedThresholdKph)
-            putBoolean(KeyRpmAlerts, updated.rpmAlerts)
-            putInt(KeyRpmThreshold, updated.rpmThreshold)
-            putBoolean(KeyAccelerationAlerts, updated.accelerationAlerts)
-            putBoolean(KeyBrakingAlerts, updated.brakingAlerts)
-            putBoolean(KeyWeatherAlerts, updated.weatherAlerts)
-            putBoolean(KeyHazardAlerts, updated.hazardAlerts)
-            putString(KeyTftText, updated.tftTextMode.name)
-            putString(KeySampleRetention, updated.sampleRetention.name)
-            putString(KeyTheme, updated.themeMode.name)
-            putBoolean(KeyDynamicColor, updated.dynamicColor)
-            putBoolean(KeyHighContrast, updated.highContrast)
-            putStringSet(KeyNotificationPackagesDisabled, updated.disabledNotificationPackages)
-        }
-        mutableSettings.value = updated
+        scope.launch(writeDispatcher) { store.updateData(transform) }
     }
 
-    /**
-     * Loads settings, falling back to defaults for anything absent or unreadable. Enum
-     * values are parsed defensively: a value written by a build that has since renamed a
-     * constant must not crash the app on launch.
-     */
-    private fun read(): AppSettings {
-        return AppSettings(
-            distanceUnits = preferences.getString(KeyUnits, null)
-                ?.let { runCatching { DistanceUnits.valueOf(it) }.getOrNull() }
-                ?: DistanceUnits.defaultFor(Locale.getDefault()),
-            voiceGuidance = preferences.getBoolean(KeyVoice, true),
-            avoidTolls = preferences.getBoolean(KeyTolls, false),
-            avoidHighways = preferences.getBoolean(KeyHighways, false),
-            avoidFerries = preferences.getBoolean(KeyFerries, false),
-            autoStartSharedDestinations = preferences.getBoolean(KeyAutoStartV2, false),
-            callerDisplay = preferences.getBoolean(KeyCallerDisplay, false),
-            tftCallControls = preferences.getBoolean(KeyTftCallControls, false),
-            tftNavigationOutputEnabled = preferences.getBoolean(KeyTftNavigationOutput, false),
-            bleCaptureEnabled = preferences.getBoolean(KeyBleCaptureEnabled, false),
-            persistConnectionDiagnostics = preferences.getBoolean(KeyPersistConnectionDiagnostics, false),
-            onboardingComplete = preferences.getBoolean(KeyOnboarding, false),
-            rideStartSpeedKph = preferences.getFloat(KeyRideStart, 3f).toDouble(),
-            rideStopSpeedKph = preferences.getFloat(KeyRideStop, 1f).toDouble(),
-            rideStopDelaySeconds = preferences.getInt(KeyRideStopDelay, 120),
-            overspeedAlerts = preferences.getBoolean(KeyOverspeedAlerts, false),
-            overspeedThresholdKph = preferences.getInt(KeyOverspeedThreshold, 100),
-            rpmAlerts = preferences.getBoolean(KeyRpmAlerts, false),
-            rpmThreshold = preferences.getInt(KeyRpmThreshold, 8_000),
-            accelerationAlerts = preferences.getBoolean(KeyAccelerationAlerts, false),
-            brakingAlerts = preferences.getBoolean(KeyBrakingAlerts, false),
-            weatherAlerts = preferences.getBoolean(KeyWeatherAlerts, false),
-            hazardAlerts = preferences.getBoolean(KeyHazardAlerts, false),
-            tftTextMode = preferences.enum(KeyTftText, TftTextMode.Full),
-            sampleRetention = preferences.enum(KeySampleRetention, SampleRetention.OneYear),
-            themeMode = preferences.enum(KeyTheme, ThemeMode.System),
-            dynamicColor = preferences.getBoolean(KeyDynamicColor, true),
-            highContrast = preferences.getBoolean(KeyHighContrast, false),
-            disabledNotificationPackages = preferences.getStringSet(KeyNotificationPackagesDisabled, null)
-                ?.toSet()
-                ?: emptySet(),
+    companion object {
+        const val FileName = "settings.json"
+
+        fun create(context: Context, scope: CoroutineScope): AppSettingsRepository = AppSettingsRepository(
+            DataStoreFactory.create(
+                serializer = JsonSerializer(AppSettings.serializer(), AppSettings()),
+                migrations = listOf(legacySettingsMigration(context)),
+                scope = CoroutineScope(scope.coroutineContext + Dispatchers.IO),
+                produceFile = { context.dataStoreFile(FileName) },
+            ),
+            scope,
         )
-    }
-
-    private companion object {
-        const val Name = "app_settings"
-        const val KeyUnits = "units"
-        const val KeyVoice = "voice_guidance"
-        const val KeyTolls = "avoid_tolls"
-        const val KeyHighways = "avoid_highways"
-        const val KeyFerries = "avoid_ferries"
-        const val KeyAutoStartV2 = "auto_start_shared_v2"
-        const val KeyCallerDisplay = "caller_display"
-        const val KeyTftCallControls = "tft_call_controls"
-        const val KeyTftNavigationOutput = "tft_navigation_output"
-        const val KeyBleCaptureEnabled = "ble_capture_enabled"
-        const val KeyPersistConnectionDiagnostics = "persist_connection_diagnostics"
-        const val KeyOnboarding = "onboarding_complete"
-        const val KeyRideStart = "ride_start_speed"
-        const val KeyRideStop = "ride_stop_speed"
-        const val KeyRideStopDelay = "ride_stop_delay"
-        const val KeyOverspeedAlerts = "overspeed_alerts"
-        const val KeyOverspeedThreshold = "overspeed_threshold"
-        const val KeyRpmAlerts = "rpm_alerts"
-        const val KeyRpmThreshold = "rpm_threshold"
-        const val KeyAccelerationAlerts = "acceleration_alerts"
-        const val KeyBrakingAlerts = "braking_alerts"
-        const val KeyWeatherAlerts = "weather_alerts"
-        const val KeyHazardAlerts = "hazard_alerts"
-        const val KeyTftText = "tft_text_mode"
-        const val KeySampleRetention = "sample_retention"
-        const val KeyTheme = "theme_mode"
-        const val KeyDynamicColor = "dynamic_color"
-        const val KeyHighContrast = "high_contrast"
-        const val KeyNotificationPackagesDisabled = "notification_packages_disabled"
     }
 }
 
-/** Reads an enum by name, falling back when it is absent or no longer a valid constant. */
-private inline fun <reified T : Enum<T>> SharedPreferences.enum(key: String, fallback: T): T =
-    getString(key, null)?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback
+/**
+ * Reads the pre-1.1 `app_settings` preferences once. Only keys the previous build wrote are
+ * mapped; anything absent keeps its default.
+ */
+internal fun legacySettingsMigration(context: Context) =
+    SharedPreferencesMigration<AppSettings>(context, "app_settings") { old, defaults ->
+        old.toAppSettings(defaults)
+    }
+
+internal fun SharedPreferencesView.toAppSettings(defaults: AppSettings): AppSettings = AppSettings(
+    distanceUnits = enum("units", defaults.distanceUnits),
+    voiceGuidance = getBoolean("voice_guidance", defaults.voiceGuidance),
+    avoidTolls = getBoolean("avoid_tolls", defaults.avoidTolls),
+    avoidHighways = getBoolean("avoid_highways", defaults.avoidHighways),
+    avoidFerries = getBoolean("avoid_ferries", defaults.avoidFerries),
+    autoStartSharedDestinations = getBoolean("auto_start_shared_v2", defaults.autoStartSharedDestinations),
+    callerDisplay = getBoolean("caller_display", defaults.callerDisplay),
+    tftCallControls = getBoolean("tft_call_controls", defaults.tftCallControls),
+    tftNavigationOutputEnabled = getBoolean("tft_navigation_output", defaults.tftNavigationOutputEnabled),
+    bleCaptureEnabled = getBoolean("ble_capture_enabled", defaults.bleCaptureEnabled),
+    persistConnectionDiagnostics = getBoolean("persist_connection_diagnostics", defaults.persistConnectionDiagnostics),
+    onboardingComplete = getBoolean("onboarding_complete", defaults.onboardingComplete),
+    rideStartSpeedKph = getFloat("ride_start_speed", defaults.rideStartSpeedKph.toFloat()).toDouble(),
+    rideStopSpeedKph = getFloat("ride_stop_speed", defaults.rideStopSpeedKph.toFloat()).toDouble(),
+    rideStopDelaySeconds = getInt("ride_stop_delay", defaults.rideStopDelaySeconds),
+    overspeedAlerts = getBoolean("overspeed_alerts", defaults.overspeedAlerts),
+    overspeedThresholdKph = getInt("overspeed_threshold", defaults.overspeedThresholdKph),
+    rpmAlerts = getBoolean("rpm_alerts", defaults.rpmAlerts),
+    rpmThreshold = getInt("rpm_threshold", defaults.rpmThreshold),
+    accelerationAlerts = getBoolean("acceleration_alerts", defaults.accelerationAlerts),
+    brakingAlerts = getBoolean("braking_alerts", defaults.brakingAlerts),
+    weatherAlerts = getBoolean("weather_alerts", defaults.weatherAlerts),
+    hazardAlerts = getBoolean("hazard_alerts", defaults.hazardAlerts),
+    tftTextMode = enum("tft_text_mode", defaults.tftTextMode),
+    sampleRetention = enum("sample_retention", defaults.sampleRetention),
+    themeMode = enum("theme_mode", defaults.themeMode),
+    dynamicColor = getBoolean("dynamic_color", defaults.dynamicColor),
+    highContrast = getBoolean("high_contrast", defaults.highContrast),
+    disabledNotificationPackages = getStringSet("notification_packages_disabled") ?: defaults.disabledNotificationPackages,
+)
+
+private inline fun <reified T : Enum<T>> SharedPreferencesView.enum(key: String, fallback: T): T =
+    getString(key)?.let { name -> enumValues<T>().firstOrNull { it.name == name } } ?: fallback
+
+/** A DataStore serializer for any `@Serializable` value, stored as JSON. */
+internal class JsonSerializer<T>(
+    private val serializer: KSerializer<T>,
+    override val defaultValue: T,
+) : Serializer<T> {
+    override suspend fun readFrom(input: InputStream): T = try {
+        StoredJson.decodeFromString(serializer, input.readBytes().decodeToString())
+    } catch (error: SerializationException) {
+        throw CorruptionException("Unreadable ${serializer.descriptor.serialName}", error)
+    }
+
+    override suspend fun writeTo(t: T, output: OutputStream) {
+        output.write(StoredJson.encodeToString(serializer, t).encodeToByteArray())
+    }
+}
+
+/**
+ * Unknown keys are ignored and absent ones take their defaults, so a field can be added freely.
+ * Defaults are still written, so a locale-derived default the rider accepted stays put.
+ */
+private val StoredJson = Json {
+    encodeDefaults = true
+    ignoreUnknownKeys = true
+    coerceInputValues = true
+}
