@@ -83,15 +83,12 @@ internal class AndroidBikeConnection(
     private var target: BikeConnectionTarget? = null
     private var session: Job? = null
 
-    /** Completed by the challenge callback while the handshake waits for it. */
+    /** Completed by the challenge callback: true once a response lands, false for an unknown challenge. */
     private var challengeAnswered: CompletableDeferred<Boolean>? = null
     private var lastChallenge: ByteArray? = null
 
     /** Proof the session is live: a value the cluster only sends over an established link. */
     private val sessionEvidence = MutableStateFlow(false)
-
-    /** Whether anything at all arrived on this attempt's link. */
-    private var sawAnyValue = false
 
     override val connectionState: StateFlow<BikeConnectionState> = mutableState.asStateFlow()
     override val readings = telemetryStream.readings
@@ -162,19 +159,12 @@ internal class AndroidBikeConnection(
      */
     private suspend fun runSession(target: BikeConnectionTarget) {
         var attempts = 0
-        var silentAttempts = 0
         while (true) {
             attempts++
             mutableState.value = BikeConnectionState.Connecting(target.deviceName, attempts, MaxConnectionAttempts)
             when (val outcome = attempt(target)) {
-                AttemptOutcome.Ended -> {
-                    attempts = 0
-                    silentAttempts = 0
-                }
-                is AttemptOutcome.Retry -> {
-                    recordError(outcome.message)
-                    silentAttempts = if (outcome.silent) silentAttempts + 1 else 0
-                }
+                AttemptOutcome.Ended -> attempts = 0
+                is AttemptOutcome.Retry -> recordError(outcome.message)
                 is AttemptOutcome.Stop -> {
                     fail(outcome.message, outcome.riderMessage)
                     return
@@ -182,8 +172,7 @@ internal class AndroidBikeConnection(
             }
             val delayMillis = reconnectDelayMillis(attempts)
             if (delayMillis == null) {
-                // A link that connects and then never transacts has one known remedy.
-                val reason = if (silentAttempts >= MinSilentAttempts) "Forget and re-pair the bike in Bluetooth settings." else "Couldn't connect."
+                val reason = "Couldn't connect."
                 onAttemptsExhausted()
                 mutableState.value = BikeConnectionState.Failed(reason, retriesExhausted = true)
                 mutableDiagnostics.update { it.copy(suppressionReason = reason) }
@@ -200,8 +189,7 @@ internal class AndroidBikeConnection(
         /** An authenticated session ran and has now ended. */
         data object Ended : AttemptOutcome
 
-        /** [silent] when the link came up but the cluster never sent anything over it. */
-        data class Retry(val message: String, val silent: Boolean = false) : AttemptOutcome
+        data class Retry(val message: String) : AttemptOutcome
         data class Stop(val message: String, val riderMessage: String) : AttemptOutcome
     }
 
@@ -227,7 +215,7 @@ internal class AndroidBikeConnection(
                 authenticate(target, device)
             }
         } catch (_: TimeoutCancellationException) {
-            AttemptOutcome.Retry("Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms", silent = manager.wasConnected && !sawAnyValue)
+            AttemptOutcome.Retry("Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms")
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
             // A peer that is not this vehicle, or a discovery that returned nothing usable, is
@@ -236,7 +224,7 @@ internal class AndroidBikeConnection(
                 AttemptOutcome.Stop("Motorcycle companion profile is incomplete", "Couldn't connect.")
             } else {
                 val reason = (error as? RequestFailedException)?.let { statusName(it.status) } ?: error.javaClass.simpleName
-                AttemptOutcome.Retry("Connection failed: $reason", silent = manager.wasConnected && !sawAnyValue)
+                AttemptOutcome.Retry("Connection failed: $reason")
             }
         }
         if (failed != null) {
@@ -270,13 +258,16 @@ internal class AndroidBikeConnection(
             val answered = CompletableDeferred<Boolean>().also { challengeAnswered = it }
             setProtection(ProtectionPhase.SubscribingChallenge)
             // The challenge can arrive before the subscription's own callback; the value callback
-            // is registered first, so it is answered either way.
-            if (!manager.subscribe(BleCharacteristics.ProtectionChallenge).await("subscribing to the challenge")) {
-                return AttemptOutcome.Retry("Could not enable motorcycle authentication indications", silent = !sawAnyValue)
+            // is registered first, so it is answered either way. Once a challenge has arrived the
+            // subscription demonstrably worked, so a late error status on it is superseded.
+            if (!manager.subscribe(BleCharacteristics.ProtectionChallenge).await("subscribing to the challenge") &&
+                lastChallenge == null
+            ) {
+                return AttemptOutcome.Retry("Could not enable motorcycle authentication indications")
             }
-            setProtection(ProtectionPhase.AwaitingChallenge)
+            if (lastChallenge == null) setProtection(ProtectionPhase.AwaitingChallenge)
             when (withTimeoutOrNull(ChallengeTimeoutMillis) { answered.await() }) {
-                null -> return AttemptOutcome.Retry("Motorcycle authentication challenge timed out", silent = !sawAnyValue)
+                null -> return AttemptOutcome.Retry("Motorcycle authentication challenge timed out")
                 false -> {
                     // The bike offered a challenge this build cannot answer, so its stored
                     // acceptance is no longer valid either.
@@ -300,7 +291,7 @@ internal class AndroidBikeConnection(
         }
         journal.record("Required motorcycle subscriptions are ready")
         if (withTimeoutOrNull(VerificationTimeoutMillis) { sessionEvidence.first { it } } == null) {
-            return AttemptOutcome.Retry("Protected session verification timed out", silent = !sawAnyValue)
+            return AttemptOutcome.Retry("Protected session verification timed out")
         }
         protectionAcceptance.markAccepted(target.address)
         mutableDiagnostics.update { it.copy(protectionPath = path) }
@@ -326,7 +317,6 @@ internal class AndroidBikeConnection(
     /** Routes one value from the cluster. Runs on the manager's callback thread, the main one. */
     private fun onValue(uuid: UUID, value: ByteArray) {
         captureRecorder.record(BleCaptureDirection.Notification, uuid, value)
-        sawAnyValue = true
         val now = System.currentTimeMillis()
         val frameLine = "${uuid.shortName()} ${value.toSpacedHex()}"
         when (uuid) {
@@ -391,6 +381,8 @@ internal class AndroidBikeConnection(
         val characteristic = manager.characteristic(BleCharacteristics.ProtectionResponse) ?: return
         setProtection(ProtectionPhase.Responding, ProtectionPath.ChallengeIndication)
         captureRecorder.record(BleCaptureDirection.Outbound, BleCharacteristics.ProtectionResponse, response)
+        // As the OEM app does: answer and carry on. A failed write leaves the handshake to time out
+        // and the attempt to retry.
         manager.write(characteristic, response, BikeWriteMode.Default)
             .done {
                 journal.record("Protection response write completed")
@@ -404,9 +396,13 @@ internal class AndroidBikeConnection(
     private suspend fun pollRssi() {
         while (true) {
             delay(RssiIntervalMillis.milliseconds)
-            val rssi = runCatching { manager.rssi().suspend() }.getOrNull() ?: continue
-            mutableDiagnostics.update { it.copy(rssi = rssi) }
-            (mutableState.value as? BikeConnectionState.Connected)?.let { mutableState.value = it.copy(rssi = rssi) }
+            // Through the same deadline as every other request: a read that never calls back would
+            // otherwise hold Nordic's queue, and every display write behind it.
+            var rssi: Int? = null
+            if (!manager.rssi().with { _, value -> rssi = value }.await("reading RSSI", logFailures = false)) continue
+            val reading = rssi ?: continue
+            mutableDiagnostics.update { it.copy(rssi = reading) }
+            (mutableState.value as? BikeConnectionState.Connected)?.let { mutableState.value = it.copy(rssi = reading) }
         }
     }
 
@@ -414,12 +410,12 @@ internal class AndroidBikeConnection(
      * Enqueues a request and waits for its outcome. A request that never calls back leaves the
      * stack unable to do anything else on this link, so the link is retired.
      */
-    private suspend fun Request.await(label: String): Boolean {
+    private suspend fun Request.await(label: String, logFailures: Boolean = true): Boolean {
         val outcome = withTimeoutOrNull(OperationTimeoutMillis) {
             suspendCancellableCoroutine { continuation ->
                 done { if (continuation.isActive) continuation.resume(true) }
                     .fail { _, status ->
-                        journal.record("GATT failure while $label: ${statusName(status)}")
+                        if (logFailures) journal.record("GATT failure while $label: ${statusName(status)}")
                         if (continuation.isActive) continuation.resume(false)
                     }
                     .invalid { if (continuation.isActive) continuation.resume(false) }
@@ -435,7 +431,6 @@ internal class AndroidBikeConnection(
 
     private fun resetLinkDiagnostics(bonded: Boolean) {
         manager.beginAttempt()
-        sawAnyValue = false
         sessionEvidence.value = false
         challengeAnswered = null
         lastChallenge = null
@@ -544,15 +539,12 @@ internal class AndroidBikeConnection(
         private val characteristics = mutableMapOf<UUID, BluetoothGattCharacteristic>()
         var profileIncomplete = false
             private set
-        var wasConnected = false
-            private set
         val currentMtu: Int get() = mtu
 
         fun characteristic(uuid: UUID): BluetoothGattCharacteristic? = characteristics[uuid]
 
         fun beginAttempt() {
             profileIncomplete = false
-            wasConnected = false
         }
 
         /**
@@ -560,7 +552,6 @@ internal class AndroidBikeConnection(
          * advertised and is not guaranteed stable across firmware.
          */
         override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
-            wasConnected = true
             characteristics.clear()
             gatt.services.flatMap { it.characteristics }.forEach { characteristics[it.uuid] = it }
             mutableDiagnostics.update { diagnostics ->
@@ -616,9 +607,6 @@ internal class AndroidBikeConnection(
 
         /** Long, because first-time pairing may be waiting on the rider to confirm a prompt. */
         const val BondTimeoutMillis = 60_000L
-
-        /** Connected-but-silent attempts before the exhaustion message names re-pairing. */
-        const val MinSilentAttempts = 2
 
         /** The protection pair and the session's subscription set. HID over GATT is hidden from apps. */
         val RequiredCharacteristics = listOf(BleCharacteristics.ProtectionChallenge, BleCharacteristics.ProtectionResponse) +

@@ -62,6 +62,23 @@ class SettingsMigrationTest {
     }
 
     @Test
+    fun `the older enabled-app key becomes the disabled set`() = runBlocking {
+        context.getSharedPreferences("app_settings", Context.MODE_PRIVATE).edit(commit = true) {
+            putStringSet("notification_packages_v2", SupportedNotificationAppsByPackage.keys - "com.whatsapp")
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val store = DataStoreFactory.create(
+            serializer = JsonSerializer(AppSettings.serializer(), AppSettings()),
+            migrations = listOf(legacySettingsMigration(context)),
+            scope = scope,
+            produceFile = { File(context.filesDir, "settings-legacy-test.json") },
+        )
+
+        assertEquals(setOf("com.whatsapp"), store.data.first().disabledNotificationPackages)
+        scope.cancel()
+    }
+
+    @Test
     fun `protection acceptance, identity and connection demand are carried into the link store`() = runBlocking {
         val address = requireNotNull(MacAddress.fromString("CC:B3:1E:C1:E1:B7"))
         context.getSharedPreferences("ble_protection_trust", Context.MODE_PRIVATE).edit(commit = true) {

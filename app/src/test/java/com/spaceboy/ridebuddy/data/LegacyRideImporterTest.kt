@@ -107,6 +107,7 @@ class LegacyRideImporterTest {
 
         assertEquals(0, history.rides().count())
         assertTrue(legacyFile.exists())
+        assertTrue(backupSnapshot.exists())
     }
 
     @Test
@@ -130,6 +131,7 @@ class LegacyRideImporterTest {
         val failure = runCatching { importer().importIfPresent() }
 
         assertTrue(failure.isFailure)
+        assertTrue(backupSnapshot.exists())
         assertEquals(0, history.rides().count())
         assertEquals(0, samples.samples().count())
         assertTrue(legacyFile.exists())

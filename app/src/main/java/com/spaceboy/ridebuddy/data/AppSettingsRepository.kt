@@ -194,7 +194,11 @@ internal fun SharedPreferencesView.toAppSettings(defaults: AppSettings): AppSett
     themeMode = enum("theme_mode", defaults.themeMode),
     dynamicColor = getBoolean("dynamic_color", defaults.dynamicColor),
     highContrast = getBoolean("high_contrast", defaults.highContrast),
-    disabledNotificationPackages = getStringSet("notification_packages_disabled") ?: defaults.disabledNotificationPackages,
+    // 1.0 also read two older keys that held the enabled apps rather than the disabled ones.
+    disabledNotificationPackages = getStringSet("notification_packages_disabled")
+        ?: getStringSet("notification_packages_v2")?.let { enabled -> SupportedNotificationAppsByPackage.keys - enabled }
+        ?: getStringSet("notification_packages")?.let { enabled -> SupportedNotificationAppsByPackage.keys - enabled }
+        ?: defaults.disabledNotificationPackages,
 )
 
 private inline fun <reified T : Enum<T>> SharedPreferencesView.enum(key: String, fallback: T): T =

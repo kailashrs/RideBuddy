@@ -24,7 +24,6 @@ internal class LegacyRideImporter(
 ) {
     /** Returns the number of rides imported. */
     suspend fun importIfPresent(): Int {
-        legacyBackupSnapshot.delete()
         if (!legacyDatabase.isFile) return 0
         if (history.rides().count() > 0) {
             Log.w(LogTag, "Ride history already populated; leaving ${legacyDatabase.name} untouched")
@@ -57,6 +56,9 @@ internal class LegacyRideImporter(
             legacy.close()
         }
         retireLegacyFiles()
+        // The 1.0 backup snapshot duplicates what was just imported; it goes only now, so a
+        // failed import never costs the rider their only other copy.
+        legacyBackupSnapshot.delete()
         Log.i(LogTag, "Imported ride history from ${legacyDatabase.name}")
         return history.rides().count()
     }
