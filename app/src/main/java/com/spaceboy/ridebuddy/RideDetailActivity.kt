@@ -18,10 +18,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,8 +37,6 @@ import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -272,6 +271,11 @@ class RideDetailActivity : ComponentActivity() {
                         buildRideDetailUiData(resolvedRide, loadedSamples, units)
                     },
                 )
+                val namedRide = container.rideRecorder.refreshLocationLabels(resolvedRide)
+                val displayed = loadState as? RideDetailLoadState.Loaded
+                if (displayed?.data?.ride?.id == namedRide.id && namedRide != resolvedRide) {
+                    loadState = RideDetailLoadState.Loaded(displayed.data.copy(ride = namedRide))
+                }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -529,33 +533,39 @@ internal fun RideDetailContent(
                 }
             }
         }
-        item(key = "export_buttons", contentType = "action_buttons") {
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onExportCsv, enabled = data.hasSamples) { Text("Export CSV") }
-                Button(onClick = onExportGpx, enabled = data.hasLocations) { Text("Export GPX") }
-            }
-        }
-        item(key = "share_buttons", contentType = "action_buttons") {
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onShare) {
-                    Icon(
-                        Icons.Outlined.Share,
-                        contentDescription = null,
-                        modifier = Modifier.size(ButtonDefaults.IconSize),
-                    )
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Share")
-                }
-                OutlinedButton(onClick = onOpenParking, enabled = ride.endLatitude != null && ride.endLongitude != null) {
-                    Icon(
-                        Icons.Outlined.LocationOn,
-                        contentDescription = null,
-                        modifier = Modifier.size(ButtonDefaults.IconSize),
-                    )
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Parking location")
+        item(key = "ride_actions", contentType = "action_buttons") {
+            val fontScale = LocalDensity.current.fontScale
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stacked = maxWidth < 340.dp || fontScale > 1.3f
+                val actions: List<@Composable (Modifier) -> Unit> = listOf(
+                    { actionModifier ->
+                        OutlinedButton(onClick = onExportCsv, enabled = data.hasSamples, modifier = actionModifier) {
+                            Text("Export CSV", textAlign = TextAlign.Center)
+                        }
+                    },
+                    { actionModifier ->
+                        OutlinedButton(onClick = onExportGpx, enabled = data.hasLocations, modifier = actionModifier) {
+                            Text("Export GPX", textAlign = TextAlign.Center)
+                        }
+                    },
+                    { actionModifier ->
+                        OutlinedButton(onClick = onShare, modifier = actionModifier) {
+                            Text("Share", textAlign = TextAlign.Center)
+                        }
+                    },
+                    { actionModifier ->
+                        OutlinedButton(onClick = onOpenParking,
+                            enabled = ride.endLatitude != null && ride.endLongitude != null, modifier = actionModifier) {
+                            Text("Parking location", textAlign = TextAlign.Center)
+                        }
+                    },
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    actions.chunked(if (stacked) 1 else 2).forEach { row ->
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            row.forEach { action -> action(Modifier.weight(1f).fillMaxHeight()) }
+                        }
+                    }
                 }
             }
         }

@@ -49,6 +49,8 @@
     <string name="history_today">Today</string>
     <string name="history_yesterday">Yesterday</string>
     <string name="history_apply">Apply</string>
+    <string name="history_start_date">Start date</string>
+    <string name="history_end_date">End date</string>
     <string name="history_cancel">Cancel</string>
     <plurals name="history_ride_count">
         <item quantity="one">%d ride</item>

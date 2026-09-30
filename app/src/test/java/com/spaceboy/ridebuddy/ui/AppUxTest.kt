@@ -77,6 +77,45 @@ class AppUxTest {
         capture("insights-metrics-large-text")
     }
 
+    @Test
+    @Config(qualifiers = "en-rGB-w393dp-h851dp-xxhdpi")
+    fun insightsKeepsTwoMetricsPerRowOnANormalPhone() {
+        compose.setContent { Rs457Theme(dynamicColor = false) {
+            InsightsScreen(insights = AppUiFixture.state(MainUiState()).insights, units = DistanceUnits.Metric,
+                selectedPeriod = InsightPeriod.ThirtyDays, onPeriodSelected = {})
+        } }
+        compose.onNodeWithText("Rides").performScrollTo()
+        val rides = compose.onNodeWithText("Rides").getUnclippedBoundsInRoot()
+        val time = compose.onNodeWithText("Ride time").getUnclippedBoundsInRoot()
+        assertEquals(rides.top.value, time.top.value, 1f)
+        assertTrue(time.left > rides.right)
+        capture("insights-two-columns")
+        compose.onNodeWithText("Fuel and mileage are estimates.").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun rideDetailButtonsHaveEqualWidthsAndAlignedColumns() {
+        val chart = TelemetryChartData(emptyList(), emptyList())
+        var shares = 0
+        var parking = 0
+        compose.setContent { Rs457Theme(dynamicColor = false) { Surface(Modifier.fillMaxSize()) {
+            RideDetailContent(RideDetailUiData(AppUiFixture.ride.copy(endLatitude = 13.05, endLongitude = 80.28),
+                false, false, emptyList(), chart, chart, chart, emptyList()), DistanceUnits.Metric,
+                onExportCsv = {}, onExportGpx = {}, onShare = { shares++ }, onOpenParking = { parking++ })
+        } } }
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Parking location"))
+        fun bounds(label: String) = compose.onNode(hasClickAction() and hasText(label)).getUnclippedBoundsInRoot()
+        val csv = bounds("Export CSV"); val gpx = bounds("Export GPX")
+        val share = bounds("Share"); val location = bounds("Parking location")
+        assertEquals((csv.right - csv.left).value, (gpx.right - gpx.left).value, 1f)
+        assertEquals(csv.left.value, share.left.value, 1f)
+        assertEquals(gpx.left.value, location.left.value, 1f)
+        assertEquals((share.bottom - share.top).value, (location.bottom - location.top).value, 1f)
+        compose.onNodeWithText("Share").performClick()
+        compose.onNodeWithText("Parking location").performClick()
+        assertEquals(1, shares); assertEquals(1, parking)
+        capture("ride-details-aligned-actions")
+    }
+
     @Test fun insightsEmptyPeriodShowsOneClearState() {
         compose.setContent { Rs457Theme(dynamicColor = false) {
             InsightsScreen(insights = RideInsights(), units = DistanceUnits.Metric,

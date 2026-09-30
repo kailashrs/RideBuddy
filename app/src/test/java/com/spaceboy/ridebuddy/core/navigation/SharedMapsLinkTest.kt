@@ -15,6 +15,30 @@ import org.junit.Test
  */
 class SharedMapsLinkTest {
     @Test
+    fun namedPlaceKeepsItsNameAlongsideExactCoordinates() {
+        val destination = directNavigationDestination(
+            "https://www.google.com/maps/place/Marina+Beach/data=!3d13.05!4d80.28",
+        )!!
+        assertEquals("Marina Beach", destination.title)
+        assertEquals(13.05, destination.latitude, 0.0)
+        assertEquals(80.28, destination.longitude, 0.0)
+    }
+
+    @Test
+    fun coordinatesDoNotBecomeTheDestinationTitle() {
+        val destination = directNavigationDestination("https://maps.google.com/?q=loc:13.05,80.28")!!
+        assertEquals("Destination", destination.title)
+        assertNull(navigationPlaceName("https://www.google.com/maps/dir//13.05,80.28/"))
+    }
+
+    @Test
+    fun namedDestinationQueryIsKept() {
+        assertEquals("Marina Beach", navigationPlaceName(
+            "https://www.google.com/maps/dir/?api=1&destination=Marina+Beach",
+        ))
+    }
+
+    @Test
     fun savedParkingSpotResolvesFromThePlaceCoordinatesInTheDataBlob() {
         val destination = directNavigationDestination(
             "https://www.google.com/maps/place/Parking+location/data=!4m6!3m5!1s0x3bae1670c9b44e6d:0x1" +

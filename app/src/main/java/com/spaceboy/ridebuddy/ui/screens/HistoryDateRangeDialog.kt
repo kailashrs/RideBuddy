@@ -1,12 +1,17 @@
 package com.spaceboy.ridebuddy.ui.screens
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.platform.LocalConfiguration
+import java.time.format.DateTimeFormatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.Surface
@@ -49,6 +54,10 @@ internal fun HistoryDateRangeDialog(
     val compactInput = (width > 0.dp && width < 360.dp) ||
         (height > 0.dp && height < 480.dp) || density.fontScale >= 1.5f
     val dialogWidth = if (width > 0.dp) (width - 32.dp).coerceIn(0.dp, 360.dp) else 360.dp
+    val locale = LocalConfiguration.current.locales[0]
+    val dateFormat = remember(locale) {
+        DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, "yMMMd"), locale)
+    }
     val selectableDates = remember(today) { object : SelectableDates {
         override fun isSelectableDate(utcTimeMillis: Long) =
             Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate() <= today
@@ -66,49 +75,74 @@ internal fun HistoryDateRangeDialog(
     LaunchedEffect(compactInput) {
         if (compactInput) state.displayMode = DisplayMode.Input
     }
-    // DatePickerDialog requires 360 dp internally, which clips controls on narrower windows.
-    // Keep the Material picker and dialog tokens, but allow this container to shrink.
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier.width(dialogWidth)
-                .heightIn(max = 560.dp),
-            shape = DatePickerDefaults.shape,
-            color = DatePickerDefaults.colors().containerColor,
-            tonalElevation = DatePickerDefaults.TonalElevation,
-        ) {
-            Column {
-                val pickerModifier = Modifier.fillMaxWidth().weight(1f, fill = false)
-                if (compactInput) {
-                    DateRangePicker(
-                        state = state,
-                        modifier = pickerModifier,
-                        title = { Text(stringResource(R.string.history_choose_dates),
-                            Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge) },
-                        headline = null,
-                        showModeToggle = false,
-                    )
-                } else {
-                    DateRangePicker(state = state, modifier = pickerModifier)
+    val picker: @Composable () -> Unit = {
+        DateRangePicker(
+            state = state,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+            title = {
+                Text(stringResource(R.string.history_choose_dates), Modifier.padding(24.dp),
+                    style = MaterialTheme.typography.titleLarge)
+            },
+            headline = if (compactInput) null else {
+                {
+                    // The default display-sized headline gives the second date only the
+                    // width left by the first. Equal columns keep both dates readable.
+                    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf(R.string.history_start_date to state.selectedStartDateMillis,
+                            R.string.history_end_date to state.selectedEndDateMillis).forEach { (label, millis) ->
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(label), style = MaterialTheme.typography.labelMedium)
+                                Text(millis?.let {
+                                    Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().format(dateFormat)
+                                } ?: "—", style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
                 }
-                FlowRow(
-                    modifier = Modifier.align(Alignment.End).padding(end = 8.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                ) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.history_cancel)) }
-                    TextButton(
-                        enabled = state.selectedStartDateMillis != null && state.selectedEndDateMillis != null,
-                        onClick = {
-                            val start = state.selectedStartDateMillis ?: return@TextButton
-                            val end = state.selectedEndDateMillis ?: return@TextButton
-                            onApply(HistoryFilter.Dates(
-                                Instant.ofEpochMilli(start).atZone(ZoneOffset.UTC).toLocalDate(),
-                                Instant.ofEpochMilli(end).atZone(ZoneOffset.UTC).toLocalDate(),
-                            ))
-                        },
-                    ) { Text(stringResource(R.string.history_apply)) }
+            },
+            showModeToggle = !compactInput,
+        )
+    }
+    val cancel: @Composable () -> Unit = {
+        TextButton(onClick = onDismiss) { Text(stringResource(R.string.history_cancel)) }
+    }
+    val apply: @Composable () -> Unit = {
+        TextButton(
+            enabled = state.selectedStartDateMillis != null && state.selectedEndDateMillis != null,
+            onClick = {
+                val start = state.selectedStartDateMillis ?: return@TextButton
+                val end = state.selectedEndDateMillis ?: return@TextButton
+                onApply(HistoryFilter.Dates(
+                    Instant.ofEpochMilli(start).atZone(ZoneOffset.UTC).toLocalDate(),
+                    Instant.ofEpochMilli(end).atZone(ZoneOffset.UTC).toLocalDate(),
+                ))
+            },
+        ) { Text(stringResource(R.string.history_apply)) }
+    }
+    if (!compactInput) {
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = apply,
+            dismissButton = cancel,
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) { picker() }
+    } else {
+        // The standard dialog requires 360 dp. Keep text input usable below that width
+        // and in short windows without squeezing the calendar or its touch targets.
+        BasicAlertDialog(onDismissRequest = onDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.width(dialogWidth).heightIn(max = 560.dp),
+                shape = DatePickerDefaults.shape,
+                color = DatePickerDefaults.colors().containerColor,
+                tonalElevation = DatePickerDefaults.TonalElevation) {
+                Column {
+                    Box(Modifier.weight(1f, fill = false)) { picker() }
+                    FlowRow(Modifier.align(Alignment.End).padding(end = 8.dp, bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                        cancel()
+                        apply()
+                    }
                 }
             }
         }

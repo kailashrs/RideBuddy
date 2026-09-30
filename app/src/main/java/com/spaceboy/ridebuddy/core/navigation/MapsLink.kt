@@ -17,11 +17,21 @@ import java.net.URLDecoder
  */
 internal fun directNavigationDestination(value: String): NavigationDestination? {
     val decoded = percentDecoded(value)
-    return coordinateFromText(value)
+    val coordinates = coordinateFromText(value)
         ?: coordinateFromText(extractNavigationQuery(value))
         ?: coordinateFromText(decoded)
         ?: degreesMinutesSecondsFrom(decoded)
         ?: mapsPathDestination(value)?.let { coordinateFromText(it) ?: degreesMinutesSecondsFrom(it) }
+    return coordinates?.copy(title = navigationPlaceName(value) ?: "Destination")
+}
+
+/** Keep the shared place name even when the link also supplies exact coordinates. */
+internal fun navigationPlaceName(value: String): String? {
+    val query = queryParameters(value).let { it["destination"] ?: it["query"] ?: it["q"] }
+    return sequenceOf(query, mapsPathDestination(value))
+        .filterNotNull()
+        .map { it.trim().removePrefix("loc:") }
+        .firstOrNull { it.isNotBlank() && coordinateFromText(it) == null && degreesMinutesSecondsFrom(it) == null }
 }
 
 private fun coordinateFromText(value: String): NavigationDestination? {
@@ -30,7 +40,7 @@ private fun coordinateFromText(value: String): NavigationDestination? {
             val latitude = match.groupValues[1].toDoubleOrNull() ?: return@let
             val longitude = match.groupValues[2].toDoubleOrNull() ?: return@let
             if (latitude in -90.0..90.0 && longitude in -180.0..180.0) {
-                return NavigationDestination(latitude, longitude, "Shared destination")
+                return NavigationDestination(latitude, longitude, "Destination")
             }
         }
     }
@@ -52,7 +62,7 @@ private fun degreesMinutesSecondsFrom(value: String): NavigationDestination? {
     val longitude = sexagesimalDegrees(match.groupValues[5], match.groupValues[6], match.groupValues[7], match.groupValues[8])
         ?: return null
     if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
-    return NavigationDestination(latitude, longitude, "Shared destination")
+    return NavigationDestination(latitude, longitude, "Destination")
 }
 
 private fun sexagesimalDegrees(degrees: String, minutes: String, seconds: String, hemisphere: String): Double? {

@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.core.navigation
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
+import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -44,7 +45,14 @@ class DestinationParser(context: Context) {
             directNavigationDestination(expanded)
                 ?: geocode(geocodableText(expanded) ?: throw UnreadableLinkException()).getOrThrow()
         }
-        Result.success(destination)
+        val namedDestination = if (destination.title == "Destination") {
+            // Naming a pin is optional; do not hold up a valid route for a slow lookup.
+            val name = withTimeoutOrNull(1_500L) {
+                RideLocationLabeler(appContext).placeName(destination.latitude, destination.longitude)
+            }
+            destination.copy(title = name ?: destination.title)
+        } else destination
+        Result.success(namedDestination)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (error: Exception) {

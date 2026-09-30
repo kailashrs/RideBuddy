@@ -13,6 +13,8 @@ import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.domain.TelemetryReading
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +39,28 @@ import org.junit.Test
  * exceeds the whole 1s + 2s failure backoff.
  */
 class TftNavigationBridgeTest {
+    @Test
+    fun `stopping navigation lets the in-flight write finish without disconnecting`() = withBridge { bridge, connection ->
+        connection.authenticate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val finished = CompletableDeferred<Unit>()
+        connection.beforeWrite = {
+            entered.complete(Unit)
+            release.await()
+            finished.complete(Unit)
+        }
+        bridge.start("Marina Beach")
+        withTimeout(3_000) { entered.await() }
+        bridge.stop()
+        assertFalse(finished.isCompleted)
+        release.complete(Unit)
+        withTimeout(3_000) { finished.await() }
+        settle()
+        assertTrue(connection.connectionState.value is BikeConnectionState.Connected)
+        assertTrue(BleCharacteristics.NavigationClear in connection.writtenCharacteristics())
+    }
+
     @Test
     fun `nothing is written while TFT output is disabled`() = withBridge(outputEnabled = false) { bridge, connection ->
         connection.authenticate()
@@ -309,6 +333,8 @@ private class FakeBikeConnection : BikeConnection {
     @Volatile
     var acceptWrites = true
 
+    var beforeWrite: suspend () -> Unit = {}
+
     /** Fails the next write to this characteristic only, then clears itself. */
     @Volatile
     var failOnce: UUID? = null
@@ -349,6 +375,7 @@ private class FakeBikeConnection : BikeConnection {
     override fun enqueueWrite(characteristic: UUID, payload: ByteArray) = Unit
 
     override suspend fun writeAndAwait(write: BikeWrite): Boolean {
+        beforeWrite()
         writes += write
         if (failOnce == write.characteristic) {
             failOnce = null

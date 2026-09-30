@@ -1,14 +1,11 @@
 package com.spaceboy.ridebuddy.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -153,7 +150,7 @@ fun InsightsScreen(
             )
         }
         Text(
-            "Fuel and mileage are estimated from the bike's reported mileage while moving.",
+            "Fuel and mileage are estimates.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -220,26 +217,22 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
 @Immutable
 private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
 
-/** Metrics keep two columns where the values fit, and stack at large text sizes. */
+/** Two equal columns, with content-driven height so larger text can wrap. */
 @Composable
 private fun MetricGrid(metrics: List<InsightMetric>) {
-    val fontScale = LocalDensity.current.fontScale
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = if (maxWidth < 360.dp || fontScale > 1.3f) 1 else 2
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            metrics.chunked(columns).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { (label, value, icon) ->
-                        OutlinedCard(Modifier.weight(1f)) {
-                            Column(Modifier.padding(16.dp)) {
-                                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(bottom = 8.dp))
-                                Metric(label, value)
-                            }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        metrics.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { (label, value, icon) ->
+                    OutlinedCard(Modifier.weight(1f).fillMaxHeight()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp))
+                            Metric(label, value)
                         }
                     }
-                    if (row.size < columns) Spacer(Modifier.weight(1f))
                 }
+                if (row.size < 2) Spacer(Modifier.weight(1f))
             }
         }
     }

@@ -6,6 +6,7 @@ import com.spaceboy.ridebuddy.domain.BikeConnection
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.TelemetryReading
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
+import com.spaceboy.ridebuddy.core.location.needsPlaceName
 import com.spaceboy.ridebuddy.core.location.RideLocationTracker
 import java.util.ArrayDeque
 import kotlinx.coroutines.CancellationException
@@ -79,9 +80,7 @@ class RideRecorder(
         onSaved = { rideId, ride ->
             // Enrichment is optional and runs after the primary save barrier opens.
             scope.launch {
-                val startArea = locationLabeler.label(ride.startLatitude, ride.startLongitude)
-                val endArea = locationLabeler.label(ride.endLatitude, ride.endLongitude)
-                updateRideAreas(rideId, startArea, endArea)
+                refreshLocationLabels(ride.copy(id = rideId))
             }
         },
         onFailure = { error -> Log.e(LogTag, "Could not save completed ride; retained for retry", error) },
@@ -124,9 +123,10 @@ class RideRecorder(
      * Holds an active ride open while the link is re-established.
      *
      * A stop cannot be confirmed without telemetry, so the pending confirmation is abandoned
-     * rather than allowed to fire blind. Running totals and stored samples are kept; only the
-     * live view and the derivation baselines are dropped, and [resumePending] makes the first
-     * frame after the gap rebuild those baselines instead of measuring across it.
+     * rather than allowed to fire blind. Running totals, stored samples and the bounded live
+     * graph are kept. Only the derivation baselines are dropped, so [resumePending] makes the
+     * first frame after the gap rebuild them instead of measuring across it. The chart leaves
+     * longer unmeasured intervals blank.
      */
     private fun pauseForReconnect() {
         if (mutableActiveRide.value != null) {
@@ -135,7 +135,8 @@ class RideRecorder(
             stopCandidate = null
             resumePending = true
         }
-        clearLiveTelemetryState()
+        lastLiveFrame = null
+        lastLiveAtElapsedRealtime = null
     }
 
     private fun clearLiveTelemetryState() {
@@ -330,14 +331,21 @@ class RideRecorder(
         }
     }
 
-    private suspend fun updateRideAreas(rideId: Long, startArea: String?, endArea: String?) {
-        if (startArea == null && endArea == null) return
-        try {
-            repository.updateAreas(rideId, startArea, endArea)
+    /** Retry unresolved names when a ride is opened; never block its initial display or saving. */
+    suspend fun refreshLocationLabels(ride: Ride): Ride {
+        val startArea = if (needsPlaceName(ride.startArea))
+            locationLabeler.label(ride.startLatitude, ride.startLongitude) ?: ride.startArea else ride.startArea
+        val endArea = if (needsPlaceName(ride.endArea))
+            locationLabeler.label(ride.endLatitude, ride.endLongitude) ?: ride.endArea else ride.endArea
+        if (startArea == ride.startArea && endArea == ride.endArea) return ride
+        return try {
+            repository.updateAreas(ride.id, startArea, endArea)
+            ride.copy(startArea = startArea, endArea = endArea)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             Log.w(LogTag, "Ride saved without location labels", error)
+            ride
         }
     }
 
