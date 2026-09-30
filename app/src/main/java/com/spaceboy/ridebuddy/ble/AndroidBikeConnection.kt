@@ -83,8 +83,10 @@ internal class AndroidBikeConnection(
     private var target: BikeConnectionTarget? = null
     private var session: Job? = null
 
-    /** Completed by the challenge callback: true once a response lands, false for an unknown challenge. */
-    private var challengeAnswered: CompletableDeferred<Boolean>? = null
+    /** Completed by the challenge callback once a response lands, fails, or cannot be given. */
+    private var challengeAnswered: CompletableDeferred<ChallengeOutcome>? = null
+
+    private enum class ChallengeOutcome { Answered, WriteFailed, Unsupported }
     private var lastChallenge: ByteArray? = null
 
     /** Proof the session is live: a value the cluster only sends over an established link. */
@@ -255,7 +257,7 @@ internal class AndroidBikeConnection(
         val path = if (storedAcceptance) {
             ProtectionPath.StoredAcceptance
         } else {
-            val answered = CompletableDeferred<Boolean>().also { challengeAnswered = it }
+            val answered = CompletableDeferred<ChallengeOutcome>().also { challengeAnswered = it }
             setProtection(ProtectionPhase.SubscribingChallenge)
             // The challenge can arrive before the subscription's own callback; the value callback
             // is registered first, so it is answered either way. Once a challenge has arrived the
@@ -268,13 +270,14 @@ internal class AndroidBikeConnection(
             if (lastChallenge == null) setProtection(ProtectionPhase.AwaitingChallenge)
             when (withTimeoutOrNull(ChallengeTimeoutMillis) { answered.await() }) {
                 null -> return AttemptOutcome.Retry("Motorcycle authentication challenge timed out")
-                false -> {
+                ChallengeOutcome.Unsupported -> {
                     // The bike offered a challenge this build cannot answer, so its stored
                     // acceptance is no longer valid either.
                     protectionAcceptance.clear(target.address)
                     return AttemptOutcome.Stop("Bike sent an unsupported authentication challenge", "Re-pair the bike in Settings.")
                 }
-                true -> Unit
+                ChallengeOutcome.WriteFailed -> return AttemptOutcome.Retry("Motorcycle authentication response could not be delivered")
+                ChallengeOutcome.Answered -> Unit
             }
             // The cluster will not issue a second challenge after accepting one, so the shortcut
             // is recorded now rather than once the whole session is up.
@@ -375,20 +378,23 @@ internal class AndroidBikeConnection(
         lastChallenge = challenge.copyOf()
         val response = ProtectionHandshake.responseFor(challenge)
         if (response == null) {
-            challengeAnswered?.complete(false)
+            challengeAnswered?.complete(ChallengeOutcome.Unsupported)
             return
         }
         val characteristic = manager.characteristic(BleCharacteristics.ProtectionResponse) ?: return
         setProtection(ProtectionPhase.Responding, ProtectionPath.ChallengeIndication)
         captureRecorder.record(BleCaptureDirection.Outbound, BleCharacteristics.ProtectionResponse, response)
-        // As the OEM app does: answer and carry on. A failed write leaves the handshake to time out
-        // and the attempt to retry.
+        // A failed write ends the attempt straight away as an ordinary retry, rather than waiting
+        // out the challenge timeout.
         manager.write(characteristic, response, BikeWriteMode.Default)
             .done {
                 journal.record("Protection response write completed")
-                challengeAnswered?.complete(true)
+                challengeAnswered?.complete(ChallengeOutcome.Answered)
             }
-            .fail { _, status -> journal.record("Protection response write failed: ${statusName(status)}") }
+            .fail { _, status ->
+                journal.record("Protection response write failed: ${statusName(status)}")
+                challengeAnswered?.complete(ChallengeOutcome.WriteFailed)
+            }
             .enqueue()
     }
 
