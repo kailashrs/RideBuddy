@@ -67,6 +67,10 @@ internal object LiveCardFixture {
     @Composable
     fun LiveScreenUnderTest(
         ride: ActiveRide?,
+        frame: TelemetryFrame = Frame,
+        guidance: GuidanceState = GuidanceState(),
+        onStopNavigation: () -> Unit = {},
+        onOpenActiveNavigation: () -> Unit = {},
         onEndRide: () -> Unit = {},
         samples: List<RideSample> = emptyList(),
         sharedDestination: String? = null,
@@ -81,7 +85,7 @@ internal object LiveCardFixture {
             bikeAssociated = true,
             pairingInProgress = false,
             live = LiveTelemetryStreams(
-                telemetry = MutableStateFlow(Frame),
+                telemetry = MutableStateFlow(frame),
                 diagnostics = MutableStateFlow(BleDiagnostics(rssi = -64)),
                 activeRide = MutableStateFlow(ride),
                 saveFailed = MutableStateFlow(false),
@@ -89,15 +93,15 @@ internal object LiveCardFixture {
                 rideMetrics = MutableStateFlow(calculateLiveRideMetrics(samples)),
             ),
             lastRide = null,
-            guidance = GuidanceState(),
+            guidance = guidance,
             units = DistanceUnits.Metric,
             onConnectBike = {},
             onDisconnectBike = {},
             onEndRide = onEndRide,
             onRetryRideSave = {},
             onStartNavigation = {},
-            onOpenActiveNavigation = {},
-            onStopNavigation = {},
+            onOpenActiveNavigation = onOpenActiveNavigation,
+            onStopNavigation = onStopNavigation,
             onSharedDestinationHandled = onSharedDestinationHandled,
             onCancelNavigationStart = {},
         )

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
@@ -52,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
@@ -59,7 +61,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.spaceboy.ridebuddy.MaxDestinationInputLength
@@ -257,26 +258,21 @@ fun LiveScreen(
                         }
                     }
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        OutlinedButton(
                             onClick = onStopNavigation,
-                            modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.large,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
                         ) {
                             Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                             Text("End route")
                         }
-                        Button(
+                        FilledTonalButton(
                             onClick = onOpenActiveNavigation,
-                            modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.large,
                         ) {
                             Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -365,26 +361,13 @@ fun LiveScreen(
         }
     }
     if (isNavigationStarting) {
-        Dialog(onDismissRequest = onCancelNavigationStart) {
-            Card {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.width(16.dp))
-                        Text("Finding route…")
-                    }
-                    TextButton(
-                        onClick = onCancelNavigationStart,
-                        modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            }
-        }
+        AlertDialog(
+            onDismissRequest = onCancelNavigationStart,
+            title = { Text("Finding route…") },
+            text = { CircularProgressIndicator(Modifier.size(32.dp)) },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = onCancelNavigationStart) { Text("Cancel") } },
+        )
     }
 }
 
@@ -425,12 +408,10 @@ internal fun ConnectionCard(
     }
 
     if (connected) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -444,6 +425,8 @@ internal fun ConnectionCard(
                 Text(
                     state.deviceName,
                     style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             TextButton(onClick = onDisconnectBike) {
@@ -535,14 +518,14 @@ private fun TelemetryCard(
 
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Baseline alignment rather than a tuned bottom padding: the unit sits on the
                 // speed's own baseline whatever the display scale does to either type size.
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         displayedSpeed.toString(),
                         style = TelemetryHero,

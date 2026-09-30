@@ -110,9 +110,6 @@ object UnitFormatter {
     fun formatDateTime(millis: Long): String =
         DateFormat.getDateTimeInstance().format(Date(millis))
 
-    fun formatShortDateTime(millis: Long): String =
-        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
-
     fun formatTime(millis: Long): String =
         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(millis))
 }

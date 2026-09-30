@@ -103,7 +103,7 @@ fun OnboardingScreen(
                 2 -> OnboardingPage(
                     icon = if (preciseLocationGranted) Icons.Outlined.CheckCircle else Icons.Outlined.LocationOn,
                     title = "Route recording",
-                    body = "Location adds route maps and distance to ride history.",
+                    body = "Location adds a map to each recorded ride.",
                     actions = if (preciseLocationGranted) emptyList() else listOf("Allow precise location" to onRequestPreciseLocation),
                     status = if (preciseLocationGranted) "Precise location granted" else "Optional, but required for route maps",
                 )
@@ -141,9 +141,9 @@ fun OnboardingScreen(
                     icon = if (navigationConfigured) Icons.Outlined.CheckCircle else Icons.Outlined.Directions,
                     title = if (navigationConfigured) "Navigation configured" else "Google navigation",
                     body = if (navigationConfigured) {
-                        "Your Google Navigation key is securely stored on this device to enable turn-by-turn route guidance on your dashboard."
+                        "Your Google Navigation key is saved."
                     } else {
-                        "Navigation is optional. Set up a Google Navigation key anytime in settings, or enjoy ride data and ride history without it."
+                        "Add a Google Navigation key in Settings to use turn-by-turn directions."
                     },
                     actions = if (navigationConfigured) emptyList() else listOf("Set up navigation" to onSetUpNavigation),
                 )
@@ -169,7 +169,7 @@ fun OnboardingScreen(
                 if (step < steps - 1) {
                     Button(onClick = { step++ }) { Text("Continue") }
                 } else {
-                    Button(onClick = onComplete) { Text("Get Started") }
+                    Button(onClick = onComplete) { Text("Get started") }
                 }
             }
             TextButton(onClick = onComplete) { Text("Skip setup") }

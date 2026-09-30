@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
@@ -356,7 +357,7 @@ private sealed interface RideDetailLoadState {
     data class Error(val message: String) : RideDetailLoadState
 }
 
-private data class RideDetailUiData(
+internal data class RideDetailUiData(
     val ride: Ride,
     val hasSamples: Boolean,
     val hasLocations: Boolean,
@@ -447,7 +448,7 @@ private val NoOpLazyListPrefetchStrategy = object : LazyListPrefetchStrategy {
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun RideDetailContent(
+internal fun RideDetailContent(
     data: RideDetailUiData,
     units: DistanceUnits,
     modifier: Modifier = Modifier,
@@ -519,10 +520,8 @@ private fun RideDetailContent(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Detailed ride data", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "This ride no longer keeps its second-by-second ride data, so the " +
-                                "charts, ride events and CSV export are unavailable. Everything " +
-                                "above is kept for good. Change how long detail is kept under " +
-                                "Settings → Ride Data & Export.",
+                            "Detailed data is unavailable. " +
+                                "Change retention in Settings → Ride data & export.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -531,14 +530,16 @@ private fun RideDetailContent(
             }
         }
         item(key = "export_buttons", contentType = "action_buttons") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onExportCsv, modifier = Modifier.weight(1f), enabled = data.hasSamples) { Text("Export CSV") }
-                Button(onClick = onExportGpx, modifier = Modifier.weight(1f), enabled = data.hasLocations) { Text("Export GPX") }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onExportCsv, enabled = data.hasSamples) { Text("Export CSV") }
+                Button(onClick = onExportGpx, enabled = data.hasLocations) { Text("Export GPX") }
             }
         }
         item(key = "share_buttons", contentType = "action_buttons") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onShare) {
                     Icon(
                         Icons.Outlined.Share,
                         contentDescription = null,
@@ -547,14 +548,14 @@ private fun RideDetailContent(
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                     Text("Share")
                 }
-                OutlinedButton(onClick = onOpenParking, modifier = Modifier.weight(1f), enabled = ride.endLatitude != null) {
+                OutlinedButton(onClick = onOpenParking, enabled = ride.endLatitude != null && ride.endLongitude != null) {
                     Icon(
                         Icons.Outlined.LocationOn,
                         contentDescription = null,
                         modifier = Modifier.size(ButtonDefaults.IconSize),
                     )
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Parking")
+                    Text("Parking location")
                 }
             }
         }

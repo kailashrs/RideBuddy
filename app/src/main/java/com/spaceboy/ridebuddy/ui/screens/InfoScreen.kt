@@ -2,7 +2,6 @@ package com.spaceboy.ridebuddy.ui.screens
 
 import android.os.PowerManager
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,20 +15,22 @@ import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.spaceboy.ridebuddy.ui.components.SettingsRow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
@@ -39,6 +40,7 @@ private data class InfoRowItem(
     val label: String,
     val value: String,
     val icon: ImageVector,
+    val onClick: (() -> Unit)? = null,
 )
 
 /**
@@ -53,16 +55,21 @@ fun InfoScreen(
     connectionState: BikeConnectionState,
     identity: BikeIdentity,
     notificationAccessEnabled: Boolean,
+    onOpenNavigationSettings: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onOpenAppPermissions: () -> Unit,
 ) {
     val connected = connectionState is BikeConnectionState.Connected
     val context = LocalContext.current
-    val backgroundAccess = context.getSystemService(PowerManager::class.java)
-        ?.isIgnoringBatteryOptimizations(context.packageName)
-        ?: false
+    var backgroundAccess by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        backgroundAccess = context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }
     val missingIdentityLabel = if (connected) {
-        "Not reported by motorcycle"
+        "Not reported"
     } else {
-        "Available after a successful connection"
+        "Connect to view"
     }
 
     Column(
@@ -73,12 +80,6 @@ fun InfoScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "Motorcycle & setup",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.semantics { heading() },
-            )
             Text(
                 text = when (connectionState) {
                     is BikeConnectionState.Connected -> "Connected to ${connectionState.deviceName}"
@@ -109,22 +110,25 @@ fun InfoScreen(
             rows = listOf(
                 InfoRowItem(
                     "Navigation",
-                    if (navigationConfigured) "Ready" else "Set up in Settings",
+                    if (navigationConfigured) "Key configured" else "Set up navigation",
                     Icons.Outlined.Navigation,
+                    onOpenNavigationSettings,
                 ),
                 InfoRowItem(
-                    "Calls & alerts",
-                    if (notificationAccessEnabled) "Ready" else "Enable notification access in Settings",
+                    "App alerts",
+                    if (notificationAccessEnabled) "Enabled" else "Set up alerts",
                     Icons.Outlined.Notifications,
+                    onOpenNotificationAccess,
                 ),
                 InfoRowItem(
-                    "Background connection",
+                    "Battery use",
                     if (backgroundAccess) {
-                        "Allowed to keep running"
+                        "Unrestricted"
                     } else {
-                        "Battery optimization may pause reconnects"
+                        "Optimized"
                     },
                     Icons.Outlined.BatteryAlert,
+                    onOpenAppPermissions,
                 ),
             ),
         )
@@ -148,25 +152,8 @@ private fun InfoSection(title: String, rows: List<InfoRowItem>) {
                     if (index > 0) {
                         HorizontalDivider(Modifier.padding(start = 56.dp))
                     }
-                    ListItem(
-                        headlineContent = { Text(row.label) },
-                        supportingContent = {
-                            Text(
-                                text = row.value,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        },
-                        leadingContent = {
-                            Box(modifier = Modifier.padding(top = 4.dp)) {
-                                Icon(
-                                    imageVector = row.icon,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    )
+                    SettingsRow(icon = row.icon, title = row.label, supportingText = row.value,
+                        onClick = row.onClick)
                 }
             }
         }

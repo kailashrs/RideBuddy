@@ -6,14 +6,14 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.view.WindowManager
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,17 +26,17 @@ import androidx.compose.material.icons.outlined.Toll
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,11 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -84,6 +81,7 @@ fun NavigationSettingsScreen(
 ) {
     var apiKey by remember { mutableStateOf("") }
     var showApiKey by remember { mutableStateOf(false) }
+    var confirmRemoval by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val keyOperationInProgress = state.isLoading || state.isSaving
@@ -99,6 +97,23 @@ fun NavigationSettingsScreen(
 
     LaunchedEffect(state.maskedKey) {
         if (state.isConfigured) apiKey = ""
+    }
+
+    if (confirmRemoval) {
+        AlertDialog(
+            onDismissRequest = { confirmRemoval = false },
+            title = { Text("Remove API key?") },
+            text = { Text("You’ll need to add a key again to start new routes.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemoval = false
+                    apiKey = ""
+                    showApiKey = false
+                    onRemove()
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemoval = false }) { Text("Cancel") } },
+        )
     }
 
     Column(
@@ -129,7 +144,7 @@ fun NavigationSettingsScreen(
                     )
                     Text(
                         text = when {
-                            state.isLoading -> "Loading encrypted navigation settings"
+                            state.isLoading -> "Loading…"
                             state.maskedKey != null -> state.maskedKey
                             else -> "Add a key to enable Google turn-by-turn navigation"
                         },
@@ -145,7 +160,7 @@ fun NavigationSettingsScreen(
                 Row(modifier = Modifier.padding(16.dp)) {
                     Icon(Icons.Outlined.RestartAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text(
-                        text = "Restart the app before navigating so the SDK can use the changed key.",
+                        text = "Restart the app to use the updated key.",
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 16.dp),
                     )
@@ -192,7 +207,8 @@ fun NavigationSettingsScreen(
                 enabled = !keyOperationInProgress,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -208,11 +224,10 @@ fun NavigationSettingsScreen(
                 Button(
                     onClick = { onSave(apiKey) },
                     enabled = apiKey.isNotBlank() && !keyOperationInProgress,
-                    modifier = Modifier.weight(1f),
                 ) {
                     if (keyOperationInProgress) {
                         CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 12.dp),
+                            modifier = Modifier.padding(end = 8.dp).size(ButtonDefaults.IconSize),
                             strokeWidth = 2.dp,
                         )
                     }
@@ -220,26 +235,20 @@ fun NavigationSettingsScreen(
                 }
             }
             if (state.isConfigured) {
-                Row(modifier = Modifier.align(Alignment.End)) {
+                FlowRow(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onTest, enabled = !keyOperationInProgress) { Text("Test setup") }
-                    Button(
-                        onClick = {
-                            apiKey = ""
-                            showApiKey = false
-                            onRemove()
-                        },
+                    TextButton(
+                        onClick = { confirmRemoval = true },
                         enabled = !keyOperationInProgress,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ),
-                    ) { Text("Remove key") }
+                    ) { Text("Remove key", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
 
         Text(
-            text = "The key is encrypted with Android Keystore and never shown again. Restrict it in Google Cloud to this app's package and signing certificate.",
+            text = "Stored securely on this device. In Google Cloud, restrict the key to RideBuddy’s package and signing certificate.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -255,13 +264,13 @@ fun NavigationSettingsScreen(
             )
             OutlinedCard(modifier = Modifier.fillMaxWidth()) {
                 Column {
-                    PreferenceSwitch("Voice guidance", "Play spoken instructions", settings.voiceGuidance, Icons.Outlined.RecordVoiceOver, onVoiceGuidanceChanged)
+                    SettingsSwitchRow("Voice guidance", "Play spoken instructions", settings.voiceGuidance, icon = Icons.Outlined.RecordVoiceOver, onCheckedChange = onVoiceGuidanceChanged)
                     HorizontalDivider(Modifier.padding(start = 56.dp))
-                    PreferenceSwitch("Avoid tolls", "Prefer routes without toll roads", settings.avoidTolls, Icons.Outlined.Toll, onAvoidTollsChanged)
+                    SettingsSwitchRow("Avoid tolls", "Prefer routes without toll roads", settings.avoidTolls, icon = Icons.Outlined.Toll, onCheckedChange = onAvoidTollsChanged)
                     HorizontalDivider(Modifier.padding(start = 56.dp))
-                    PreferenceSwitch("Avoid highways", "Prefer local roads where possible", settings.avoidHighways, Icons.AutoMirrored.Outlined.AltRoute, onAvoidHighwaysChanged)
+                    SettingsSwitchRow("Avoid highways", "Prefer local roads where possible", settings.avoidHighways, icon = Icons.AutoMirrored.Outlined.AltRoute, onCheckedChange = onAvoidHighwaysChanged)
                     HorizontalDivider(Modifier.padding(start = 56.dp))
-                    PreferenceSwitch("Avoid ferries", "Do not include ferries in routes", settings.avoidFerries, Icons.Outlined.DirectionsBoat, onAvoidFerriesChanged)
+                    SettingsSwitchRow("Avoid ferries", "Prefer routes without ferries", settings.avoidFerries, icon = Icons.Outlined.DirectionsBoat, onCheckedChange = onAvoidFerriesChanged)
                 }
             }
         }
@@ -272,35 +281,4 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
-}
-
-/** Local switch row. The whole row is toggleable, so it reads as one control to a screen reader. */
-@Composable
-private fun PreferenceSwitch(
-    title: String,
-    supporting: String,
-    checked: Boolean,
-    icon: ImageVector,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(supporting) },
-        leadingContent = {
-            Box(modifier = Modifier.padding(top = 4.dp)) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-        },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.toggleable(
-            value = checked,
-            role = Role.Switch,
-            onValueChange = onCheckedChange,
-        ),
-    )
 }

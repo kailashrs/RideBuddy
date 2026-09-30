@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -41,11 +42,13 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
@@ -62,7 +65,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsSliderRow(
     title: String,
-    supportingText: String,
+    valueLabel: (Float) -> String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
@@ -75,7 +78,7 @@ internal fun SettingsSliderRow(
     Column(modifier = modifier.fillMaxWidth()) {
         ListItem(
             headlineContent = { Text(title) },
-            supportingContent = { Text(supportingText) },
+            supportingContent = { Text(valueLabel(sliderValue)) },
             leadingContent = icon?.let {
                 {
                     Box(modifier = Modifier.padding(top = 4.dp)) {
@@ -95,7 +98,7 @@ internal fun SettingsSliderRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 56.dp, end = 16.dp, bottom = 8.dp)
-                .semantics { contentDescription = title },
+                .semantics { contentDescription = title; stateDescription = valueLabel(sliderValue) },
         )
     }
 }
@@ -114,36 +117,44 @@ internal fun <T> SettingsChoiceRow(
     choices: List<T>,
     selectedChoice: T,
     modifier: Modifier = Modifier,
-    icon: ImageVector? = null,
+    icon: ImageVector,
     enabled: Boolean = true,
     choiceLabel: (T) -> String = { it.toString() },
     onSelected: (T) -> Unit,
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text(title) },
-            leadingContent = icon?.let {
-                {
-                    Box(modifier = Modifier.padding(top = 4.dp)) {
-                        Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        if (maxWidth < 360.dp || fontScale > 1.1f) {
+            SettingsPickerRow(icon, title, choices, selectedChoice, enabled = enabled,
+                choiceLabel = choiceLabel, onSelected = onSelected)
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                ListItem(
+                    headlineContent = { Text(title) },
+                    leadingContent = icon.let {
+                        {
+                            Box(modifier = Modifier.padding(top = 4.dp)) {
+                                Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+                ) {
+                    choices.forEachIndexed { index, choice ->
+                        SegmentedButton(
+                            selected = choice == selectedChoice,
+                            onClick = { onSelected(choice) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = choices.size),
+                            enabled = enabled,
+                            label = { Text(choiceLabel(choice)) },
+                        )
                     }
                 }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
-        ) {
-            choices.forEachIndexed { index, choice ->
-                SegmentedButton(
-                    selected = choice == selectedChoice,
-                    onClick = { onSelected(choice) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = choices.size),
-                    enabled = enabled,
-                    label = { Text(choiceLabel(choice)) },
-                )
             }
         }
     }
@@ -247,23 +258,26 @@ internal fun SettingsSwitchRow(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val largeText = LocalDensity.current.fontScale > 1.3f
+    val control: @Composable () -> Unit = {
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = { Text(supportingText) },
-        leadingContent = icon?.let {
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(supportingText)
+                if (largeText) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { control() }
+            }
+        },
+        leadingContent = icon?.takeUnless { largeText }?.let {
             {
                 Box(modifier = Modifier.padding(top = 4.dp)) {
                     Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 }
             }
         },
-        trailingContent = {
-            Switch(
-                checked = checked,
-                onCheckedChange = null,
-                enabled = enabled,
-            )
-        },
+        trailingContent = if (largeText) null else control,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = modifier.toggleable(
             value = checked,
@@ -313,6 +327,7 @@ internal fun SettingsRow(
     /** Replaces the navigation chevron for rows whose action is a button rather than the row. */
     trailingContent: @Composable (() -> Unit)? = null,
 ) {
+    val largeText = LocalDensity.current.fontScale > 1.3f
     val clickModifier = if (onClick != null) {
         modifier.clickable(
             enabled = enabled,
@@ -325,11 +340,11 @@ internal fun SettingsRow(
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(supportingText) },
-        leadingContent = {
+        leadingContent = if (largeText) null else { {
             Box(modifier = Modifier.padding(top = 4.dp)) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
-        },
+        } },
         trailingContent = {
             when {
                 trailingContent != null -> trailingContent()

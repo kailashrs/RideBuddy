@@ -1,16 +1,12 @@
 package com.spaceboy.ridebuddy.data
 
 import java.time.Clock
-import java.time.Instant
-import java.time.ZoneId
-import java.time.temporal.WeekFields
-import java.util.Locale
 
 /**
  * Aggregates ride history for the insights screen.
  *
  * Pure and clock-injectable: every overload funnels into the one taking an explicit
- * timestamp and zone, so period boundaries can be exercised directly.
+ * timestamp, so period boundaries can be exercised directly.
  */
 object InsightsCalculator {
     fun calculate(
@@ -92,34 +88,6 @@ object InsightsCalculator {
                 .map(Ride::distanceKilometres),
         )
     }
-
-    /**
-     * Totals since the start of the current week. The week boundary follows [locale] the way the
-     * rider's calendar does — Monday in most of the world, Sunday in some of it.
-     */
-    fun weekSummary(
-        rides: List<Ride>,
-        nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
-        locale: Locale = Locale.getDefault(),
-    ): RideWeekSummary {
-        val weekStart = Instant.ofEpochMilli(nowMillis)
-            .atZone(zone)
-            .toLocalDate()
-            .with(WeekFields.of(locale).dayOfWeek(), 1L)
-            .atStartOfDay(zone)
-            .toInstant()
-            .toEpochMilli()
-        val week = rides.filter { it.startedAtMillis in weekStart..nowMillis }
-        if (week.isEmpty()) return RideWeekSummary()
-        return RideWeekSummary(
-            rideCount = week.size,
-            distanceKilometres = week.sumOf(Ride::distanceKilometres),
-            averageDurationMillis = week.sumOf(Ride::durationMillis) / week.size,
-            mileageKilometresPerLitre = week.combinedMileageKilometresPerLitre(),
-        )
-    }
-
 
     /** Rides in the trend sparkline. Enough to show a shape, few enough to stay legible. */
     private const val DistanceTrendRides = 14

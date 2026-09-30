@@ -116,15 +116,6 @@ data class RideInsights(
     val distanceTrendKilometres: List<Double> = emptyList(),
 )
 
-/** Totals since the start of the current week, as the rider's locale defines the week. */
-@Immutable
-data class RideWeekSummary(
-    val rideCount: Int = 0,
-    val distanceKilometres: Double = 0.0,
-    val averageDurationMillis: Long = 0,
-    val mileageKilometresPerLitre: Double? = null,
-)
-
 /**
  * One recorded moment of a ride: vehicle telemetry, plus a GPS fix when one was available.
  *

@@ -5,7 +5,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class UnitFormatterTest {
@@ -50,18 +49,13 @@ class UnitFormatterTest {
     }
 
     @Test
-    fun dateTimeFormattingPreservesEachDisplayStyle() = withUsUtcDefaults {
+    fun dateTimeFormattingUsesTheLocaleDefault() = withUsUtcDefaults {
         val timestamp = 1_704_163_445_000L
 
         assertEquals(
             DateFormat.getDateTimeInstance().format(Date(timestamp)),
             UnitFormatter.formatDateTime(timestamp),
         )
-        assertEquals(
-            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp)),
-            UnitFormatter.formatShortDateTime(timestamp),
-        )
-        assertNotEquals(UnitFormatter.formatDateTime(timestamp), UnitFormatter.formatShortDateTime(timestamp))
     }
 
     @Test

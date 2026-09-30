@@ -348,7 +348,7 @@ private fun MotorcycleConnectionSection(
     onAssociateBike: () -> Unit,
     onRequestForget: () -> Unit,
 ) {
-    SettingsSection("Motorcycle Connection") {
+    SettingsSection("Motorcycle connection") {
         SettingsRow(
             icon = Icons.Outlined.Bluetooth,
             title = bikeAssociation.bike?.name ?: "Pair your motorcycle",
@@ -357,7 +357,7 @@ private fun MotorcycleConnectionSection(
                 bikeAssociation.bike == null && !bikeAssociation.supported -> "Motorcycle pairing isn't supported here"
                 bikeAssociation.bike == null -> "Choose your bike from the list"
                 bikeAssociation.observingPresence -> "Auto-connect on"
-                else -> "Tap to enable auto-connect"
+                else -> "Auto-connect off"
             },
             onClick = if (bikeAssociation.bike == null) onAssociateBike else null,
         )
@@ -365,7 +365,7 @@ private fun MotorcycleConnectionSection(
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsRow(
                 icon = Icons.Outlined.BluetoothConnected,
-                title = "Bluetooth Pairing",
+                title = "Bluetooth pairing",
                 supportingText = "${bikeAssociation.bike.address.takeLast(5)} • Paired via Bluetooth",
                 trailingContent = { TextButton(onClick = onRequestForget) { Text("Forget") } },
             )
@@ -388,7 +388,7 @@ private fun NavigationAndCallsSection(
     onAutoStartSharedChanged: (Boolean) -> Unit,
     onManageSupportedApps: () -> Unit,
 ) {
-    SettingsSection("Navigation & Calls") {
+    SettingsSection("Navigation & calls") {
         SettingsSwitchRow(
             title = "Use miles",
             supportingText = "Display distance and speed in imperial units",
@@ -399,7 +399,7 @@ private fun NavigationAndCallsSection(
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSwitchRow(
             title = "Start shared destinations",
-            supportingText = "Begin navigation when a Google Maps destination is shared",
+            supportingText = "Skip the route preview when the bike is connected",
             checked = settings.autoStartSharedDestinations,
             icon = Icons.AutoMirrored.Outlined.AltRoute,
             onCheckedChange = onAutoStartSharedChanged,
@@ -409,7 +409,7 @@ private fun NavigationAndCallsSection(
             icon = Icons.Outlined.Directions,
             title = "Navigation",
             supportingText = when {
-                navigationKey.isLoading -> "Checking encrypted API key"
+                navigationKey.isLoading -> "Checking setup…"
                 navigationKey.maskedKey != null -> navigationKey.maskedKey
                 else -> "API key not configured"
             },
@@ -418,11 +418,11 @@ private fun NavigationAndCallsSection(
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsRow(
             icon = Icons.Outlined.LocationOn,
-            title = "Navigation with screen off",
+            title = "Background location",
             supportingText = if (backgroundLocationGranted) {
-                "Always-on location enabled for uninterrupted guidance"
+                "Allowed all the time"
             } else {
-                "Optional: set Location to Allow all the time for the most accurate background guidance"
+                "Optional for automatic route recording"
             },
             onClick = onOpenBackgroundLocationSettings,
         )
@@ -440,17 +440,16 @@ private fun NavigationAndCallsSection(
             icon = Icons.Outlined.Apps,
             title = "Supported apps",
             supportingText = if (installedSupportedApps.isEmpty()) {
-                "No supported messaging or social apps detected on device"
+                "No supported apps installed"
             } else {
                 "$enabledInstalledCount of ${installedSupportedApps.size} installed apps enabled"
             },
             onClick = onManageSupportedApps,
-            trailingContent = { TextButton(onClick = onManageSupportedApps) { Text("Manage") } },
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSwitchRow(
             "Caller display",
-            "Show incoming caller name and number on the motorcycle display",
+            "Show incoming calls on the bike",
             settings.callerDisplay,
             icon = Icons.Outlined.ContactPage
         ) {
@@ -458,8 +457,8 @@ private fun NavigationAndCallsSection(
         }
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSwitchRow(
-            "TFT call controls",
-            "Accept or decline incoming phone calls using handlebar controls",
+            "Handlebar call controls",
+            "Answer or decline calls from the handlebar",
             settings.tftCallControls,
             icon = Icons.Outlined.Call
         ) {
@@ -474,10 +473,10 @@ private fun TripTrackingSection(
     settingsActions: MoreSettingsActions,
     speed: SpeedFormat,
 ) {
-    SettingsSection("Automatic Trip Tracking") {
+    SettingsSection("Automatic ride recording") {
         SettingsSliderRow(
-            title = "Start above ${speed.label(settings.rideStartSpeedKph)}",
-            supportingText = "A ride starts automatically after this speed",
+            title = "Start recording above",
+            valueLabel = { speed.label(speed.stored(it)) },
             value = speed.display(settings.rideStartSpeedKph),
             range = speed.display(1.0)..speed.display(15.0),
             steps = 13,
@@ -490,8 +489,8 @@ private fun TripTrackingSection(
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSliderRow(
-            title = "Stop below ${speed.label(settings.rideStopSpeedKph)}",
-            supportingText = "The bike must remain below this speed",
+            title = "Stop recording below",
+            valueLabel = { speed.label(speed.stored(it)) },
             value = speed.display(settings.rideStopSpeedKph),
             range = speed.display(0.0)..speed.display(10.0),
             steps = 9,
@@ -504,13 +503,20 @@ private fun TripTrackingSection(
         )
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSliderRow(
-            title = "Stop after ${settings.rideStopDelaySeconds / 60.0} min",
-            supportingText = "Parking delay before the ride is saved",
+            title = "Parking delay",
+            valueLabel = { seconds ->
+                val total = seconds.roundToInt()
+                when {
+                    total < 60 -> "$total s"
+                    total % 60 == 0 -> "${total / 60} min"
+                    else -> "${total / 60} min ${total % 60} s"
+                }
+            },
             value = settings.rideStopDelaySeconds.toFloat(),
             range = 30f..300f,
             steps = 8,
             icon = Icons.Outlined.Schedule,
-            onValueChange = { settingsActions.onRideStopDelayChanged(it.toInt()) },
+            onValueChange = { settingsActions.onRideStopDelayChanged(it.roundToInt()) },
         )
     }
 }
@@ -522,7 +528,7 @@ private fun SafetyAlertsSection(
     speed: SpeedFormat,
     onOpenWeatherAttribution: () -> Unit,
 ) {
-    SettingsSection("Safety & Speed Alerts") {
+    SettingsSection("Riding alerts") {
         SettingsSwitchRow(
             "Overspeed",
             "Alert above ${speed.label(settings.overspeedThresholdKph.toDouble())}",
@@ -535,7 +541,7 @@ private fun SafetyAlertsSection(
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsSliderRow(
                 title = "Overspeed threshold",
-                supportingText = speed.label(settings.overspeedThresholdKph.toDouble()),
+                valueLabel = { speed.label(speed.stored(it)) },
                 value = speed.display(settings.overspeedThresholdKph.toDouble()),
                 range = speed.display(40.0)..speed.display(200.0),
                 steps = 15,
@@ -555,12 +561,12 @@ private fun SafetyAlertsSection(
             HorizontalDivider(Modifier.padding(start = 56.dp))
             SettingsSliderRow(
                 title = "RPM threshold",
-                supportingText = "${settings.rpmThreshold} rpm",
+                valueLabel = { "${it.roundToInt()} rpm" },
                 value = settings.rpmThreshold.toFloat(),
                 range = 3_000f..12_000f,
                 steps = 17,
                 icon = Icons.Outlined.Tune,
-            ) { settingsActions.onRpmThresholdChanged(it.toInt()) }
+            ) { settingsActions.onRpmThresholdChanged(it.roundToInt()) }
         }
         HorizontalDivider(Modifier.padding(start = 56.dp))
         SettingsSwitchRow(
@@ -614,10 +620,10 @@ private fun MotorcycleDisplaySection(
     settings: AppSettings,
     settingsActions: MoreSettingsActions,
 ) {
-    SettingsSection("Motorcycle Display") {
+    SettingsSection("Motorcycle display") {
         SettingsSwitchRow(
-            "TFT navigation output",
-            "Show turn-by-turn maneuvers and distances on the motorcycle display",
+            "Navigation on bike",
+            "Show directions and distances on the bike",
             settings.tftNavigationOutputEnabled,
             icon = Icons.Outlined.Tv,
         ) { enabled -> settingsActions.onTftNavigationOutputChanged(enabled) }
@@ -631,7 +637,7 @@ private fun MotorcycleDisplaySection(
             onSelected = settingsActions.onTftTextModeChanged,
         )
         Text(
-            "Extreme-weather and supported route warnings briefly use the navigation text rows. Calls and approaching turns always take priority.",
+            "Weather and route alerts briefly replace directions. Calls and nearby turns take priority.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 56.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
@@ -644,7 +650,7 @@ private fun AppThemeSection(
     settings: AppSettings,
     settingsActions: MoreSettingsActions,
 ) {
-    SettingsSection("App Theme & Display") {
+    SettingsSection("Appearance") {
         SettingsChoiceRow(
             title = "Theme",
             choices = ThemeMode.entries,
@@ -759,7 +765,7 @@ private fun PermissionsSection(
     onShowAbout: () -> Unit,
     onResetOnboarding: () -> Unit,
 ) {
-    SettingsSection("Permissions & System") {
+    SettingsSection("Permissions & system") {
         SettingsRow(
             icon = Icons.Outlined.Security,
             title = "Permissions & privacy",
@@ -791,7 +797,7 @@ private fun RideDataSection(
     onExportRideHistory: () -> Unit,
     onRequestClearHistory: () -> Unit,
 ) {
-    SettingsSection("Ride Data & Export") {
+    SettingsSection("Ride data & export") {
         SettingsRow(
             icon = Icons.Outlined.History,
             title = "Ride history",

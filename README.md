@@ -9,7 +9,7 @@ vehicle-aware Bluetooth transport layer and safety-gated vehicle integration.
 - **Material You UI**: Adaptive layouts, light/dark modes, and dynamic color. Features Live, History, Insights, Info, and Settings destinations.
 - **BLE Telemetry**: Automatic background reconnection. Live speed, RPM and throttle with automatic ride recording; mileage is reported per ride, where an average means something.
 - **Google Navigation**: Share destinations directly from Google Maps. Full turn-by-turn routing via the Google Navigation SDK.
-- **Ride History**: Local SQLite history with weekly summaries, performance records, and long-term insights. Includes GPX/CSV export capabilities. Rides, records and insights are kept for good; each ride's second-by-second telemetry is kept for a rider-chosen window, one year by default.
+- **Ride History**: Local SQLite history grouped by day, with this-week, this-month and custom date filters. Totals match the displayed rides. Includes performance records and long-term insights. Includes GPX/CSV export capabilities. Rides, records and insights are kept for good; each ride's second-by-second telemetry is kept for a rider-chosen window, one year by default.
 - **Backup**: Ride summaries and preferences ride along with Android's own backup, encrypted with the device lock screen and free of the rider's Drive quota. Telemetry detail stays on the device.
 - **TFT Integration**: (Opt-in) Bridges turn-by-turn maneuvers, caller presentation, and handlebar call controls directly to the motorcycle's display. Calls come from Telecom, so they work with any dialler.
 - **Alerts & Priorities**: Handles competing phone notifications, imminent turns, and weather warnings without obscuring critical driving information.
@@ -117,7 +117,7 @@ what History, Insights, weekly totals, records and the route thumbnail are built
 is what makes history grow, at roughly 0.14 MB for every hour ridden, and it backs the per-ride
 speed, engine and throttle charts, the ride-events list, and the detailed CSV and GPX exports.
 
-**Settings → Ride Data & Export → Keep detailed telemetry** chooses how long each ride keeps its
+**Settings → Ride data & export → Keep detailed telemetry** chooses how long each ride keeps its
 series — 30 days to Keep everything, one year by default. Only the series expires: rides, records
 and insights are kept indefinitely whatever the window, and a ride past it shows its summary and
 route with a note in place of the charts.

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 
 import com.spaceboy.ridebuddy.MainUiState
 import com.spaceboy.ridebuddy.TopLevelDestination
@@ -116,13 +117,13 @@ fun MainScreen(
             )
             if (!uiState.isNavigationSettingsOpen && !uiState.isDiagnosticsOpen && uiState.selectedDestination != TopLevelDestination.Live) {
                 LargeTopAppBar(
-                    title = { Text(title) },
+                    title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     scrollBehavior = topBarScrollBehavior,
                     colors = topBarColors,
                 )
             } else {
                 TopAppBar(
-                    title = { Text(title) },
+                    title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     colors = topBarColors,
                     scrollBehavior = topBarScrollBehavior,
                     navigationIcon = {
@@ -163,7 +164,7 @@ fun MainScreen(
                                         contentDescription = null
                                     )
                                 },
-                                label = { Text(item.label) },
+                                label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             )
                         }
                     }
@@ -196,7 +197,7 @@ fun MainScreen(
                                                 contentDescription = null
                                             )
                                         },
-                                        label = { Text(item.label) },
+                                        label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     )
                                 }
                             }
@@ -289,7 +290,7 @@ internal fun MainScreenContent(
             )
 
             TopLevelDestination.History ->
-                HistoryScreen(modifier, rides, weekSummary, settings.distanceUnits, onRideSelected)
+                HistoryScreen(modifier, rides, settings.distanceUnits, onRideSelected)
             TopLevelDestination.Insights -> InsightsScreen(
                 modifier = modifier,
                 insights = insights,
@@ -304,6 +305,9 @@ internal fun MainScreenContent(
                 connectionState = connectionState,
                 identity = identity,
                 notificationAccessEnabled = notificationAccessEnabled,
+                onOpenNavigationSettings = onOpenNavigationSettings,
+                onOpenNotificationAccess = onOpenNotificationAccess,
+                onOpenAppPermissions = onOpenAppPermissions,
             )
 
             TopLevelDestination.More -> SettingsScreen(

@@ -2,6 +2,8 @@ package com.spaceboy.ridebuddy.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +40,15 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.selected
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
@@ -76,24 +87,16 @@ fun InsightsScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // Exactly one period is ever selected, which is what a segmented button says and a
-        // filter chip does not. It also gives equal-width segments without the weight() hack.
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            Periods.forEachIndexed { index, (period, label) ->
-                SegmentedButton(
-                    selected = selectedPeriod == period,
-                    onClick = { onPeriodSelected(period) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = Periods.size),
-                    label = {
-                        Text(
-                            text = label,
-                            maxLines = 1,
-                            softWrap = false,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                )
+        PeriodSelector(selectedPeriod, onPeriodSelected)
+        if (insights.rideCount == 0) {
+            OutlinedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Outlined.Route, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text(if (selectedPeriod == InsightPeriod.AllTime) "Your rides will appear here" else "No rides in this period",
+                        style = MaterialTheme.typography.bodyLarge)
+                }
             }
+            return@Column
         }
 
         Card(
@@ -110,7 +113,7 @@ fun InsightsScreen(
                     Text(
                         "%+.0f%% from the previous period".format(locale, it),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (it >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -144,8 +147,8 @@ fun InsightsScreen(
             )
             MetricGrid(
                 listOfNotNull(
-                    insights.bestZeroToSixtyMillis?.let { InsightMetric("Best 0–60", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
-                    insights.bestZeroToHundredMillis?.let { InsightMetric("Best 0–100", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                    insights.bestZeroToSixtyMillis?.let { InsightMetric("Best 0–60 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                    insights.bestZeroToHundredMillis?.let { InsightMetric("Best 0–100 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
                 ),
             )
         }
@@ -196,7 +199,8 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
                     baselineColor = grid,
                 )
                 // A single ride has no trend to read off the line, so the figures stay in text.
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Longest ${UnitFormatter.distance(distancesKilometres.max(), units, locale)}",
                         style = MaterialTheme.typography.labelSmall,
@@ -216,24 +220,75 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
 @Immutable
 private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
 
-/** Two-column grid. Plain rows rather than a lazy grid: the list is short and fixed. */
+/** Metrics keep two columns where the values fit, and stack at large text sizes. */
 @Composable
 private fun MetricGrid(metrics: List<InsightMetric>) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        metrics.chunked(2).forEach { row ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { (label, value, icon) ->
-                    OutlinedCard(modifier = Modifier.weight(1f)) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
-                            Metric(label = label, value = value)
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth < 360.dp || fontScale > 1.3f) 1 else 2
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            metrics.chunked(columns).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { (label, value, icon) ->
+                        OutlinedCard(Modifier.weight(1f)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp))
+                                Metric(label, value)
+                            }
                         }
                     }
+                    if (row.size < columns) Spacer(Modifier.weight(1f))
                 }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PeriodSelector(selectedPeriod: InsightPeriod, onSelected: (InsightPeriod) -> Unit) {
+    val fontScale = LocalDensity.current.fontScale
+    var expanded by remember { mutableStateOf(false) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 360.dp || fontScale > 1.1f) {
+            Box {
+                OutlinedButton(onClick = { expanded = true }) {
+                    Text(selectedPeriod.periodLabel(), Modifier.padding(end = 8.dp))
+                    Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+                    Periods.forEach { (period, _) ->
+                        DropdownMenuItem(
+                            text = { Text(period.periodLabel()) },
+                            modifier = Modifier.semantics { selected = period == selectedPeriod },
+                            onClick = { onSelected(period); expanded = false },
+                        )
+                    }
+                }
+            }
+        } else {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                Periods.forEachIndexed { index, (period, label) ->
+                    SegmentedButton(
+                        selected = period == selectedPeriod,
+                        onClick = { onSelected(period) },
+                        shape = SegmentedButtonDefaults.itemShape(index, Periods.size),
+                        modifier = Modifier.semantics { contentDescription = period.periodLabel() },
+                        label = { Text(label, maxLines = 1, softWrap = false) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun InsightPeriod.periodLabel(): String = when (this) {
+    InsightPeriod.OneDay -> "Last 24 hours"
+    InsightPeriod.SevenDays -> "Last 7 days"
+    InsightPeriod.ThirtyDays -> "Last 30 days"
+    InsightPeriod.NinetyDays -> "Last 90 days"
+    InsightPeriod.AllTime -> "All time"
 }
 
 /** Period selector, with the short labels the segmented buttons show. */

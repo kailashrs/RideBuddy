@@ -12,7 +12,6 @@ import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.InsightsCalculator
 import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.RideInsights
-import com.spaceboy.ridebuddy.data.RideWeekSummary
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.ThemeMode
@@ -108,10 +107,6 @@ class MainViewModel internal constructor(
         InsightsCalculator.calculate(currentRides, period)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideInsights())
-    val weekSummary: StateFlow<RideWeekSummary> = rides
-        .map { currentRides -> InsightsCalculator.weekSummary(currentRides, System.currentTimeMillis()) }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RideWeekSummary())
 
     init {
         // Fill in the navigation-key state once the process-wide load finishes — unless the

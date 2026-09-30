@@ -39,4 +39,19 @@
     <string name="tft_test_confirm_title">Confirm TFT display</string>
     <string name="tft_test_confirm_yes">Looks correct</string>
     <string name="tft_test_confirm_no">Did not appear</string>
+    <string name="history_all_rides">All rides</string>
+    <string name="history_this_week">This week</string>
+    <string name="history_this_month">This month</string>
+    <string name="history_choose_dates">Choose dates</string>
+    <string name="history_clear_filter">Clear filter</string>
+    <string name="history_empty">Your rides will appear here</string>
+    <string name="history_empty_period">No rides in this period</string>
+    <string name="history_today">Today</string>
+    <string name="history_yesterday">Yesterday</string>
+    <string name="history_apply">Apply</string>
+    <string name="history_cancel">Cancel</string>
+    <plurals name="history_ride_count">
+        <item quantity="one">%d ride</item>
+        <item quantity="other">%d rides</item>
+    </plurals>
 </resources>
