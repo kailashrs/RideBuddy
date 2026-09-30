@@ -3,7 +3,7 @@ package com.spaceboy.ridebuddy.ui.screens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasTextExactly
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -40,7 +40,7 @@ class LiveTelemetryCardTest {
         composeRule.onNodeWithText("64").assertIsDisplayed()
         composeRule.onNodeWithText("km/h").assertIsDisplayed()
         composeRule.onNodeWithText("RPM").assertIsDisplayed()
-        composeRule.onNodeWithText("5420 rpm").assertIsDisplayed()
+        composeRule.onNodeWithText("5420").assertIsDisplayed()
         composeRule.onNodeWithText("Throttle").assertIsDisplayed()
         composeRule.onNodeWithText("38%").assertIsDisplayed()
     }
@@ -59,11 +59,9 @@ class LiveTelemetryCardTest {
     fun rideStateIsShownAsStateRatherThanAsAnotherButton() {
         show(ride = LiveCardFixture.recording())
 
-        composeRule.onNodeWithText("Recording").assertIsDisplayed()
-        composeRule.onNodeWithText("3.0 km").assertIsDisplayed()
-        // Neither half of the status does anything when tapped — only the buttons below it do.
-        composeRule.onNode(hasClickAction() and hasTextExactly("Recording")).assertDoesNotExist()
-        composeRule.onNode(hasClickAction() and hasTextExactly("3.0 km")).assertDoesNotExist()
+        composeRule.onNodeWithText("Recording · 3.0 km").assertIsDisplayed()
+        // The status does nothing when tapped — only the buttons below it do.
+        composeRule.onNode(hasClickAction() and hasText("Recording", substring = true)).assertDoesNotExist()
     }
 
     @Test
@@ -71,7 +69,7 @@ class LiveTelemetryCardTest {
         show(ride = null)
 
         composeRule.onNodeWithText("End ride").assertDoesNotExist()
-        composeRule.onNodeWithText("Recording").assertDoesNotExist()
+        composeRule.onNodeWithText("Recording", substring = true).assertDoesNotExist()
         // The card's own action stays put whether or not a ride is running, so its position
         // does not move under a thumb when recording starts.
         composeRule.onNodeWithText("Details").assertIsDisplayed()

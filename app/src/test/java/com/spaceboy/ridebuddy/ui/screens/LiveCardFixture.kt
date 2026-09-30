@@ -104,6 +104,7 @@ internal object LiveCardFixture {
             onStopNavigation = onStopNavigation,
             onSharedDestinationHandled = onSharedDestinationHandled,
             onCancelNavigationStart = {},
+            onRideSelected = {},
         )
     }
 }

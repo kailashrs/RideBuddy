@@ -97,7 +97,6 @@ internal object AppUiFixture {
         onExportBleCapture = { },
         onClearBleCapture = { },
         onRunStationaryTest = { },
-        onOpenBackgroundLocationSettings = { },
         onOpenAppPermissions = { },
         onMessageShown = { },
         settingsActions = settingsActions,

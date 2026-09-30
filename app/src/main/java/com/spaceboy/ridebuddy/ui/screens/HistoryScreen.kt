@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.spaceboy.ridebuddy.ui.components.EmptyState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,20 +20,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,7 +101,6 @@ fun HistoryScreen(
     val today = calendar.toLocalDate()
     val zone = calendar.zone
     var filter by rememberSaveable(stateSaver = HistoryFilterSaver) { mutableStateOf<HistoryFilter>(HistoryFilter.All) }
-    var menuOpen by remember { mutableStateOf(false) }
     var choosingDates by rememberSaveable { mutableStateOf(false) }
     var history by remember(rides, filter, today, zone, locale) { mutableStateOf<RideHistory?>(null) }
     LaunchedEffect(rides, filter, today, zone, locale) {
@@ -122,61 +122,51 @@ fun HistoryScreen(
         )
     }
     if (rides.isEmpty()) {
-        Column(modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center) {
-            Icon(Icons.Outlined.Route, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text(stringResource(R.string.history_empty), style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(top = 20.dp))
-        }
+        EmptyState(
+            icon = Icons.Outlined.Route,
+            title = stringResource(R.string.history_empty),
+            body = "RideBuddy records each ride automatically while the bike is connected.",
+            modifier = modifier,
+        )
         return
     }
 
     Column(modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        // Filter chips, per Material: the presets are one tap, and the date chip opens the picker
+        // and then carries the chosen range as its label.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box {
-                OutlinedButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Outlined.DateRange, contentDescription = null)
-                    Text(historyFilterLabel(filter, today, locale),
-                        modifier = Modifier.padding(horizontal = 8.dp).weight(1f, fill = false),
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    listOf(HistoryFilter.All, HistoryFilter.ThisWeek, HistoryFilter.ThisMonth).forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(historyFilterLabel(option, today, locale)) },
-                            onClick = { selectFilter(option); menuOpen = false },
-                            modifier = Modifier.semantics { selected = filter == option },
-                            trailingIcon = if (filter == option) {{ Icon(Icons.Outlined.Check, contentDescription = null) }} else null,
-                        )
-                    }
-                    DropdownMenuItem(text = { Text(stringResource(R.string.history_choose_dates)) },
-                        onClick = { menuOpen = false; choosingDates = true },
-                        modifier = Modifier.semantics { selected = filter is HistoryFilter.Dates })
-                }
+            listOf(HistoryFilter.All, HistoryFilter.ThisWeek, HistoryFilter.ThisMonth).forEach { option ->
+                FilterChip(
+                    selected = filter == option,
+                    onClick = { selectFilter(option) },
+                    label = { Text(historyFilterLabel(option, today, locale)) },
+                )
             }
-            if (filter != HistoryFilter.All) {
-                TextButton(onClick = { selectFilter(HistoryFilter.All) }) { Text(stringResource(R.string.history_clear_filter)) }
-            }
+            val dates = filter as? HistoryFilter.Dates
+            FilterChip(
+                selected = dates != null,
+                onClick = { choosingDates = true },
+                label = { Text(if (dates != null) historyFilterLabel(dates, today, locale) else stringResource(R.string.history_choose_dates)) },
+                leadingIcon = { Icon(Icons.Outlined.DateRange, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) },
+            )
         }
         val current = history
         when {
             current == null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            current.rideCount == 0 -> Column(
-                Modifier.fillMaxWidth().weight(1f).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(stringResource(R.string.history_empty_period), style = MaterialTheme.typography.bodyLarge)
-            }
+            current.rideCount == 0 -> EmptyState(
+                icon = Icons.Outlined.DateRange,
+                title = stringResource(R.string.history_empty_period),
+                body = null,
+                modifier = Modifier.weight(1f),
+            )
             else -> {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item(key = "summary", contentType = "summary") {
                         Text(
@@ -188,7 +178,7 @@ fun HistoryScreen(
                     }
                     current.days.forEach { day ->
                         stickyHeader(key = "day:${day.date}") {
-                            Surface(color = MaterialTheme.colorScheme.background) {
+                            Surface {
                                 Text(historyDayLabel(day.date, today, locale),
                                     Modifier.fillMaxWidth().padding(vertical = 12.dp).semantics { heading() },
                                     style = MaterialTheme.typography.titleSmall,
@@ -251,17 +241,17 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
     val locale = LocalConfiguration.current.locales[0]
     OutlinedCard(onClick = { onRideSelected(ride) }, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                android.text.format.DateFormat.getTimeFormat(LocalContext.current).format(Date(ride.startedAtMillis)),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                if (ride.startArea != null || ride.endArea != null) {
-                    "${ride.startArea ?: "Start"} → ${ride.endArea ?: "Parking location"}"
-                } else "Recorded ride",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column {
+                Text(
+                    if (ride.startArea != null || ride.endArea != null) ride.routeLabel() else "Ride",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    android.text.format.DateFormat.getTimeFormat(LocalContext.current).format(Date(ride.startedAtMillis)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 RideValue("Distance", UnitFormatter.distance(ride.distanceKilometres, units, locale))
@@ -269,7 +259,7 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
                 RideValue("Average", UnitFormatter.speed(ride.averageSpeedKph, units, locale))
             }
             Text(
-                "Max ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} estimated fuel • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}",
+                "Top ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} · ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} fuel · ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

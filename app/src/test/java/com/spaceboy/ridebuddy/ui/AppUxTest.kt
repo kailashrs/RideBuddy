@@ -68,12 +68,11 @@ class AppUxTest {
                 }
             }
         }
-        compose.onNodeWithText("Last 30 days").assertIsDisplayed().performClick()
-        compose.onNodeWithText("Last 7 days").performClick()
+        compose.onNodeWithContentDescription("Last 7 days").assertIsDisplayed().performClick()
         assertEquals(InsightPeriod.SevenDays, period.value)
-        compose.onNodeWithText("Last 7 days").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Last 7 days").assertIsSelected()
         capture("insights-large-text")
-        compose.onNodeWithText("Avg duration").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Duration").performScrollTo().assertIsDisplayed()
         capture("insights-metrics-large-text")
     }
 
@@ -90,30 +89,23 @@ class AppUxTest {
         assertEquals(rides.top.value, time.top.value, 1f)
         assertTrue(time.left > rides.right)
         capture("insights-two-columns")
-        compose.onNodeWithText("Fuel and mileage are estimates.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Records").performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun rideDetailButtonsHaveEqualWidthsAndAlignedColumns() {
+    @Test fun rideDetailShowsItsFiguresAndOpensTheParkingLocation() {
         val chart = TelemetryChartData(emptyList(), emptyList())
-        var shares = 0
         var parking = 0
         compose.setContent { Rs457Theme(dynamicColor = false) { Surface(Modifier.fillMaxSize()) {
             RideDetailContent(RideDetailUiData(AppUiFixture.ride.copy(endLatitude = 13.05, endLongitude = 80.28),
                 false, false, emptyList(), chart, chart, chart, emptyList()), DistanceUnits.Metric,
-                onExportCsv = {}, onExportGpx = {}, onShare = { shares++ }, onOpenParking = { parking++ })
+                onOpenParking = { parking++ })
         } } }
+        compose.onNodeWithText("Home → Marina Beach").assertIsDisplayed()
+        compose.onNodeWithText("Top speed").assertIsDisplayed()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Parking location"))
-        fun bounds(label: String) = compose.onNode(hasClickAction() and hasText(label)).getUnclippedBoundsInRoot()
-        val csv = bounds("Export CSV"); val gpx = bounds("Export GPX")
-        val share = bounds("Share"); val location = bounds("Parking location")
-        assertEquals((csv.right - csv.left).value, (gpx.right - gpx.left).value, 1f)
-        assertEquals(csv.left.value, share.left.value, 1f)
-        assertEquals(gpx.left.value, location.left.value, 1f)
-        assertEquals((share.bottom - share.top).value, (location.bottom - location.top).value, 1f)
-        compose.onNodeWithText("Share").performClick()
         compose.onNodeWithText("Parking location").performClick()
-        assertEquals(1, shares); assertEquals(1, parking)
-        capture("ride-details-aligned-actions")
+        assertEquals(1, parking)
+        capture("ride-details")
     }
 
     @Test fun insightsEmptyPeriodShowsOneClearState() {
@@ -122,44 +114,46 @@ class AppUxTest {
                 selectedPeriod = InsightPeriod.SevenDays, onPeriodSelected = {})
         } }
         compose.onNodeWithText("No rides in this period").assertIsDisplayed()
-        compose.onNodeWithText("Avg speed").assertDoesNotExist()
+        compose.onNodeWithText("Averages").assertDoesNotExist()
         compose.onNodeWithContentDescription("Last 7 days").assertExists()
     }
 
-    @Test fun infoOffersSetupActionsWithoutClaimingCallReadiness() {
-        var navigation = 0; var alerts = 0; var permissions = 0
+    @Test fun settingsCarryTheMotorcycleIdentityAndSetupRows() {
+        var navigation = 0; var permissions = 0; var developer = 0
         compose.setContent { Rs457Theme(dynamicColor = false) {
-            InfoScreen(navigationConfigured = false, connectionState = BikeConnectionState.Disconnected,
-                identity = BikeIdentity(), notificationAccessEnabled = true,
-                onOpenNavigationSettings = { navigation++ }, onOpenNotificationAccess = { alerts++ },
-                onOpenAppPermissions = { permissions++ })
+            val ui = MainUiState(selectedDestination = TopLevelDestination.Settings)
+            val actions = AppUiFixture.actions().copy(
+                onOpenNavigationSettings = { navigation++ },
+                onOpenAppPermissions = { permissions++ },
+                onOpenDiagnostics = { developer++ },
+            )
+            MainScreen(ui, actions) { modifier -> MainScreenContent(modifier, AppUiFixture.state(ui), actions) }
         } }
-        compose.onNodeWithText("Calls & alerts").assertDoesNotExist()
-        compose.onNodeWithText("Navigation").performScrollTo().performClick()
-        compose.onNodeWithText("App alerts").performScrollTo().performClick()
-        compose.onNodeWithText("Battery use").performScrollTo().performClick()
-        assertEquals(1, navigation); assertEquals(1, alerts); assertEquals(1, permissions)
+        compose.onNodeWithText("TESTVIN123456789").assertIsDisplayed()
+        compose.onNodeWithText("Google Navigation key").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Battery use"))
+        compose.onNodeWithText("Battery use").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Developer tools"))
+        compose.onNodeWithText("Developer tools").performClick()
+        assertEquals(1, navigation); assertEquals(1, permissions); assertEquals(1, developer)
     }
 
     @Test
     @Config(qualifiers = "en-rGB-w320dp-h740dp-xxhdpi")
-    fun navigationSetupUsesSingleSwitchNodesAndConfirmsKeyRemoval() {
+    fun navigationSetupConfirmsKeyRemovalAtLargeText() {
         RuntimeEnvironment.setFontScale(2f)
-        var removed = 0; var toggled = 0
+        var removed = 0
         compose.setContent { Rs457Theme(dynamicColor = false) { Surface(Modifier.fillMaxSize()) {
             NavigationSettingsScreen(state = NavigationKeyUiState(isConfigured = true, maskedKey = "•••• 1234"),
-                onSave = {}, onRemove = { removed++ }, onTest = {}, settings = AppSettings(),
-                onVoiceGuidanceChanged = { toggled++ }, onAvoidTollsChanged = {}, onAvoidHighwaysChanged = {}, onAvoidFerriesChanged = {})
+                onSave = {}, onRemove = { removed++ }, onTest = {})
         } } }
-        compose.onNodeWithText("Remove key").performScrollTo().performClick()
-        assertEquals(0, removed)
+        val removeButton = hasText("Remove") and hasClickAction() and !hasAnyAncestor(isDialog())
+        compose.onNode(removeButton).performScrollTo().performClick()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals(0, removed)
-        compose.onNodeWithText("Voice guidance").performScrollTo().performClick()
-        assertEquals(1, toggled)
-        capture("navigation-preferences-large-text")
-        compose.onNodeWithText("Remove key").performScrollTo().performClick()
-        compose.onNodeWithText("Remove").performClick()
+        capture("navigation-key-large-text")
+        compose.onNode(removeButton).performScrollTo().performClick()
+        compose.onNode(hasText("Remove") and hasAnyAncestor(isDialog())).performClick()
         assertEquals(1, removed)
     }
 
@@ -170,7 +164,7 @@ class AppUxTest {
         val selected = mutableStateOf(ThemeMode.System)
         compose.setContent { Rs457Theme(dynamicColor = false) { Surface(Modifier.fillMaxSize()) {
             androidx.compose.foundation.layout.Column {
-                com.spaceboy.ridebuddy.ui.components.SettingsChoiceRow(title = "Theme", choices = ThemeMode.entries,
+                com.spaceboy.ridebuddy.ui.components.SettingsPickerRow(title = "Theme", choices = ThemeMode.entries,
                     selectedChoice = selected.value, icon = androidx.compose.material.icons.Icons.Outlined.Palette,
                     onSelected = { selected.value = it })
             }
@@ -183,16 +177,15 @@ class AppUxTest {
 
     @Test
     @Config(qualifiers = "en-rGB-w320dp-h740dp-xxhdpi")
-    fun rideDetailActionsFitLargeTextAndUnavailableParkingIsDisabled() {
+    fun rideDetailFitsLargeTextAndHidesUnknownParking() {
         RuntimeEnvironment.setFontScale(2f)
         val chart = TelemetryChartData(emptyList(), emptyList())
         compose.setContent { Rs457Theme(dynamicColor = false) { Surface(Modifier.fillMaxSize()) {
             RideDetailContent(RideDetailUiData(AppUiFixture.ride, false, false, emptyList(), chart, chart, chart, emptyList()),
-                DistanceUnits.Metric, onExportCsv = {}, onExportGpx = {}, onShare = {}, onOpenParking = {})
+                DistanceUnits.Metric, onOpenParking = {})
         } } }
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Parking location"))
-        compose.onNodeWithText("Parking location").assertIsNotEnabled()
-        compose.onNodeWithText("Share").assertIsDisplayed()
+        compose.onNodeWithText("Parking location").assertDoesNotExist()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Charts for this ride", substring = true))
         capture("ride-details-actions-large-text")
     }
 
@@ -239,7 +232,7 @@ class AppUxTest {
     fun mainNavigationRemainsUsableAtLargeTextSizes() {
         RuntimeEnvironment.setFontScale(2f)
         compose.setContent { Rs457Theme(dynamicColor = false) {
-            val ui = MainUiState(selectedDestination = TopLevelDestination.Info)
+            val ui = MainUiState(selectedDestination = TopLevelDestination.Settings)
             val actions = AppUiFixture.actions()
             MainScreen(ui, actions) { modifier -> MainScreenContent(modifier, AppUiFixture.state(ui), actions) }
         } }

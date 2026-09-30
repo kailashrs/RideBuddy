@@ -14,7 +14,7 @@ class MainViewModelNavigationStateTest {
     @Test
     fun `manual shared destination selects Live and replaces an automatic request`() {
         val state = MainUiState(
-            selectedDestination = TopLevelDestination.More,
+            selectedDestination = TopLevelDestination.Settings,
             isNavigationSettingsOpen = true,
             isDiagnosticsOpen = true,
             sharedDestinationError = "Old error",
@@ -79,7 +79,7 @@ class MainViewModelNavigationStateTest {
     @Test
     fun `failed automatic start restores the matching request for manual confirmation`() {
         val state = MainUiState(
-            selectedDestination = TopLevelDestination.More,
+            selectedDestination = TopLevelDestination.Settings,
             isNavigationSettingsOpen = true,
             isDiagnosticsOpen = true,
             autoStartSharedDestination = AutoStartSharedDestinationRequest(4L, "Retry destination"),

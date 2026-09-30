@@ -38,7 +38,7 @@ class OnboardingCopyTest {
     fun pairingUsesFindMyBikeBeforeAssociationAndConnectAfterward() {
         bikeIsPaired = false
         show()
-        repeat(3) { composeRule.onNodeWithText("Continue").performClick() }
+        repeat(2) { composeRule.onNodeWithText("Continue").performClick() }
 
         composeRule.onNodeWithText("Pair your motorcycle").assertIsDisplayed()
         composeRule.onNodeWithText("Find my bike").assertIsDisplayed()
@@ -56,12 +56,12 @@ class OnboardingCopyTest {
     fun notificationAccessIsExplainedForAppAlertsAndNotCallControl() {
         bikeIsPaired = true
         show()
-        repeat(4) { composeRule.onNodeWithText("Continue").performClick() }
+        repeat(1) { composeRule.onNodeWithText("Continue").performClick() }
 
-        composeRule.onNodeWithText("App alerts").assertIsDisplayed()
-        composeRule.onNodeWithText("Show supported app alerts on your motorcycle display.").assertIsDisplayed()
+        composeRule.onNodeWithText("Notification access").assertIsDisplayed()
+        composeRule.onNodeWithText("Shows app notifications on the bike").assertIsDisplayed()
         composeRule.onNodeWithText("Allow notification access to display incoming caller names, call controls, and weather alerts directly on your motorcycle screen.").assertDoesNotExist()
-        capture("onboarding-app-alerts")
+        capture("onboarding-permissions")
     }
 
     private fun show() {

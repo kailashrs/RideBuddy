@@ -1,72 +1,46 @@
 package com.spaceboy.ridebuddy.ui.screens
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.outlined.LocalGasStation
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Timeline
-import androidx.compose.material.icons.outlined.Eco
-import androidx.compose.material.icons.outlined.EmojiEvents
-import androidx.compose.material.icons.outlined.SportsMotorsports
 import androidx.compose.material.icons.outlined.Route
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.selected
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.UnitFormatter
+import com.spaceboy.ridebuddy.ui.components.EmptyState
 import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.Metric
+import com.spaceboy.ridebuddy.ui.components.SectionHeader
 
-@OptIn(ExperimentalMaterial3Api::class)
+
 /**
- * Aggregate riding statistics over a selectable period: totals, averages, records, and a
- * distance trend. All computed by [com.spaceboy.ridebuddy.data.InsightsCalculator] from
- * stored history; this screen only presents them.
+ * Aggregate riding statistics over a selectable period: the total, a distance trend, then the
+ * figures grouped as totals, averages and records. All computed by
+ * [com.spaceboy.ridebuddy.data.InsightsCalculator]; this screen only presents them.
  */
 @Composable
 fun InsightsScreen(
@@ -81,35 +55,28 @@ fun InsightsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PeriodSelector(selectedPeriod, onPeriodSelected)
         if (insights.rideCount == 0) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Outlined.Route, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text(if (selectedPeriod == InsightPeriod.AllTime) "Your rides will appear here" else "No rides in this period",
-                        style = MaterialTheme.typography.bodyLarge)
-                }
-            }
+            EmptyState(
+                icon = Icons.Outlined.Route,
+                title = if (selectedPeriod == InsightPeriod.AllTime) "Your rides will appear here" else "No rides in this period",
+                body = null,
+                modifier = Modifier.heightIn(min = 320.dp),
+            )
             return@Column
         }
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
                 Text("Total distance", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    UnitFormatter.distance(insights.totalDistanceKilometres, units, locale),
-                    style = MaterialTheme.typography.displaySmall,
-                )
+                Text(UnitFormatter.distance(insights.totalDistanceKilometres, units, locale), style = MaterialTheme.typography.displaySmall)
                 insights.distanceChangePercent?.let {
                     Text(
                         "%+.0f%% from the previous period".format(locale, it),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -118,42 +85,52 @@ fun InsightsScreen(
 
         DistanceTrend(insights.distanceTrendKilometres, units)
 
-        MetricGrid(
+        MetricSection(
+            "Totals",
             listOf(
-                InsightMetric("Rides", insights.rideCount.toString(), Icons.Outlined.Route),
-                InsightMetric("Ride time", formatDuration(insights.totalDurationMillis), Icons.Outlined.Timer),
-                InsightMetric("Fuel estimate", UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale), Icons.Outlined.LocalGasStation),
-                InsightMetric("Avg ride", UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale), Icons.Outlined.Timeline),
-                InsightMetric("Avg duration", formatDuration(insights.averageRideDurationMillis), Icons.Outlined.Timer),
-                InsightMetric("Avg speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
-                InsightMetric("Avg RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
-                InsightMetric("Avg throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
-                InsightMetric("Mileage", UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale), Icons.Outlined.Eco),
-                InsightMetric("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
-                InsightMetric("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
+                "Rides" to insights.rideCount.toString(),
+                "Ride time" to formatDuration(insights.totalDurationMillis),
+                "Fuel (est.)" to UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale),
+                "Mileage (est.)" to UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale),
             ),
         )
-        if (insights.bestZeroToSixtyMillis != null || insights.bestZeroToHundredMillis != null) {
-            Text(
-                text = "Performance",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 16.dp)
-                    .semantics { heading() },
-            )
-            MetricGrid(
-                listOfNotNull(
-                    insights.bestZeroToSixtyMillis?.let { InsightMetric("Best 0–60 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
-                    insights.bestZeroToHundredMillis?.let { InsightMetric("Best 0–100 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
-                ),
-            )
-        }
-        Text(
-            "Fuel and mileage are estimates.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        MetricSection(
+            "Averages",
+            listOf(
+                "Distance" to UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale),
+                "Duration" to formatDuration(insights.averageRideDurationMillis),
+                "Speed" to UnitFormatter.speed(insights.averageSpeedKph, units, locale),
+                "RPM" to "%.0f".format(locale, insights.averageRpm),
+                "Throttle" to "%.0f%%".format(locale, insights.averageThrottlePercent),
+            ),
         )
+        MetricSection(
+            "Records",
+            listOfNotNull(
+                "Longest ride" to UnitFormatter.distance(insights.longestRideKilometres, units, locale),
+                "Top speed" to UnitFormatter.speed(insights.highestSpeedKph, units, locale),
+                insights.bestZeroToSixtyMillis?.let { "0–60 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+                insights.bestZeroToHundredMillis?.let { "0–100 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+            ),
+        )
+    }
+}
+
+/** A titled group of figures in two equal columns. */
+@Composable
+private fun MetricSection(title: String, metrics: List<Pair<String, String>>) {
+    Column {
+        SectionHeader(title)
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                metrics.chunked(2).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        row.forEach { (label, value) -> Metric(label, value, Modifier.weight(1f)) }
+                        if (row.size < 2) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -172,10 +149,7 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
     val grid = MaterialTheme.colorScheme.outlineVariant
     val locale = LocalConfiguration.current.locales[0]
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text("Distance per ride", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -214,64 +188,19 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
     }
 }
 
-@Immutable
-private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
-
-/** Two equal columns, with content-driven height so larger text can wrap. */
-@Composable
-private fun MetricGrid(metrics: List<InsightMetric>) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        metrics.chunked(2).forEach { row ->
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { (label, value, icon) ->
-                    OutlinedCard(Modifier.weight(1f).fillMaxHeight()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 8.dp))
-                            Metric(label, value)
-                        }
-                    }
-                }
-                if (row.size < 2) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PeriodSelector(selectedPeriod: InsightPeriod, onSelected: (InsightPeriod) -> Unit) {
-    val fontScale = LocalDensity.current.fontScale
-    var expanded by remember { mutableStateOf(false) }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        if (maxWidth < 360.dp || fontScale > 1.1f) {
-            Box {
-                OutlinedButton(onClick = { expanded = true }) {
-                    Text(selectedPeriod.periodLabel(), Modifier.padding(end = 8.dp))
-                    Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
-                }
-                DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-                    Periods.forEach { (period, _) ->
-                        DropdownMenuItem(
-                            text = { Text(period.periodLabel()) },
-                            modifier = Modifier.semantics { selected = period == selectedPeriod },
-                            onClick = { onSelected(period); expanded = false },
-                        )
-                    }
-                }
-            }
-        } else {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                Periods.forEachIndexed { index, (period, label) ->
-                    SegmentedButton(
-                        selected = period == selectedPeriod,
-                        onClick = { onSelected(period) },
-                        shape = SegmentedButtonDefaults.itemShape(index, Periods.size),
-                        modifier = Modifier.semantics { contentDescription = period.periodLabel() },
-                        label = { Text(label, maxLines = 1, softWrap = false) },
-                    )
-                }
-            }
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        Periods.forEachIndexed { index, (period, label) ->
+            SegmentedButton(
+                selected = period == selectedPeriod,
+                onClick = { onSelected(period) },
+                shape = SegmentedButtonDefaults.itemShape(index, Periods.size),
+                modifier = Modifier.semantics { contentDescription = period.periodLabel() },
+                // The check icon would not fit five segments at phone width; colour marks the choice.
+                icon = {},
+                label = { Text(label, maxLines = 1, softWrap = false) },
+            )
         }
     }
 }

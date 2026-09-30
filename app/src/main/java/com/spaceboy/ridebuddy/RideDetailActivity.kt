@@ -37,6 +37,21 @@ import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.LocalParking
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.TableChart
+import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import com.spaceboy.ridebuddy.ui.components.Metric
+import com.spaceboy.ridebuddy.ui.components.SectionHeader
+import com.spaceboy.ridebuddy.ui.screens.routeLabel
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -199,13 +214,35 @@ class RideDetailActivity : ComponentActivity() {
                                 }
                             },
                             actions = {
-                                // Enabled only once the ride has loaded: there is nothing to
-                                // confirm deleting while the screen still says "Loading".
-                                IconButton(
-                                    onClick = { confirmDelete = true },
-                                    enabled = loadState is RideDetailLoadState.Loaded,
-                                ) {
-                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete ride")
+                                // Only once loaded: there is nothing to share or delete while loading.
+                                val loaded = (loadState as? RideDetailLoadState.Loaded)?.data
+                                var menuOpen by remember { mutableStateOf(false) }
+                                IconButton(onClick = { loaded?.let { shareRide(it.ride) } }, enabled = loaded != null) {
+                                    Icon(Icons.Outlined.Share, contentDescription = "Share")
+                                }
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }, enabled = loaded != null) {
+                                        Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
+                                    }
+                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Export CSV") },
+                                            leadingIcon = { Icon(Icons.Outlined.TableChart, contentDescription = null) },
+                                            enabled = loaded?.hasSamples == true,
+                                            onClick = { menuOpen = false; export("ride-$rideId.csv", RideExportFormat.Csv) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Export GPX") },
+                                            leadingIcon = { Icon(Icons.Outlined.Map, contentDescription = null) },
+                                            enabled = loaded?.hasLocations == true,
+                                            onClick = { menuOpen = false; export("ride-$rideId.gpx", RideExportFormat.Gpx) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Delete") },
+                                            leadingIcon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null) },
+                                            onClick = { menuOpen = false; confirmDelete = true },
+                                        )
+                                    }
                                 }
                             },
                             scrollBehavior = scrollBehavior,
@@ -214,8 +251,8 @@ class RideDetailActivity : ComponentActivity() {
                 ) { padding ->
                     when (val state = loadState) {
                         RideDetailLoadState.Loading -> {
-                            Column(Modifier.fillMaxSize().padding(padding).padding(24.dp)) {
-                                Text("Loading ride…")
+                            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
                             }
                         }
                         is RideDetailLoadState.Error -> {
@@ -228,15 +265,11 @@ class RideDetailActivity : ComponentActivity() {
                             }
                         }
                         is RideDetailLoadState.Loaded -> {
-                            val currentRide = state.data.ride
                             RideDetailContent(
                                 data = state.data,
                                 units = units,
                                 modifier = Modifier.padding(padding),
-                                onExportCsv = { export("ride-${currentRide.id}.csv", RideExportFormat.Csv) },
-                                onExportGpx = { export("ride-${currentRide.id}.gpx", RideExportFormat.Gpx) },
-                                onShare = { shareRide(currentRide) },
-                                onOpenParking = { openParking(currentRide) },
+                                onOpenParking = { openParking(state.data.ride) },
                             )
                         }
                     }
@@ -456,40 +489,59 @@ internal fun RideDetailContent(
     data: RideDetailUiData,
     units: DistanceUnits,
     modifier: Modifier = Modifier,
-    onExportCsv: () -> Unit,
-    onExportGpx: () -> Unit,
-    onShare: () -> Unit,
     onOpenParking: () -> Unit,
 ) {
     val ride = data.ride
     val locale = LocalConfiguration.current.locales[0]
+    val hasParking = ride.endLatitude != null && ride.endLongitude != null
     // Prefetch is disabled because the RouteCard item hosts an AndroidView(MapView)
     // that races with AndroidPrefetchScheduler's cancellation (see NoOpLazyListPrefetchStrategy).
     val listState = rememberLazyListState(prefetchStrategy = NoOpLazyListPrefetchStrategy)
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(key = "header_info", contentType = "header") {
-            Text(UnitFormatter.formatDateTime(ride.startedAtMillis), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text("${UnitFormatter.distance(ride.distanceKilometres, units, locale)} • ${formatDuration(ride.durationMillis)} • ${UnitFormatter.speed(ride.averageSpeedKph, units, locale)} average", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (data.routePoints.size > 1) {
-            item(key = "route_card", contentType = "route_map") {
-                RouteCard(data.routePoints)
+            Column {
+                Text(ride.routeLabel(), style = MaterialTheme.typography.headlineSmall)
+                Text(UnitFormatter.formatRideStart(ride.startedAtMillis), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item(key = "ride_summary", contentType = "summary_card") {
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Ride summary", style = MaterialTheme.typography.titleMedium)
-                    Text("Estimated fuel ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} • ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}", style = MaterialTheme.typography.bodyMedium)
-                    Text("Peak ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} • ${ride.maximumRpm} rpm", style = MaterialTheme.typography.bodyMedium)
-                    ride.zeroToSixtyMillis?.let { Text("0–60 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
-                    ride.zeroToHundredMillis?.let { Text("0–100 km/h ${"%.1f".format(locale, it / 1_000.0)} s", style = MaterialTheme.typography.bodyMedium) }
-                    if (ride.startArea != null || ride.endArea != null) Text("${ride.startArea ?: "Start"} → ${ride.endArea ?: "Parking location"}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val metrics = listOfNotNull(
+                        "Distance" to UnitFormatter.distance(ride.distanceKilometres, units, locale),
+                        "Duration" to formatDuration(ride.durationMillis),
+                        "Average" to UnitFormatter.speed(ride.averageSpeedKph, units, locale),
+                        "Top speed" to UnitFormatter.speed(ride.maximumSpeedKph, units, locale),
+                        "Fuel (est.)" to UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale),
+                        "Mileage (est.)" to UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale),
+                        "Peak RPM" to ride.maximumRpm.toString(),
+                        ride.zeroToSixtyMillis?.let { "0–60 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+                        ride.zeroToHundredMillis?.let { "0–100 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+                    )
+                    metrics.chunked(2).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            row.forEach { (label, value) -> Metric(label, value, Modifier.weight(1f)) }
+                            if (row.size < 2) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+        if (data.routePoints.size > 1) {
+            item(key = "route_card", contentType = "route_map") {
+                RouteCard(data.routePoints, hasParking, onOpenParking)
+            }
+        } else if (hasParking) {
+            item(key = "parking", contentType = "action_buttons") {
+                OutlinedButton(onClick = onOpenParking, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.LocalParking, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                    Text("Parking location")
                 }
             }
         }
@@ -507,66 +559,24 @@ internal fun RideDetailContent(
                 TelemetryChart("Throttle", "%", data.throttleValues)
             }
             item(key = "ride_events", contentType = "events_card") {
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Ride events", style = MaterialTheme.typography.titleMedium)
-                        if (data.events.isEmpty()) Text("No hard acceleration or braking events detected", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        data.events.forEach { event ->
-                            val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
-                            Text("%s • %s • %+.1f m/s²".format(locale, label, UnitFormatter.formatTime(event.timestampMillis), event.accelerationMetresPerSecondSquared), style = MaterialTheme.typography.bodyMedium)
-                        }
+                Column {
+                    SectionHeader("Hard acceleration & braking")
+                    if (data.events.isEmpty()) {
+                        Text("None detected on this ride", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    data.events.forEach { event ->
+                        val label = if (event.type == RideEventType.HardAcceleration) "Hard acceleration" else "Hard braking"
+                        Text("%s · %s · %+.1f m/s²".format(locale, UnitFormatter.formatTime(event.timestampMillis), label,
+                            event.accelerationMetresPerSecondSquared), modifier = Modifier.padding(vertical = 4.dp))
                     }
                 }
             }
         } else {
             item(key = "telemetry_unavailable", contentType = "summary_card") {
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Detailed ride data", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Detailed data is unavailable. " +
-                                "Change retention in Settings → Ride data & export.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-        item(key = "ride_actions", contentType = "action_buttons") {
-            val fontScale = LocalDensity.current.fontScale
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val stacked = maxWidth < 340.dp || fontScale > 1.3f
-                val actions: List<@Composable (Modifier) -> Unit> = listOf(
-                    { actionModifier ->
-                        OutlinedButton(onClick = onExportCsv, enabled = data.hasSamples, modifier = actionModifier) {
-                            Text("Export CSV", textAlign = TextAlign.Center)
-                        }
-                    },
-                    { actionModifier ->
-                        OutlinedButton(onClick = onExportGpx, enabled = data.hasLocations, modifier = actionModifier) {
-                            Text("Export GPX", textAlign = TextAlign.Center)
-                        }
-                    },
-                    { actionModifier ->
-                        OutlinedButton(onClick = onShare, modifier = actionModifier) {
-                            Text("Share", textAlign = TextAlign.Center)
-                        }
-                    },
-                    { actionModifier ->
-                        OutlinedButton(onClick = onOpenParking,
-                            enabled = ride.endLatitude != null && ride.endLongitude != null, modifier = actionModifier) {
-                            Text("Parking location", textAlign = TextAlign.Center)
-                        }
-                    },
+                Text(
+                    "Charts for this ride are no longer kept. Change how long detailed data is kept in Settings.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    actions.chunked(if (stacked) 1 else 2).forEach { row ->
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            row.forEach { action -> action(Modifier.weight(1f).fillMaxHeight()) }
-                        }
-                    }
-                }
             }
         }
     }
@@ -574,13 +584,16 @@ internal fun RideDetailContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RouteCard(points: List<Pair<Double, Double>>) {
+private fun RouteCard(points: List<Pair<Double, Double>>, hasParking: Boolean, onOpenParking: () -> Unit) {
     var exploring by rememberSaveable { mutableStateOf(false) }
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Recorded route", style = MaterialTheme.typography.titleMedium)
-            if (!exploring) RecordedRouteMap(points, Modifier.fillMaxWidth().height(240.dp), interactive = false)
-            TextButton(onClick = { exploring = true }, modifier = Modifier.fillMaxWidth()) { Text("Explore route") }
+        if (!exploring) RecordedRouteMap(points, Modifier.fillMaxWidth().height(220.dp), interactive = false)
+        Row(
+            Modifier.fillMaxWidth().padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            if (hasParking) TextButton(onClick = onOpenParking) { Text("Parking location") }
+            FilledTonalButton(onClick = { exploring = true }) { Text("Explore route") }
         }
     }
     if (exploring) {
@@ -681,10 +694,14 @@ private fun TelemetryChart(title: String, unit: String, series: TelemetryChartDa
     val color = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp)) {
+        Column(Modifier.padding(16.dp)) {
             val maximum = values.filterNotNull().maxOrNull()
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(maximum?.let { "Peak %.0f %s".format(locale, it, unit) } ?: "No data", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                maximum?.let { "Peak %.0f%s%s".format(locale, it, if (unit == "%") "" else " ", unit) } ?: "No data",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             LineChart(
                 values = values,
                 timestampsMillis = series.timestampsMillis,
@@ -698,8 +715,8 @@ private fun TelemetryChart(title: String, unit: String, series: TelemetryChartDa
                     "%s over the duration of the ride; peak %.0f %s".format(locale, title, it, unit)
                 }
                     ?: "$title data unavailable",
-                strokeWidth = 5f,
-                fillAlpha = null,
+                strokeWidth = 4f,
+                fillAlpha = 0.2f,
                 drawBaseline = true,
                 baselineColor = grid,
             )

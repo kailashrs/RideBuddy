@@ -108,7 +108,7 @@ class BikeConnectionCardTest {
         )
 
         composeRule.onNodeWithText("Couldn't connect").assertIsDisplayed()
-        composeRule.onNode(hasClickAction() and hasTextExactly("Connect")).assertIsDisplayed()
+        composeRule.onNode(hasClickAction() and hasTextExactly("Retry")).assertIsDisplayed()
         composeRule.onNode(hasText("GATT", substring = true)).assertDoesNotExist()
         capture("connection-failed")
     }

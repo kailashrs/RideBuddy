@@ -5,229 +5,207 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.IosShare
+import androidx.compose.material.icons.outlined.Tv
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.ble.BleCaptureState
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
-import com.spaceboy.ridebuddy.domain.BikeIdentity
-import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
+import com.spaceboy.ridebuddy.ui.MainScreenActions
+import com.spaceboy.ridebuddy.ui.MainScreenState
+import com.spaceboy.ridebuddy.ui.components.SectionHeader
+import com.spaceboy.ridebuddy.ui.components.SettingsRow
+import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import com.spaceboy.ridebuddy.ui.labelResource
 
 /**
- * Live protocol readout: link state, handshake phase, GATT counters, recent frames and
- * events, and the shareable support report.
- *
- * A developer-facing screen reached from settings, and the intended first stop when a
- * connection misbehaves — [BikeConnectionState.Failed] carries one message, while the
- * journal here carries the sequence that led to it.
+ * Tools for protocol research and troubleshooting, then a live readout of the link: state,
+ * handshake phase, GATT counters, errors and recent events. The first stop when a connection
+ * misbehaves — [BikeConnectionState.Failed] carries one message; the journal here carries the
+ * sequence that led to it.
  */
 @Composable
 fun DiagnosticsScreen(
-    live: LiveTelemetryStreams,
-    bleCapture: BleCaptureState,
-    connectionState: BikeConnectionState,
-    identity: BikeIdentity,
-    deviceAddress: String?,
-    notificationAccessEnabled: Boolean,
-    onExport: () -> Unit,
+    state: MainScreenState,
+    actions: MainScreenActions,
     modifier: Modifier = Modifier,
 ) {
-    // Diagnostics is a live readout, so it is the one screen that should follow the frame rate.
-    val diagnostics = live.diagnostics.collectAsStateWithLifecycle().value
-    val rideMetrics = live.rideMetrics.collectAsStateWithLifecycle().value
-    val companionLinkStatus = stringResource(
-        if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready,
-    )
-    val protectionPhase = stringResource(diagnostics.protectionPhase.labelResource())
-    val protectionPath = diagnostics.protectionPath?.let { stringResource(it.labelResource()) } ?: "—"
+    // A live readout, so this is the one screen that follows the frame rate.
+    val diagnostics = state.live.diagnostics.collectAsStateWithLifecycle().value
+    val rideMetrics = state.live.rideMetrics.collectAsStateWithLifecycle().value
+    val capture = state.bleCapture
+    val identity = state.identity
+    var dialog by rememberSaveable { mutableStateOf<String?>(null) }
+    when (dialog) {
+        "capture" -> BleCaptureDialog(capture, actions.onExportBleCapture, actions.onClearBleCapture) { dialog = null }
+        "tft" -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Test the bike's display?") },
+            text = {
+                Text(
+                    "Only while parked, with no call in progress. The test sends a turn, distances, text and a " +
+                        "speed limit, then a test caller ringing, answered, cleared and outgoing.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { dialog = null; actions.onRunStationaryTest() }) { Text("Run test") } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+        )
+    }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
         Text(
-            text = "Connection diagnostics",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.semantics { heading() },
+            "Use these only while parked. Captured packets can include identifiers and notification text.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
+        Header("Tools")
+        SettingsSwitchRow(
+            "Keep connection history",
+            "Save recent connection activity across app restarts",
+            state.settings.persistConnectionDiagnostics,
+            icon = Icons.Outlined.History,
+            onCheckedChange = actions.settingsActions.onPersistConnectionDiagnosticsChanged,
+        )
+        SettingsSwitchRow(
+            "Capture Bluetooth traffic",
+            "Record raw GATT reads, writes and notifications in memory",
+            state.settings.bleCaptureEnabled,
+            icon = Icons.Outlined.BugReport,
+            onCheckedChange = actions.settingsActions.onBleCaptureEnabledChanged,
+        )
+        SettingsRow(
+            "Captured packets",
+            when {
+                capture.entries.isEmpty() -> "None yet"
+                capture.droppedEntries > 0 -> "${capture.entries.size} kept, ${capture.droppedEntries} older dropped"
+                else -> "${capture.entries.size} kept"
+            },
+            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+            onClick = { dialog = "capture" },
+        )
+        SettingsRow("Test the bike's display", "Send sample directions and calls while parked",
+            icon = Icons.Outlined.Tv, onClick = { dialog = "tft" })
+        SettingsRow("Share connection report", null, icon = Icons.Outlined.IosShare, onClick = actions.onExportDiagnostics)
 
-        DiagnosticSection(
-            title = "Connection",
-            rows = listOf(
-                "State" to connectionState.diagnosticLabel(),
-                "Device" to (deviceAddress ?: "Not associated"),
-                "Last successful link" to (identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime)
-                    ?: "No successful link recorded"),
-                "Companion link" to companionLinkStatus,
-                "Protection phase" to protectionPhase,
-                "Protection path" to protectionPath,
-                "System bond" to when (diagnostics.bonded) {
-                    true -> "Bonded"
-                    false -> "Not bonded"
-                    null -> "Unknown"
-                },
-                "RSSI" to (diagnostics.rssi?.let { "$it dBm" } ?: "—"),
-                "ATT MTU" to (diagnostics.attMtu?.let { "$it bytes" } ?: "—"),
-                "GATT services" to if (diagnostics.servicesDiscovered > 0) {
-                    "${diagnostics.servicesDiscovered} discovered"
-                } else {
-                    "—"
-                },
-                "Notification access" to if (notificationAccessEnabled) "Enabled" else "Disabled",
-            ),
-        )
+        Header("Connection")
+        Readout("State", state.connectionState.diagnosticLabel())
+        Readout("Device", state.bikeAssociation.bike?.address ?: "Not paired")
+        Readout("Last successful link", identity.lastConnectedAtMillis?.let(UnitFormatter::formatDateTime) ?: "None recorded")
+        Readout("Companion link", stringResource(if (diagnostics.authenticated) R.string.companion_link_ready else R.string.companion_link_not_ready))
+        Readout("Protection phase", stringResource(diagnostics.protectionPhase.labelResource()))
+        Readout("Protection path", diagnostics.protectionPath?.let { stringResource(it.labelResource()) } ?: "—")
+        Readout("System bond", when (diagnostics.bonded) { true -> "Bonded"; false -> "Not bonded"; null -> "Unknown" })
+        Readout("RSSI", diagnostics.rssi?.let { "$it dBm" } ?: "—")
+        Readout("ATT MTU", diagnostics.attMtu?.let { "$it bytes" } ?: "—")
+        Readout("GATT services", diagnostics.servicesDiscovered.takeIf { it > 0 }?.toString() ?: "—")
+        Readout("Notification access", if (state.notificationAccessEnabled) "Enabled" else "Disabled")
+        Readout("VIN", identity.vin ?: "Not reported")
+        Readout("Cluster software", identity.clusterSoftwareVersion ?: "Not reported")
 
-        DiagnosticSection(
-            title = "Motorcycle identity",
-            rows = listOf(
-                "VIN" to (identity.vin ?: "Not reported"),
-                "Cluster software" to (identity.clusterSoftwareVersion ?: "Not reported"),
-            ),
-        )
+        Header("GATT activity")
+        Readout("Active operation", diagnostics.activeGattOperation ?: "—")
+        Readout("Notifications", diagnostics.notificationsReceived.toString())
+        Readout("Descriptor writes", diagnostics.descriptorWritesCompleted.toString())
+        Readout("Characteristic writes", diagnostics.writesCompleted.toString())
+        Readout("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz))
+        Readout("Last frame", diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
+        Readout("Estimated malformed frames", diagnostics.malformedTelemetryFrames.toString())
+        Readout("Dropped ride frames", diagnostics.droppedRawTelemetryFrames.toString())
+        Readout("Estimated packet gaps", rideMetrics.estimatedPacketGapPercent?.let { "$it%" } ?: "—")
 
-        DiagnosticSection(
-            title = "GATT activity",
-            rows = listOf(
-                "Active operation" to (diagnostics.activeGattOperation ?: "—"),
-                "Notifications" to diagnostics.notificationsReceived.toString(),
-                "Descriptor writes" to diagnostics.descriptorWritesCompleted.toString(),
-                "Characteristic writes" to diagnostics.writesCompleted.toString(),
-                "Telemetry rate" to "%.1f Hz".format(diagnostics.telemetryHz),
-                "Last frame" to (diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
-                "Estimated malformed frames" to diagnostics.malformedTelemetryFrames.toString(),
-                "Dropped ride frames" to diagnostics.droppedRawTelemetryFrames.toString(),
-                "Estimated packet gaps" to
-                    (rideMetrics.estimatedPacketGapPercent?.let { "$it%" } ?: "—"),
-                "BLE capture" to if (bleCapture.enabled) {
-                    "On • ${bleCapture.entries.size} packets"
-                } else {
-                    "Off"
-                },
-            ),
-        )
-
-        DiagnosticSection(
-            title = "Errors",
-            rows = listOf(
-                "Last error" to (diagnostics.lastError ?: "None"),
-                "Error time" to (diagnostics.lastErrorAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
-                "Error category" to (diagnostics.lastFailure?.category?.name ?: "—"),
-                "Error context" to (diagnostics.lastFailure?.contextLine() ?: "—"),
-                "Automatic retries" to (diagnostics.suppressionReason ?: "Active"),
-            ),
-        )
+        Header("Errors")
+        Readout("Last error", diagnostics.lastError ?: "None")
+        Readout("Error time", diagnostics.lastErrorAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
+        Readout("Error category", diagnostics.lastFailure?.category?.name ?: "—")
+        Readout("Error context", diagnostics.lastFailure?.contextLine() ?: "—")
+        Readout("Automatic retries", diagnostics.suppressionReason ?: "Active")
 
         diagnostics.lastSuccessfulLink?.let { link ->
-            DiagnosticSection(
-                title = "Last successful link",
-                rows = listOf(
-                    "Session" to link.sessionId.toString(),
-                    "ATT MTU" to (link.attMtu?.let { "$it bytes" } ?: "—"),
-                    "GATT services" to link.servicesDiscovered.toString(),
-                    "Established" to (link.establishedAtMillis?.let(UnitFormatter::formatDateTime) ?: "—"),
-                    "Held for" to (link.durationMillis?.let { "${it / 1_000}s" } ?: "—"),
-                ),
-            )
+            Header("Last successful link")
+            Readout("Session", link.sessionId.toString())
+            Readout("ATT MTU", link.attMtu?.let { "$it bytes" } ?: "—")
+            Readout("GATT services", link.servicesDiscovered.toString())
+            Readout("Established", link.establishedAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
+            Readout("Held for", link.durationMillis?.let { "${it / 1_000}s" } ?: "—")
         }
-
         if (diagnostics.serviceSnapshot.isNotEmpty()) {
-            DiagnosticSection(
-                title = "GATT snapshot",
-                rows = diagnostics.serviceSnapshot.mapIndexed { index, value -> "${index + 1}" to value },
-            )
+            Header("GATT snapshot")
+            diagnostics.serviceSnapshot.forEachIndexed { index, value -> Readout("${index + 1}", value) }
         }
         if (diagnostics.recentEvents.isNotEmpty()) {
-            Text(
-                text = "Recent events",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 16.dp)
-                    .semantics { heading() },
-            )
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    diagnostics.recentEvents.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
+            Header("Recent events")
+            diagnostics.recentEvents.forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             }
         }
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export report") }
     }
 }
 
-/**
- * Connection state in protocol terms, unlike the rider-facing labels elsewhere. Reconnects
- * show their attempt number, which is what distinguishes a link retrying from one stuck.
- */
+@Composable
+private fun Header(title: String) = SectionHeader(title, Modifier.padding(horizontal = 16.dp))
+
+/** A dense label/value line; a readout this long would be unreadable as two-line list items. */
+@Composable
+private fun Readout(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+    }
+}
+
+/** Connection state in protocol terms; reconnects show their attempt number. */
 private fun BikeConnectionState.diagnosticLabel(): String = when (this) {
     BikeConnectionState.Disconnected -> "Disconnected"
-    is BikeConnectionState.Connecting -> reconnectAttempt?.let { attempt ->
-        "Connecting ($attempt/${maxAttempts ?: "?"})"
-    } ?: "Connecting"
+    is BikeConnectionState.Connecting -> reconnectAttempt?.let { "Connecting ($it/${maxAttempts ?: "?"})" } ?: "Connecting"
     is BikeConnectionState.Authenticating -> "Authenticating"
     is BikeConnectionState.Connected -> "Connected"
     is BikeConnectionState.Failed -> "Failed: $message"
 }
 
+/** The captured packets, newest first. The privacy note is here because this is where they get shared. */
 @Composable
-private fun DiagnosticSection(title: String, rows: List<Pair<String, String>>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .padding(start = 16.dp)
-                .semantics { heading() },
-        )
-        DiagnosticCard(rows)
-    }
-}
-
-@Composable
-private fun DiagnosticCard(rows: List<Pair<String, String>>) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column {
-            rows.forEachIndexed { index, (label, value) ->
-                if (index > 0) {
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    Text(
-                        text = value,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+private fun BleCaptureDialog(capture: BleCaptureState, onShare: () -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Captured packets") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Kept in memory until cleared or the app closes.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (capture.entries.isEmpty()) Text("Turn on capture, then reproduce what you want to inspect.")
+                capture.entries.asReversed().forEach { Text(it.format(), style = MaterialTheme.typography.bodySmall) }
             }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = onShare, enabled = capture.entries.isNotEmpty()) { Text("Share") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onClear, enabled = capture.entries.isNotEmpty()) { Text("Clear") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
 }

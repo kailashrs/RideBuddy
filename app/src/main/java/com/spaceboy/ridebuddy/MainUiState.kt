@@ -164,6 +164,5 @@ enum class TopLevelDestination {
     Live,
     History,
     Insights,
-    Info,
-    More,
+    Settings,
 }

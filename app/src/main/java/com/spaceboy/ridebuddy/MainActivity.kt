@@ -311,7 +311,6 @@ class MainActivity : ComponentActivity() {
         onExportBleCapture = ::exportBleCapture,
         onClearBleCapture = viewModel::clearBleCapture,
         onRunStationaryTest = ::runStationaryTest,
-        onOpenBackgroundLocationSettings = ::openAppPermissionSettings,
         onOpenAppPermissions = ::openAppPermissionSettings,
         onMessageShown = viewModel::clearTransientMessage,
     )

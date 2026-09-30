@@ -57,18 +57,17 @@ class DeviceScreenUiTest {
                     assertEquals(rides.top.value, time.top.value, 1f)
                     assertTrue(time.left > rides.right)
                     capture("insights-metrics-$theme")
-                    compose.onNodeWithText("Fuel and mileage are estimates.").performScrollTo().assertIsDisplayed()
+                    compose.onNodeWithText("Records").performScrollTo().assertIsDisplayed()
                     capture("insights-footer-$theme")
                 }
             }
         }
     }
 
-    @Test fun rideDetailActionsAreAlignedAndWorkAtTheDeviceWidth() {
+    @Test fun rideDetailSummaryFitsTheDeviceWidth() {
         RuntimeEnvironment.setFontScale(1f)
         val dark = mutableStateOf(false)
         val chart = TelemetryChartData(emptyList(), emptyList())
-        var shared = 0
         var parking = 0
         compose.setContent {
             Rs457Theme(themeMode = if (dark.value) ThemeMode.Dark else ThemeMode.Light, dynamicColor = false) {
@@ -76,31 +75,20 @@ class DeviceScreenUiTest {
                     RideDetailContent(
                         RideDetailUiData(AppUiFixture.ride.copy(endLatitude = 13.05, endLongitude = 80.28),
                             false, false, emptyList(), chart, chart, chart, emptyList()),
-                        DistanceUnits.Metric, onExportCsv = {}, onExportGpx = {},
-                        onShare = { shared++ }, onOpenParking = { parking++ },
+                        DistanceUnits.Metric, onOpenParking = { parking++ },
                     )
                 }
             }
         }
         for (night in listOf(false, true)) {
             compose.runOnIdle { dark.value = night }
+            val distance = compose.onNodeWithText("Distance").getUnclippedBoundsInRoot()
+            val duration = compose.onNodeWithText("Duration").getUnclippedBoundsInRoot()
+            assertEquals(distance.top.value, duration.top.value, 1f)
             compose.onNode(hasScrollAction()).performScrollToNode(hasText("Parking location"))
-            val buttons = listOf("Export CSV", "Export GPX", "Share", "Parking location").map { label ->
-                compose.onNode(hasClickAction() and hasText(label)).assertIsDisplayed().getUnclippedBoundsInRoot()
-            }
-            val root = compose.onRoot().getUnclippedBoundsInRoot()
-            buttons.forEach { bounds ->
-                assertTrue(bounds.left >= root.left && bounds.right <= root.right)
-                assertEquals((buttons.first().right - buttons.first().left).value, (bounds.right - bounds.left).value, 1f)
-                assertTrue((bounds.bottom - bounds.top).value >= 48f)
-            }
-            compose.onNodeWithText("Export CSV").assertIsNotEnabled()
-            compose.onNodeWithText("Export GPX").assertIsNotEnabled()
-            compose.onNodeWithText("Share").performClick()
             compose.onNodeWithText("Parking location").performClick()
-            capture("ride-detail-actions-${if (night) "dark" else "light"}")
+            capture("ride-detail-${if (night) "dark" else "light"}")
         }
-        assertEquals(2, shared)
         assertEquals(2, parking)
     }
 

@@ -3,6 +3,7 @@ package com.spaceboy.ridebuddy.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -14,11 +15,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
+import androidx.compose.material.icons.outlined.BluetoothConnected
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
+import com.spaceboy.ridebuddy.ui.components.SectionHeader
 import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.TwoWheeler
@@ -27,10 +32,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -40,7 +43,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
@@ -55,7 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -75,8 +76,6 @@ import com.spaceboy.ridebuddy.data.telemetryChartData
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.LiveTelemetryStreams
-import com.spaceboy.ridebuddy.ui.theme.TelemetryHero
-import com.spaceboy.ridebuddy.ui.theme.statusColors
 import com.spaceboy.ridebuddy.ui.components.LineChart
 import com.spaceboy.ridebuddy.ui.components.Metric
 import kotlin.math.roundToInt
@@ -111,6 +110,7 @@ fun LiveScreen(
     onStopNavigation: () -> Unit,
     onSharedDestinationHandled: () -> Unit,
     onCancelNavigationStart: () -> Unit,
+    onRideSelected: (Ride) -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     // Keep edits when a share is consumed; a newer share is applied by the effect below.
@@ -130,7 +130,7 @@ fun LiveScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         ConnectionCard(
@@ -149,209 +149,95 @@ fun LiveScreen(
             onEndRide = onEndRide,
         )
 
-        val saveFailed = live.saveFailed.collectAsStateWithLifecycle().value
-        if (saveFailed) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
+        if (live.saveFailed.collectAsStateWithLifecycle().value) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Ride not saved", style = MaterialTheme.typography.titleMedium)
-                    Text("Storage could not save the ride. Free some space, then retry. Keep RideBuddy open until it is saved.", style = MaterialTheme.typography.bodyMedium)
-                    Button(onClick = onRetryRideSave, modifier = Modifier.fillMaxWidth()) { Text("Retry save") }
+                    Text("The phone's storage is full or unavailable. Free some space, then retry. Keep RideBuddy open until it is saved.")
+                    Button(onClick = onRetryRideSave, modifier = Modifier.align(Alignment.End)) { Text("Retry") }
                 }
             }
         }
-        Text(
-            text = "Navigate",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .padding(start = 16.dp)
-                .semantics { heading() },
-        )
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ),
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (guidance.active) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(48.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Outlined.Directions,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(28.dp),
-                                )
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = guidance.instruction.ifBlank { "Navigating" },
-                                style = MaterialTheme.typography.titleLarge,
-                            )
-                            if (guidance.roadName.isNotBlank()) {
-                                Text(
-                                    text = guidance.roadName,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        guidance.distanceToDestinationMetres?.let { metres ->
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            ) {
-                                Text(
-                                    text = "${UnitFormatter.distance(metres / 1000.0, units, locale)} left",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                )
-                            }
-                        }
-                        guidance.timeToDestinationSeconds?.let { seconds ->
-                            val etaStr = UnitFormatter.formatTime(System.currentTimeMillis() + seconds * 1000L)
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            ) {
-                                Text(
-                                    text = "ETA $etaStr",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                )
-                            }
-                        }
-                        guidance.distanceToManeuverMetres?.let { m ->
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.navigation_maneuver_distance,
-                                        UnitFormatter.maneuverDistance(m, units, locale),
-                                    ),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                )
-                            }
-                        }
-                    }
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onStopNavigation,
-                            shape = MaterialTheme.shapes.large,
-                        ) {
-                            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("End route")
-                        }
-                        FilledTonalButton(
-                            onClick = onOpenActiveNavigation,
-                            shape = MaterialTheme.shapes.large,
+        Column {
+            SectionHeader("Navigate")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (guidance.active) {
+                        ActiveGuidance(guidance, units, onStopNavigation, onOpenActiveNavigation)
+                    } else {
+                        OutlinedTextField(
+                            value = destination,
+                            onValueChange = { value ->
+                                if (sharedDestination != null) onSharedDestinationHandled()
+                                destination = value.take(MaxDestinationInputLength)
+                            },
+                            label = { Text("Google Maps link") },
+                            placeholder = { Text("Share or paste a place from Maps") },
+                            leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                            trailingIcon = if (destination.isNotBlank()) {
+                                {
+                                    IconButton(onClick = {
+                                        destination = ""
+                                        if (sharedDestination != null) onSharedDestinationHandled()
+                                    }) { Icon(Icons.Outlined.Close, contentDescription = "Clear") }
+                                }
+                            } else null,
+                            isError = sharedDestinationError != null,
+                            supportingText = sharedDestinationError?.let { message -> { Text(message) } },
+                            maxLines = 3,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = {
+                                if (sharedDestinationError != null) onSharedDestinationHandled()
+                                onStartNavigation(destination)
+                            },
+                            enabled = destination.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text(stringResource(R.string.navigation_full_map))
+                            Text("Start navigation")
                         }
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = destination,
-                        onValueChange = { value ->
-                            if (sharedDestination != null) onSharedDestinationHandled()
-                            destination = value.take(MaxDestinationInputLength)
-                        },
-                        label = { Text("Google Maps link") },
-                        placeholder = { Text("Paste a link from Google Maps") },
-                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingIcon = if (destination.isNotBlank()) {
-                            {
-                                IconButton(
-                                    onClick = {
-                                        destination = ""
-                                        if (sharedDestination != null) onSharedDestinationHandled()
-                                    },
-                                ) {
-                                    Icon(Icons.Outlined.Close, contentDescription = "Clear")
-                                }
-                            }
-                        } else null,
-                        isError = sharedDestinationError != null,
-                        supportingText = sharedDestinationError?.let { message ->
-                            { Text(message) }
-                        },
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.extraLarge,
-                    )
-                    Button(
-                        onClick = {
-                            if (sharedDestinationError != null) onSharedDestinationHandled()
-                            onStartNavigation(destination)
-                        },
-                        enabled = destination.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text("Start navigation")
                     }
                 }
             }
         }
 
-        Text(
-            text = "Last ride",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .padding(start = 16.dp)
-                .semantics { heading() },
-        )
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = lastRide?.let {
-                    "${UnitFormatter.distance(it.distanceKilometres, units, locale)} • ${formatDuration(it.durationMillis)} • ${UnitFormatter.speed(it.averageSpeedKph, units, locale)} average"
-                } ?: "Your rides will appear here once you set off.",
-                modifier = Modifier.padding(16.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Column {
+            SectionHeader("Last ride")
+            if (lastRide == null) {
+                Text(
+                    "Your rides will appear here once you set off.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                OutlinedCard(onClick = { onRideSelected(lastRide) }, modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text(lastRide.routeLabel()) },
+                        supportingContent = {
+                            Text("${UnitFormatter.distance(lastRide.distanceKilometres, units, locale)} · " +
+                                "${formatDuration(lastRide.durationMillis)} · ${UnitFormatter.speed(lastRide.averageSpeedKph, units, locale)} average")
+                        },
+                        leadingContent = { Icon(Icons.Outlined.Route, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(8.dp))
     }
 
     if (showLiveDetails) {
         ModalBottomSheet(
             onDismissRequest = { showLiveDetails = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             // Opens fully rather than at the half stop. The content is one scroll now, so a
             // partially expanded sheet would just be a drag standing between the rider and
             // the ride figures they opened it for.
@@ -390,6 +276,11 @@ private fun TelemetrySection(
     TelemetryCard(frame, activeRide, units, onDetails, onEndRide)
 }
 
+/**
+ * The bike's link, as one list item: what is happening, and the one thing to do about it.
+ * Connected, it names the bike and offers Disconnect; otherwise it offers to connect, or shows
+ * progress while a connection or pairing is under way.
+ */
 @Composable
 internal fun ConnectionCard(
     state: BikeConnectionState,
@@ -398,109 +289,62 @@ internal fun ConnectionCard(
     onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
 ) {
-    val connected = state is BikeConnectionState.Connected
-    val statusColors = MaterialTheme.statusColors
-    val statusColor = when (state) {
-        is BikeConnectionState.Connected -> statusColors.connected
-        is BikeConnectionState.Connecting, is BikeConnectionState.Authenticating -> statusColors.inProgress
-        is BikeConnectionState.Failed -> statusColors.error
-        else -> MaterialTheme.colorScheme.outline
+    val busy = state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating || pairingInProgress
+    val failed = state is BikeConnectionState.Failed
+    // The retry count is deliberately not shown: a rider can simply wait for the link or a retry.
+    val headline = when {
+        state is BikeConnectionState.Connected -> state.deviceName
+        busy && pairingInProgress && state !is BikeConnectionState.Connecting -> "Finding your bike…"
+        busy -> "Connecting…"
+        failed -> "Couldn't connect"
+        bikeAssociated -> "Not connected"
+        else -> "Not paired"
     }
-
-    if (connected) {
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(statusColor, shape = CircleShape),
-                )
-                Text(
-                    state.deviceName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            TextButton(onClick = onDisconnectBike) {
-                Text("Disconnect")
-            }
-        }
-        return
+    val supporting = when {
+        state is BikeConnectionState.Connected -> "Connected"
+        state is BikeConnectionState.Failed -> state.message.takeUnless { it == "Couldn't connect." }
+        busy -> "Keep the ignition on"
+        bikeAssociated -> "RideBuddy connects when the bike is nearby"
+        else -> "Pair your motorcycle to see live data"
     }
-
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth(),
+        colors = when {
+            failed -> CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            state is BikeConnectionState.Connected -> CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            else -> CardDefaults.cardColors()
+        },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(statusColor, shape = CircleShape),
+        ListItem(
+            headlineContent = { Text(headline, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = supporting?.let { { Text(it) } },
+            leadingContent = {
+                Icon(
+                    if (state is BikeConnectionState.Connected) Icons.Outlined.BluetoothConnected else Icons.Outlined.TwoWheeler,
+                    contentDescription = null,
                 )
-            }
-            Spacer(Modifier.height(8.dp))
-            Icon(
-                Icons.Outlined.TwoWheeler,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                // The retry count is deliberately not shown. It is the app's own bookkeeping, and
-                // a rider waiting for their bike can simply wait until the connection succeeds
-                // or the app offers a retry.
-                text = when (state) {
-                    is BikeConnectionState.Connecting, is BikeConnectionState.Authenticating -> "Connecting…"
-                    is BikeConnectionState.Failed -> "Couldn't connect"
-                    else -> when {
-                        pairingInProgress -> "Finding your bike…"
-                        bikeAssociated -> "Not connected"
-                        else -> "Not paired"
-                    }
-                },
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            val connectionHint = (state as? BikeConnectionState.Failed)
-                ?.message
-                ?.takeUnless { it == "Couldn't connect." }
-            if (!connectionHint.isNullOrBlank()) {
-                Text(
-                    connectionHint,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            if (state is BikeConnectionState.Connecting || state is BikeConnectionState.Authenticating || pairingInProgress) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            } else {
-                Button(onClick = onConnectBike) {
-                    Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text(if (bikeAssociated) "Connect" else "Find my bike")
+            },
+            trailingContent = {
+                when {
+                    state is BikeConnectionState.Connected -> TextButton(onClick = onDisconnectBike) { Text("Disconnect") }
+                    busy -> CircularProgressIndicator(Modifier.size(24.dp))
+                    failed -> Button(onClick = onConnectBike) { Text("Retry") }
+                    else -> FilledTonalButton(onClick = onConnectBike) { Text(if (bikeAssociated) "Connect" else "Find my bike") }
                 }
-            }
-        }
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = Color.Transparent,
+                headlineColor = LocalContentColor.current,
+                supportingColor = LocalContentColor.current,
+                leadingIconColor = LocalContentColor.current,
+            ),
+        )
     }
 }
 
@@ -516,48 +360,36 @@ private fun TelemetryCard(
     val displayedSpeed = UnitFormatter.chartSpeed(frame.speedKilometresPerHour, units).roundToInt()
     val rpmFraction = (frame.engineRpm / RedlineRpm.toFloat()).coerceIn(0f, 1f)
 
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Baseline alignment rather than a tuned bottom padding: the unit sits on the
-                // speed's own baseline whatever the display scale does to either type size.
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        displayedSpeed.toString(),
-                        style = TelemetryHero,
-                        modifier = Modifier.alignByBaseline(),
-                    )
-                    Text(
-                        UnitFormatter.speedUnit(units),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.alignByBaseline(),
-                    )
-                }
-                // Secondary rather than primary container. The app's seed colour is red, so in
-                // the dark scheme primaryContainer and errorContainer are the same value: a
-                // badge that is always on screen would wear the app's error colour, and would
-                // shout louder than the redline the RPM gauge turns red for.
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                ) {
-                    Text(
-                        text = "LIVE",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // Baseline alignment keeps the unit on the speed's baseline at any display scale.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                Text(
+                    displayedSpeed.toString(),
+                    style = MaterialTheme.typography.displayLarge,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Text(
+                    UnitFormatter.speedUnit(units),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.alignByBaseline().weight(1f),
+                )
+                activeRide?.let { ride ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 8.dp)) {
+                        Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.error, CircleShape))
+                        Text(
+                            "Recording · ${UnitFormatter.distance(ride.distanceKilometres, units, locale)}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
-
             Gauge(
                 label = "RPM",
-                value = "${frame.engineRpm} rpm",
+                value = "${frame.engineRpm}",
                 fraction = rpmFraction,
                 color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 reading = "${frame.engineRpm} rpm of $RedlineRpm",
@@ -569,69 +401,22 @@ private fun TelemetryCard(
                 color = MaterialTheme.colorScheme.primary,
                 reading = "${frame.throttlePercent} percent",
             )
-
-            // Ride state reads as state, below the instruments and above the buttons, rather
-            // than sharing a row with them where it looked like a third button.
-            activeRide?.let { ride ->
-                HorizontalDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape),
-                        )
-                        Text(
-                            "Recording",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        UnitFormatter.distance(ride.distanceKilometres, units, locale),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-
-            // Card actions: bottom, trailing edge, ordered by emphasis. Same order as the
-            // navigate card's pair, so the action that ends something is always the left of
-            // the two and no card trains a thumb to land on the other's "end" button.
-            // FlowRow rather than Row because two buttons stop fitting on one line at large
-            // display scales, where stacking them is better than clipping either label.
+            // Stacks rather than clips at large display scales.
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (activeRide != null) {
-                    OutlinedButton(onClick = onEndRide, shape = MaterialTheme.shapes.large) {
-                        Text("End ride")
-                    }
-                }
-                // Just "Details": the LIVE badge at the top of this card already says the
-                // figures are live, and the button repeating it read as a second claim.
-                FilledTonalButton(onClick = onDetails, shape = MaterialTheme.shapes.large) {
-                    Text("Details")
-                }
+                if (activeRide != null) OutlinedButton(onClick = onEndRide) { Text("End ride") }
+                FilledTonalButton(onClick = onDetails) { Text("Details") }
             }
         }
     }
 }
 
 /**
- * A labelled bar gauge: name on the left, current value on the right, fill beneath.
- *
- * Speed is the only figure worth reading as a number at riding pace; revs and throttle are
- * read as positions, which is what a bar gives. Both use the one shape so the pair reads as
- * a single instrument rather than two unrelated readouts.
+ * A labelled bar: name left, value right, fill beneath. Revs and throttle are read as positions,
+ * which a bar gives; only speed is worth reading as a number at riding pace.
  */
 @Composable
 private fun Gauge(
@@ -642,26 +427,66 @@ private fun Gauge(
     reading: String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleMedium)
         }
+        // A gauge, not a progress bar: no gap and no end-stop dot.
         LinearProgressIndicator(
             progress = { fraction.coerceIn(0f, 1f) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(16.dp)
-                // Without this it is announced as a bare progress bar with no value.
+                .height(12.dp)
                 .semantics { stateDescription = reading },
             color = color,
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            strokeCap = StrokeCap.Round,
+            gapSize = 0.dp,
+            drawStopIndicator = {},
         )
     }
 }
+
+/** The current instruction, what is left of the route, and the two route actions. */
+@Composable
+private fun ActiveGuidance(
+    guidance: GuidanceState,
+    units: DistanceUnits,
+    onStopNavigation: () -> Unit,
+    onOpenActiveNavigation: () -> Unit,
+) {
+    val locale = LocalConfiguration.current.locales[0]
+    val details = listOfNotNull(
+        guidance.distanceToManeuverMetres?.let {
+            stringResource(R.string.navigation_maneuver_distance, UnitFormatter.maneuverDistance(it, units, locale))
+        },
+        guidance.distanceToDestinationMetres?.let { "${UnitFormatter.distance(it / 1000.0, units, locale)} left" },
+        guidance.timeToDestinationSeconds?.let { "ETA ${UnitFormatter.formatTime(System.currentTimeMillis() + it * 1000L)}" },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Icon(Icons.Outlined.Directions, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(32.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(guidance.instruction.ifBlank { "Navigating" }, style = MaterialTheme.typography.titleLarge)
+            if (details.isNotEmpty()) {
+                Text(details.joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+    // FlowRow so the pair stacks rather than clips at large display scales.
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = onStopNavigation) { Text("End route") }
+        Button(onClick = onOpenActiveNavigation) { Text(stringResource(R.string.navigation_full_map)) }
+    }
+}
+
+/** "Home → Marina Beach", or the day it was ridden when the places are unknown. */
+internal fun Ride.routeLabel(): String =
+    if (startArea != null || endArea != null) "${startArea ?: "Start"} → ${endArea ?: "Parking location"}"
+    else UnitFormatter.formatDate(startedAtMillis)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -697,8 +522,7 @@ private fun LiveDetailsSheet(
                 ?: "— ${UnitFormatter.mileageUnit(units)}",
         )
 
-        HorizontalDivider()
-        SheetSection("This ride")
+        SectionHeader("This ride")
         if (activeRide == null) {
             Text("Recording starts when you set off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
@@ -710,8 +534,7 @@ private fun LiveDetailsSheet(
         DetailRow("Hard acceleration", metrics.hardAccelerationEvents.toString())
         DetailRow("Hard braking", metrics.hardBrakingEvents.toString())
 
-        HorizontalDivider()
-        SheetSection("Ride data")
+        SectionHeader("Ride data")
         val speedData = remember(samples, units) { telemetryChartData(samples, 120) { UnitFormatter.chartSpeed(it.speedKph, units) } }
         val rpmData = remember(samples) { telemetryChartData(samples, 120) { it.rpm.toDouble() } }
         val throttleData = remember(samples) { telemetryChartData(samples, 120) { it.throttlePercent.toDouble() } }
@@ -719,19 +542,6 @@ private fun LiveDetailsSheet(
         LiveChart("RPM", rpmData, "rpm")
         LiveChart("Throttle", throttleData, "%")
     }
-}
-
-/**
- * A section heading inside the sheet, styled as the Live screen's own headings are.
- */
-@Composable
-private fun SheetSection(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.semantics { heading() },
-    )
 }
 
 /**
@@ -765,6 +575,7 @@ private fun LiveChart(title: String, series: TelemetryChartData, unit: String) {
                 values.lastOrNull { it != null }?.let {
                     "Latest %.0f%s%s".format(locale, it, if (unit == "%") "" else " ", unit)
                 } ?: "No data yet",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LineChart(

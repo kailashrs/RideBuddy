@@ -69,7 +69,7 @@ class HistoryScreenTest {
         choose("This month")
         awaitText("2 rides · 30.0 km · 1h 15m")
         compose.onNodeWithText("Park → Beach").assertDoesNotExist()
-        compose.onNodeWithText("Clear filter").assertIsDisplayed().performClick()
+        choose("All rides")
         awaitText("4 rides · 65.0 km · 2h 0m")
     }
 
@@ -78,9 +78,9 @@ class HistoryScreenTest {
         awaitText("1 ride · 30.0 km · 30m")
         choose("This month")
         awaitText("No rides in this period")
-        compose.onNodeWithText("Clear filter").assertIsDisplayed()
+        compose.onNodeWithText("All rides").assertIsDisplayed()
         capture("history-empty-period")
-        compose.onNodeWithText("Clear filter").performClick()
+        choose("All rides")
         awaitText("1 ride · 30.0 km · 30m")
     }
 
@@ -121,7 +121,6 @@ class HistoryScreenTest {
         awaitText("2 rides · 30.0 km · 1h 15m")
         capture("history-custom")
         compose.onNode(hasClickAction() and hasText("Sep", substring = true)).performClick()
-        compose.onNodeWithText("Choose dates").performClick()
         compose.onNodeWithText("Cancel").performClick()
         awaitText("2 rides · 30.0 km · 1h 15m")
     }
@@ -160,7 +159,7 @@ class HistoryScreenTest {
             startedAtMillis = rides[0].startedAtMillis - index * 60_000L) }
         show(rides = daily + rides[1])
         awaitText("Today")
-        compose.onNode(hasScrollAction()).performScrollToIndex(4)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(4)
         compose.onNodeWithText("Today").assertIsDisplayed()
         capture("history-sticky-header")
     }
@@ -225,8 +224,7 @@ class HistoryScreenTest {
     }
 
     private fun choose(label: String) {
-        compose.onNodeWithText("All rides").performClick()
-        compose.onNodeWithText(label).performClick()
+        compose.onNodeWithText(label).performScrollTo().performClick()
     }
     private fun awaitText(text: String) {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }

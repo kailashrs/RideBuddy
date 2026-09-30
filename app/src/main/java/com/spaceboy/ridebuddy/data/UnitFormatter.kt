@@ -110,6 +110,13 @@ object UnitFormatter {
     fun formatDateTime(millis: Long): String =
         DateFormat.getDateTimeInstance().format(Date(millis))
 
+    /** Date and minute, for a ride's heading; seconds are noise there. */
+    fun formatRideStart(millis: Long): String =
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
+
+    fun formatDate(millis: Long): String =
+        DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis))
+
     fun formatTime(millis: Long): String =
         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(millis))
 }

@@ -1,337 +1,437 @@
 package com.spaceboy.ridebuddy.ui.screens
 
 import android.content.pm.PackageManager
+import android.os.PowerManager
 import android.provider.Telephony
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.layout.Arrangement
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.automirrored.outlined.PhoneCallback
-import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.Bluetooth
-import androidx.compose.material.icons.outlined.BluetoothConnected
-import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.ContactPage
 import androidx.compose.material.icons.outlined.Contrast
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DeveloperMode
 import androidx.compose.material.icons.outlined.Directions
+import androidx.compose.material.icons.outlined.DirectionsBoat
 import androidx.compose.material.icons.outlined.FileDownload
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.Mail
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.ReportProblem
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Toll
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import android.widget.Toast
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.spaceboy.ridebuddy.BuildConfig
-import com.spaceboy.ridebuddy.NavigationKeyUiState
 import com.spaceboy.ridebuddy.R
-import com.spaceboy.ridebuddy.ble.BleCaptureState
-import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
-import com.spaceboy.ridebuddy.data.AppSettings
 import com.spaceboy.ridebuddy.data.DistanceUnits
+import com.spaceboy.ridebuddy.data.SampleRetention
 import com.spaceboy.ridebuddy.data.SupportedNotificationApp
 import com.spaceboy.ridebuddy.data.SupportedNotificationApps
-import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
-import com.spaceboy.ridebuddy.data.SampleRetention
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.ui.components.SettingsChoiceRow
-import com.spaceboy.ridebuddy.ui.components.SettingsRow
+import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
+import com.spaceboy.ridebuddy.domain.BikeConnectionState
+import com.spaceboy.ridebuddy.ui.MainScreenActions
+import com.spaceboy.ridebuddy.ui.MainScreenState
+import com.spaceboy.ridebuddy.ui.components.SectionHeader
 import com.spaceboy.ridebuddy.ui.components.SettingsPickerRow
-import com.spaceboy.ridebuddy.ui.components.SettingsSection
+import com.spaceboy.ridebuddy.ui.components.SettingsRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSliderRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * Every setting, grouped into sections.
+ * Every setting, as one Material list under subheaders.
  *
- * Each section below is its own composable rather than one long list, so the file stays
- * navigable and each group's parameters make plain what it actually touches.
- *
- * Three groups need care. Anything that writes to the motorcycle — caller display, call
- * controls, navigation output — is off by default and carries a warning to validate it
- * parked first. Anything that captures data is off by default because captures can contain
- * identifiers and notification text. And the destructive actions (forget bike, clear
- * history) confirm before acting.
+ * Anything that writes to the motorcycle — caller display, call controls, navigation output —
+ * is off by default. Destructive actions confirm first. Developer tools live on their own
+ * screen, one row away, so the riding settings are not buried under protocol switches.
  */
 @Composable
 fun SettingsScreen(
+    state: MainScreenState,
+    actions: MainScreenActions,
     modifier: Modifier = Modifier,
-    navigationKey: NavigationKeyUiState,
-    onOpenNavigationSettings: () -> Unit,
-    bleCapture: BleCaptureState,
-    rideCount: Int,
-    onClearRideHistory: () -> Unit,
-    onExportRideHistory: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    bikeAssociation: BikeAssociationState,
-    onAssociateBike: () -> Unit,
-    onForgetBike: () -> Unit,
-    settings: AppSettings,
-    onDistanceUnitsChanged: (DistanceUnits) -> Unit,
-    onAutoStartSharedChanged: (Boolean) -> Unit,
-    settingsActions: MoreSettingsActions,
-    onResetOnboarding: () -> Unit,
-    onExportDiagnostics: () -> Unit,
-    onExportBleCapture: () -> Unit,
-    onClearBleCapture: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
-    onRunStationaryTest: () -> Unit,
-    notificationAccessEnabled: Boolean,
-    backgroundLocationGranted: Boolean,
-    onOpenBackgroundLocationSettings: () -> Unit,
-    onOpenAppPermissions: () -> Unit,
 ) {
+    val settings = state.settings
+    val settingsActions = actions.settingsActions
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var installedAppsRefresh by remember { mutableIntStateOf(0) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) installedAppsRefresh++
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val installedSupportedApps by produceState<List<SupportedNotificationApp>>(
-        initialValue = emptyList(),
-        context,
-        installedAppsRefresh,
-    ) {
-        value = withContext(Dispatchers.IO) {
-            // The default SMS app is resolved rather than listed, and is installed by
-            // definition, so it is prepended instead of being filtered for presence.
-            val defaultSms = runCatching {
-                val packageName = Telephony.Sms.getDefaultSmsPackage(context)
-                defaultSmsNotificationApp(
-                    packageName,
-                    packageName?.let {
-                        context.packageManager.getApplicationLabel(
-                            context.packageManager.getApplicationInfo(
-                                it,
-                                PackageManager.ApplicationInfoFlags.of(0),
-                            ),
-                        ).toString()
-                    },
-                )
-            }.getOrNull()
-            listOfNotNull(defaultSms) + SupportedNotificationApps.filter { app ->
-                app.packageName != defaultSms?.packageName &&
-                try {
-                    context.packageManager.getPackageInfo(
-                        app.packageName,
-                        PackageManager.PackageInfoFlags.of(0),
-                    )
-                    true
-                } catch (_: Exception) {
-                    false
-                }
-            }
-        }
-    }
-    val uriHandler = LocalUriHandler.current
     val locale = LocalConfiguration.current.locales[0]
     val speed = remember(settings.distanceUnits, locale) { SpeedFormat(settings.distanceUnits, locale) }
-    var confirmTest by remember { mutableStateOf(false) }
-    var confirmForget by remember { mutableStateOf(false) }
-    var confirmClearRideHistory by remember { mutableStateOf(false) }
-    var showAbout by remember { mutableStateOf(false) }
-    var showSupportedAppsDialog by remember { mutableStateOf(false) }
-    var showBleCapture by remember { mutableStateOf(false) }
-    if (confirmTest) {
-        StationaryTestDialog(
-            onDismiss = { confirmTest = false },
-            onConfirm = { confirmTest = false; onRunStationaryTest() },
+    val uriHandler = LocalUriHandler.current
+
+    // Re-read on resume: these are changed in system settings, which do not notify.
+    var resumeCount by remember { mutableIntStateOf(0) }
+    var unrestrictedBattery by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        resumeCount++
+        unrestrictedBattery = context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }
+    val installedApps by produceState(emptyList<SupportedNotificationApp>(), context, resumeCount) {
+        value = withContext(Dispatchers.IO) { installedSupportedApps(context) }
+    }
+
+    var dialog by rememberSaveable { mutableStateOf<SettingsDialog?>(null) }
+    when (dialog) {
+        SettingsDialog.ForgetBike -> ConfirmDialog(
+            title = "Forget this bike?",
+            text = "RideBuddy will stop reconnecting automatically. You can pair the bike again at any time.",
+            confirm = "Forget",
+            onDismiss = { dialog = null },
+            onConfirm = actions.onForgetBike,
         )
-    }
-    if (confirmForget) {
-        ForgetBikeDialog(
-            onDismiss = { confirmForget = false },
-            onConfirm = { confirmForget = false; onForgetBike() },
+        SettingsDialog.ClearHistory -> ConfirmDialog(
+            title = "Delete all rides?",
+            text = "This permanently deletes ${state.rides.size} rides with their routes and stats. Export anything you want to keep first.",
+            confirm = "Delete",
+            onDismiss = { dialog = null },
+            onConfirm = actions.onClearRideHistory,
         )
-    }
-    if (confirmClearRideHistory) {
-        ClearHistoryDialog(
-            rideCount = rideCount,
-            onDismiss = { confirmClearRideHistory = false },
-            onConfirm = { confirmClearRideHistory = false; onClearRideHistory() },
-        )
-    }
-    if (showAbout) {
-        AboutDialog(onDismiss = { showAbout = false })
-    }
-    if (showSupportedAppsDialog) {
-        SupportedAppsDialog(
-            installedSupportedApps = installedSupportedApps,
+        SettingsDialog.SupportedApps -> SupportedAppsDialog(
+            installedApps = installedApps,
             disabledPackages = settings.disabledNotificationPackages,
             onPackageChanged = settingsActions.onNotificationPackageChanged,
-            onDismiss = { showSupportedAppsDialog = false },
+            onDismiss = { dialog = null },
         )
-    }
-    if (showBleCapture) {
-        BleCaptureDialog(
-            bleCapture = bleCapture,
-            onExport = onExportBleCapture,
-            onClear = onClearBleCapture,
-            onDismiss = { showBleCapture = false },
+        SettingsDialog.About -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("RideBuddy ${BuildConfig.VERSION_NAME}") },
+            text = {
+                Text(
+                    "A third-party companion for your motorcycle. It brings turn-by-turn navigation, " +
+                        "incoming calls and riding alerts to the bike's display, and keeps a private log " +
+                        "of your rides on this phone.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { dialog = null }) { Text("Close") } },
         )
+        null -> Unit
     }
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        item("connection") {
-            MotorcycleConnectionSection(
-                bikeAssociation = bikeAssociation,
-                onAssociateBike = onAssociateBike,
-                onRequestForget = { confirmForget = true },
-            )
+
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        section("Motorcycle") {
+            val bike = state.bikeAssociation.bike
+            if (bike == null) {
+                SettingsRow(
+                    title = "Pair your motorcycle",
+                    supportingText = when {
+                        state.bikeAssociation.associationInProgress -> "Waiting for permission"
+                        !state.bikeAssociation.supported -> "Pairing isn't supported on this phone"
+                        else -> "Choose your bike from the list"
+                    },
+                    icon = Icons.Outlined.Bluetooth,
+                    enabled = state.bikeAssociation.supported && !state.bikeAssociation.associationInProgress,
+                    onClick = actions.onAssociateBike,
+                )
+            } else {
+                SettingsRow(
+                    title = bike.name,
+                    supportingText = if (state.bikeAssociation.observingPresence) "Connects automatically" else "Automatic connection off",
+                    icon = Icons.Outlined.Bluetooth,
+                    trailingContent = { TextButton(onClick = { dialog = SettingsDialog.ForgetBike }) { Text("Forget") } },
+                )
+                val missing = if (state.connectionState is BikeConnectionState.Connected) "Not reported" else "Connect to read"
+                SettingsRow("VIN", state.identity.vin ?: missing, icon = Icons.Outlined.Fingerprint)
+                SettingsRow("Cluster software", state.identity.clusterSoftwareVersion ?: missing, icon = Icons.Outlined.Memory)
+            }
         }
-        item("navigation") {
-            NavigationAndCallsSection(
-                settings = settings,
-                settingsActions = settingsActions,
-                navigationKey = navigationKey,
-                notificationAccessEnabled = notificationAccessEnabled,
-                backgroundLocationGranted = backgroundLocationGranted,
-                installedSupportedApps = installedSupportedApps,
-                onOpenNavigationSettings = onOpenNavigationSettings,
-                onOpenNotificationAccess = onOpenNotificationAccess,
-                onOpenBackgroundLocationSettings = onOpenBackgroundLocationSettings,
-                onDistanceUnitsChanged = onDistanceUnitsChanged,
-                onAutoStartSharedChanged = onAutoStartSharedChanged,
-                onManageSupportedApps = { showSupportedAppsDialog = true },
-            )
-        }
-        item("trip-tracking") {
-            TripTrackingSection(settings, settingsActions, speed)
-        }
-        item("ride-data") {
-            RideDataSection(
-                rideCount = rideCount,
-                settings = settings,
-                settingsActions = settingsActions,
-                onExportRideHistory = onExportRideHistory,
-                onRequestClearHistory = { confirmClearRideHistory = true },
-            )
-        }
-        item("safety-alerts") {
-            SafetyAlertsSection(
-                settings = settings,
-                settingsActions = settingsActions,
-                speed = speed,
-                onOpenWeatherAttribution = {
-                    runCatching { uriHandler.openUri(OpenMeteoUrl) }
-                        .onFailure {
-                            Toast.makeText(context, R.string.browser_unavailable, Toast.LENGTH_LONG).show()
-                        }
+        section("Navigation") {
+            SettingsRow(
+                title = "Google Navigation key",
+                supportingText = when {
+                    state.uiState.navigationKey.isLoading -> "Checking…"
+                    state.uiState.navigationKey.maskedKey != null -> state.uiState.navigationKey.maskedKey
+                    else -> "Not set up"
                 },
+                icon = Icons.Outlined.Key,
+                onClick = actions.onOpenNavigationSettings,
+            )
+            SettingsSwitchRow("Voice guidance", "Speak instructions on the phone", settings.voiceGuidance,
+                icon = Icons.Outlined.RecordVoiceOver, onCheckedChange = actions.onVoiceGuidanceChanged)
+            SettingsSwitchRow("Avoid tolls", null, settings.avoidTolls,
+                icon = Icons.Outlined.Toll, onCheckedChange = actions.onAvoidTollsChanged)
+            SettingsSwitchRow("Avoid highways", null, settings.avoidHighways,
+                icon = Icons.AutoMirrored.Outlined.AltRoute, onCheckedChange = actions.onAvoidHighwaysChanged)
+            SettingsSwitchRow("Avoid ferries", null, settings.avoidFerries,
+                icon = Icons.Outlined.DirectionsBoat, onCheckedChange = actions.onAvoidFerriesChanged)
+            SettingsSwitchRow("Start shared routes right away", "Skip the route preview when the bike is connected",
+                settings.autoStartSharedDestinations, icon = Icons.Outlined.Directions,
+                onCheckedChange = actions.onAutoStartSharedChanged)
+        }
+        section("Motorcycle display") {
+            SettingsSwitchRow("Directions on the bike", "Show turns and distances on the display",
+                settings.tftNavigationOutputEnabled, icon = Icons.Outlined.Tv,
+                onCheckedChange = settingsActions.onTftNavigationOutputChanged)
+            SettingsPickerRow("Direction text", TftTextMode.entries, settings.tftTextMode,
+                icon = Icons.Outlined.TextFields, choiceLabel = { if (it == TftTextMode.Full) "Full" else "Compact" },
+                onSelected = settingsActions.onTftTextModeChanged)
+            SettingsSwitchRow("Caller display", "Show incoming calls on the bike", settings.callerDisplay,
+                icon = Icons.Outlined.ContactPage, onCheckedChange = settingsActions.onCallerDisplayChanged)
+            SettingsSwitchRow("Handlebar call controls", "Answer or decline calls from the handlebar",
+                settings.tftCallControls, icon = Icons.Outlined.Call, onCheckedChange = settingsActions.onTftCallControlsChanged)
+            SettingsRow(
+                title = "App notifications",
+                supportingText = when {
+                    !state.notificationAccessEnabled -> "Notification access is off"
+                    installedApps.isEmpty() -> "No supported apps installed"
+                    else -> "${installedApps.count { it.packageName !in settings.disabledNotificationPackages }} of ${installedApps.size} apps"
+                },
+                icon = Icons.Outlined.Apps,
+                onClick = { if (state.notificationAccessEnabled) dialog = SettingsDialog.SupportedApps else actions.onOpenNotificationAccess() },
             )
         }
-        item("motorcycle-display") {
-            MotorcycleDisplaySection(settings, settingsActions)
+        section("Riding alerts") {
+            SettingsSwitchRow("Overspeed", "Alert above ${speed.label(settings.overspeedThresholdKph.toDouble())}",
+                settings.overspeedAlerts, icon = Icons.Outlined.Speed, onCheckedChange = settingsActions.onOverspeedAlertsChanged)
+            if (settings.overspeedAlerts) {
+                SettingsSliderRow(
+                    title = "Overspeed limit",
+                    valueLabel = { speed.label(speed.stored(it)) },
+                    value = speed.display(settings.overspeedThresholdKph.toDouble()),
+                    range = speed.display(40.0)..speed.display(200.0),
+                    steps = 15,
+                ) { settingsActions.onOverspeedThresholdChanged(speed.stored(it).roundToInt()) }
+            }
+            SettingsSwitchRow("High RPM", "Alert above ${settings.rpmThreshold} rpm", settings.rpmAlerts,
+                icon = Icons.Outlined.Tune, onCheckedChange = settingsActions.onRpmAlertsChanged)
+            if (settings.rpmAlerts) {
+                SettingsSliderRow(
+                    title = "RPM limit",
+                    valueLabel = { "${it.roundToInt()} rpm" },
+                    value = settings.rpmThreshold.toFloat(),
+                    range = 3_000f..12_000f,
+                    steps = 17,
+                ) { settingsActions.onRpmThresholdChanged(it.roundToInt()) }
+            }
+            SettingsSwitchRow("Hard acceleration", null, settings.accelerationAlerts,
+                icon = Icons.AutoMirrored.Outlined.TrendingUp, onCheckedChange = settingsActions.onAccelerationAlertsChanged)
+            SettingsSwitchRow("Hard braking", null, settings.brakingAlerts,
+                icon = Icons.Outlined.ReportProblem, onCheckedChange = settingsActions.onBrakingAlertsChanged)
+            SettingsSwitchRow("Weather", "Rain, storm and strong wind warnings. Data by Open-Meteo.com",
+                settings.weatherAlerts, icon = Icons.Outlined.Cloud, onCheckedChange = settingsActions.onWeatherAlertsChanged)
+            if (settings.weatherAlerts) {
+                TextButton(
+                    onClick = {
+                        runCatching { uriHandler.openUri(OpenMeteoUrl) }
+                            .onFailure { Toast.makeText(context, R.string.browser_unavailable, Toast.LENGTH_LONG).show() }
+                    },
+                    modifier = Modifier.padding(start = 44.dp),
+                ) { Text("About Open-Meteo") }
+            }
+            SettingsSwitchRow("Road disruptions & cameras", "Incidents and cameras on the map, and route warnings on the bike",
+                settings.hazardAlerts, icon = Icons.Outlined.CameraAlt, onCheckedChange = settingsActions.onHazardAlertsChanged)
         }
-        item("app-theme") {
-            AppThemeSection(settings, settingsActions)
-        }
-        item("permissions") {
-            PermissionsSection(
-                onOpenAppPermissions = onOpenAppPermissions,
-                onShowAbout = { showAbout = true },
-                onResetOnboarding = onResetOnboarding,
+        section("Ride recording") {
+            SettingsSliderRow(
+                title = "Start recording above",
+                valueLabel = { speed.label(speed.stored(it)) },
+                value = speed.display(settings.rideStartSpeedKph),
+                range = speed.display(1.0)..speed.display(15.0),
+                steps = 13,
+                icon = Icons.Outlined.Speed,
+            ) { settingsActions.onRideStartSpeedChanged(speed.stored(it).coerceAtLeast(settings.rideStopSpeedKph + 0.5)) }
+            SettingsSliderRow(
+                title = "Stop recording below",
+                valueLabel = { speed.label(speed.stored(it)) },
+                value = speed.display(settings.rideStopSpeedKph),
+                range = speed.display(0.0)..speed.display(10.0),
+                steps = 9,
+                icon = Icons.Outlined.Timer,
+            ) { settingsActions.onRideStopSpeedChanged(speed.stored(it).coerceAtMost(settings.rideStartSpeedKph - 0.5)) }
+            SettingsSliderRow(
+                title = "End ride after parking for",
+                valueLabel = { formatSeconds(it.roundToInt()) },
+                value = settings.rideStopDelaySeconds.toFloat(),
+                range = 30f..300f,
+                steps = 8,
+                icon = Icons.Outlined.Schedule,
+            ) { settingsActions.onRideStopDelayChanged(it.roundToInt()) }
+            SettingsRow(
+                title = "Background location",
+                supportingText = if (state.backgroundLocationGranted) "Allowed all the time" else "Needed to map rides with the screen off",
+                icon = Icons.Outlined.LocationOn,
+                onClick = actions.onOpenAppPermissions,
             )
         }
-        item("developer-tools") {
-            DeveloperToolsSection(
-                settings = settings,
-                settingsActions = settingsActions,
-                bleCapture = bleCapture,
-                onOpenDiagnostics = onOpenDiagnostics,
-                onViewCapture = { showBleCapture = true },
-                onRequestStationaryTest = { confirmTest = true },
-            )
+        section("Ride data") {
+            SettingsPickerRow("Keep detailed ride data", SampleRetention.entries, settings.sampleRetention,
+                icon = Icons.Outlined.Storage, choiceLabel = SampleRetention::label,
+                onSelected = settingsActions.onSampleRetentionChanged)
+            SettingsRow("Export all rides", "A CSV summary of every saved ride",
+                icon = Icons.Outlined.FileDownload, enabled = state.rides.isNotEmpty(), onClick = actions.onExportRideHistory)
+            SettingsRow("Delete all rides", "${state.rides.size} rides on this phone",
+                icon = Icons.Outlined.DeleteOutline, enabled = state.rides.isNotEmpty(),
+                onClick = { dialog = SettingsDialog.ClearHistory })
+        }
+        section("App") {
+            SettingsSwitchRow("Use miles", "Distances and speeds in imperial units",
+                settings.distanceUnits == DistanceUnits.Imperial, icon = Icons.Outlined.Straighten) { imperial ->
+                actions.onDistanceUnitsChanged(if (imperial) DistanceUnits.Imperial else DistanceUnits.Metric)
+            }
+            SettingsPickerRow("Theme", ThemeMode.entries, settings.themeMode, icon = Icons.Outlined.Palette,
+                choiceLabel = { if (it == ThemeMode.System) "System default" else it.name },
+                onSelected = settingsActions.onThemeModeChanged)
+            SettingsSwitchRow("Dynamic color", "Match your wallpaper's colors", settings.dynamicColor,
+                icon = Icons.Outlined.ColorLens, onCheckedChange = settingsActions.onDynamicColorChanged)
+            SettingsSwitchRow("High contrast", null, settings.highContrast,
+                icon = Icons.Outlined.Contrast, onCheckedChange = settingsActions.onHighContrastChanged)
+            SettingsRow("Notification access", if (state.notificationAccessEnabled) "Allowed" else "Needed for bike alerts",
+                icon = Icons.Outlined.Notifications, onClick = actions.onOpenNotificationAccess)
+            SettingsRow("Battery use", if (unrestrictedBattery) "Unrestricted" else "Optimized — may delay reconnecting",
+                icon = Icons.Outlined.BatteryAlert, onClick = actions.onOpenAppPermissions)
+            SettingsRow("App permissions", null, icon = Icons.Outlined.Security, onClick = actions.onOpenAppPermissions)
+            SettingsRow("Run setup again", null, icon = Icons.Outlined.RestartAlt, onClick = actions.onResetOnboarding)
+            SettingsRow("Developer tools", "Connection details, packet capture and display tests",
+                icon = Icons.Outlined.DeveloperMode, onClick = actions.onOpenDiagnostics)
+            SettingsRow("About", "Version ${BuildConfig.VERSION_NAME}", icon = Icons.Outlined.Info,
+                onClick = { dialog = SettingsDialog.About })
         }
     }
 }
 
+private enum class SettingsDialog { ForgetBike, ClearHistory, SupportedApps, About }
+
+private fun LazyListScope.section(title: String, content: @Composable () -> Unit) {
+    item(key = title) {
+        Column {
+            SectionHeader(title, Modifier.padding(horizontal = 16.dp))
+            content()
+        }
+    }
+}
+
+/** A destructive confirmation. The confirm action is error-coloured and closes the dialog. */
+@Composable
+internal fun ConfirmDialog(
+    title: String,
+    text: String,
+    confirm: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(
+                onClick = { onDismiss(); onConfirm() },
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text(confirm) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun SupportedAppsDialog(
+    installedApps: List<SupportedNotificationApp>,
+    disabledPackages: Set<String>,
+    onPackageChanged: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("App notifications") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Choose which apps can show notifications on the bike.")
+                if (installedApps.isEmpty()) {
+                    Text(
+                        "None of the supported apps (WhatsApp, Messages, Instagram, Facebook, Gmail, Outlook, X) are installed.",
+                        Modifier.padding(top = 16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                installedApps.forEach { app ->
+                    SettingsSwitchRow(app.label, null, app.packageName !in disabledPackages) {
+                        onPackageChanged(app.packageName, it)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/** The default SMS app first (resolved, so always installed), then the listed apps that are. */
+private fun installedSupportedApps(context: android.content.Context): List<SupportedNotificationApp> {
+    val packages = context.packageManager
+    val defaultSms = runCatching {
+        val packageName = Telephony.Sms.getDefaultSmsPackage(context)
+        defaultSmsNotificationApp(packageName, packageName?.let {
+            packages.getApplicationLabel(packages.getApplicationInfo(it, PackageManager.ApplicationInfoFlags.of(0))).toString()
+        })
+    }.getOrNull()
+    return listOfNotNull(defaultSms) + SupportedNotificationApps.filter { app ->
+        app.packageName != defaultSms?.packageName &&
+            runCatching { packages.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0)) }.isSuccess
+    }
+}
+
+private fun formatSeconds(total: Int): String = when {
+    total < 60 -> "$total s"
+    total % 60 == 0 -> "${total / 60} min"
+    else -> "${total / 60} min ${total % 60} s"
+}
+
 /**
- * Converts between the km/h the app stores and the value a slider shows in the rider's units.
- * Shared by the trip-tracking and alert sections, which both drive sliders in display units and
- * write back canonical ones.
- */
-/**
- * Converts between stored speeds and the rider's display units for the slider rows.
- *
- * Speeds are stored in km/h but the sliders operate in whatever unit the rider has chosen,
- * so the conversion has to run both ways: [display] to place the handle, [stored] to
- * convert the position back before saving.
+ * Speeds are stored in km/h but sliders run in the rider's units, so the conversion goes both
+ * ways: [display] places the handle and [stored] converts the position back before saving.
  */
 @Immutable
 private class SpeedFormat(private val units: DistanceUnits, private val locale: Locale) {
@@ -341,735 +441,3 @@ private class SpeedFormat(private val units: DistanceUnits, private val locale: 
 }
 
 private const val OpenMeteoUrl = "https://open-meteo.com/"
-
-@Composable
-private fun MotorcycleConnectionSection(
-    bikeAssociation: BikeAssociationState,
-    onAssociateBike: () -> Unit,
-    onRequestForget: () -> Unit,
-) {
-    SettingsSection("Motorcycle connection") {
-        SettingsRow(
-            icon = Icons.Outlined.Bluetooth,
-            title = bikeAssociation.bike?.name ?: "Pair your motorcycle",
-            supportingText = when {
-                bikeAssociation.associationInProgress -> "Waiting for permission"
-                bikeAssociation.bike == null && !bikeAssociation.supported -> "Motorcycle pairing isn't supported here"
-                bikeAssociation.bike == null -> "Choose your bike from the list"
-                bikeAssociation.observingPresence -> "Auto-connect on"
-                else -> "Auto-connect off"
-            },
-            onClick = if (bikeAssociation.bike == null) onAssociateBike else null,
-        )
-        if (bikeAssociation.bike != null) {
-            HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsRow(
-                icon = Icons.Outlined.BluetoothConnected,
-                title = "Bluetooth pairing",
-                supportingText = "${bikeAssociation.bike.address.takeLast(5)} • Paired via Bluetooth",
-                trailingContent = { TextButton(onClick = onRequestForget) { Text("Forget") } },
-            )
-        }
-    }
-}
-
-@Composable
-private fun NavigationAndCallsSection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-    navigationKey: NavigationKeyUiState,
-    notificationAccessEnabled: Boolean,
-    backgroundLocationGranted: Boolean,
-    installedSupportedApps: List<SupportedNotificationApp>,
-    onOpenNavigationSettings: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    onOpenBackgroundLocationSettings: () -> Unit,
-    onDistanceUnitsChanged: (DistanceUnits) -> Unit,
-    onAutoStartSharedChanged: (Boolean) -> Unit,
-    onManageSupportedApps: () -> Unit,
-) {
-    SettingsSection("Navigation & calls") {
-        SettingsSwitchRow(
-            title = "Use miles",
-            supportingText = "Display distance and speed in imperial units",
-            checked = settings.distanceUnits == DistanceUnits.Imperial,
-            icon = Icons.Outlined.Straighten,
-            onCheckedChange = { imperial -> onDistanceUnitsChanged(if (imperial) DistanceUnits.Imperial else DistanceUnits.Metric) },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            title = "Start shared destinations",
-            supportingText = "Skip the route preview when the bike is connected",
-            checked = settings.autoStartSharedDestinations,
-            icon = Icons.AutoMirrored.Outlined.AltRoute,
-            onCheckedChange = onAutoStartSharedChanged,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.Directions,
-            title = "Navigation",
-            supportingText = when {
-                navigationKey.isLoading -> "Checking setup…"
-                navigationKey.maskedKey != null -> navigationKey.maskedKey
-                else -> "API key not configured"
-            },
-            onClick = onOpenNavigationSettings,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.LocationOn,
-            title = "Background location",
-            supportingText = if (backgroundLocationGranted) {
-                "Allowed all the time"
-            } else {
-                "Optional for automatic route recording"
-            },
-            onClick = onOpenBackgroundLocationSettings,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.Notifications,
-            title = "Alerts & notifications",
-            supportingText = if (notificationAccessEnabled) "Notification access enabled" else "Tap to enable notification access",
-            onClick = onOpenNotificationAccess,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        val enabledInstalledCount =
-            installedSupportedApps.count { it.packageName !in settings.disabledNotificationPackages }
-        SettingsRow(
-            icon = Icons.Outlined.Apps,
-            title = "Supported apps",
-            supportingText = if (installedSupportedApps.isEmpty()) {
-                "No supported apps installed"
-            } else {
-                "$enabledInstalledCount of ${installedSupportedApps.size} installed apps enabled"
-            },
-            onClick = onManageSupportedApps,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Caller display",
-            "Show incoming calls on the bike",
-            settings.callerDisplay,
-            icon = Icons.Outlined.ContactPage
-        ) {
-            settingsActions.onCallerDisplayChanged(it)
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Handlebar call controls",
-            "Answer or decline calls from the handlebar",
-            settings.tftCallControls,
-            icon = Icons.Outlined.Call
-        ) {
-            settingsActions.onTftCallControlsChanged(it)
-        }
-    }
-}
-
-@Composable
-private fun TripTrackingSection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-    speed: SpeedFormat,
-) {
-    SettingsSection("Automatic ride recording") {
-        SettingsSliderRow(
-            title = "Start recording above",
-            valueLabel = { speed.label(speed.stored(it)) },
-            value = speed.display(settings.rideStartSpeedKph),
-            range = speed.display(1.0)..speed.display(15.0),
-            steps = 13,
-            icon = Icons.Outlined.Speed,
-            onValueChange = { value ->
-                settingsActions.onRideStartSpeedChanged(
-                    speed.stored(value).coerceAtLeast(settings.rideStopSpeedKph + 0.5),
-                )
-            },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSliderRow(
-            title = "Stop recording below",
-            valueLabel = { speed.label(speed.stored(it)) },
-            value = speed.display(settings.rideStopSpeedKph),
-            range = speed.display(0.0)..speed.display(10.0),
-            steps = 9,
-            icon = Icons.Outlined.Timer,
-            onValueChange = { value ->
-                settingsActions.onRideStopSpeedChanged(
-                    speed.stored(value).coerceAtMost(settings.rideStartSpeedKph - 0.5),
-                )
-            },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSliderRow(
-            title = "Parking delay",
-            valueLabel = { seconds ->
-                val total = seconds.roundToInt()
-                when {
-                    total < 60 -> "$total s"
-                    total % 60 == 0 -> "${total / 60} min"
-                    else -> "${total / 60} min ${total % 60} s"
-                }
-            },
-            value = settings.rideStopDelaySeconds.toFloat(),
-            range = 30f..300f,
-            steps = 8,
-            icon = Icons.Outlined.Schedule,
-            onValueChange = { settingsActions.onRideStopDelayChanged(it.roundToInt()) },
-        )
-    }
-}
-
-@Composable
-private fun SafetyAlertsSection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-    speed: SpeedFormat,
-    onOpenWeatherAttribution: () -> Unit,
-) {
-    SettingsSection("Riding alerts") {
-        SettingsSwitchRow(
-            "Overspeed",
-            "Alert above ${speed.label(settings.overspeedThresholdKph.toDouble())}",
-            settings.overspeedAlerts,
-            icon = Icons.Outlined.Speed
-        ) {
-            settingsActions.onOverspeedAlertsChanged(it)
-        }
-        if (settings.overspeedAlerts) {
-            HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSliderRow(
-                title = "Overspeed threshold",
-                valueLabel = { speed.label(speed.stored(it)) },
-                value = speed.display(settings.overspeedThresholdKph.toDouble()),
-                range = speed.display(40.0)..speed.display(200.0),
-                steps = 15,
-                icon = Icons.Outlined.Speed,
-            ) { value -> settingsActions.onOverspeedThresholdChanged(speed.stored(value).roundToInt()) }
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "High RPM",
-            "Alert above ${settings.rpmThreshold} rpm",
-            settings.rpmAlerts,
-            icon = Icons.Outlined.Tune
-        ) {
-            settingsActions.onRpmAlertsChanged(it)
-        }
-        if (settings.rpmAlerts) {
-            HorizontalDivider(Modifier.padding(start = 56.dp))
-            SettingsSliderRow(
-                title = "RPM threshold",
-                valueLabel = { "${it.roundToInt()} rpm" },
-                value = settings.rpmThreshold.toFloat(),
-                range = 3_000f..12_000f,
-                steps = 17,
-                icon = Icons.Outlined.Tune,
-            ) { settingsActions.onRpmThresholdChanged(it.roundToInt()) }
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Hard acceleration",
-            "Notify when acceleration exceeds the event threshold",
-            settings.accelerationAlerts,
-            icon = Icons.AutoMirrored.Outlined.TrendingUp
-        ) {
-            settingsActions.onAccelerationAlertsChanged(it)
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Hard braking",
-            "Notify when braking exceeds the event threshold",
-            settings.brakingAlerts,
-            icon = Icons.Outlined.ReportProblem
-        ) {
-            settingsActions.onBrakingAlertsChanged(it)
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Weather",
-            "Rain, storm and high-wind warnings on the phone and, when enabled, the TFT",
-            settings.weatherAlerts,
-            icon = Icons.Outlined.Cloud
-        ) {
-            settingsActions.onWeatherAlertsChanged(it)
-        }
-        if (settings.weatherAlerts) {
-            TextButton(
-                onClick = onOpenWeatherAttribution,
-                modifier = Modifier.padding(start = 56.dp),
-            ) {
-                Text("Weather data by Open-Meteo.com")
-            }
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Road disruptions & cameras",
-            "Show Google incidents and cameras on the map, with supported route warnings on the TFT",
-            settings.hazardAlerts,
-            icon = Icons.Outlined.CameraAlt,
-        ) {
-            settingsActions.onHazardAlertsChanged(it)
-        }
-    }
-}
-
-@Composable
-private fun MotorcycleDisplaySection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-) {
-    SettingsSection("Motorcycle display") {
-        SettingsSwitchRow(
-            "Navigation on bike",
-            "Show directions and distances on the bike",
-            settings.tftNavigationOutputEnabled,
-            icon = Icons.Outlined.Tv,
-        ) { enabled -> settingsActions.onTftNavigationOutputChanged(enabled) }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsChoiceRow(
-            title = "Navigation text",
-            choices = TftTextMode.entries,
-            selectedChoice = settings.tftTextMode,
-            icon = Icons.Outlined.TextFields,
-            choiceLabel = TftTextMode::name,
-            onSelected = settingsActions.onTftTextModeChanged,
-        )
-        Text(
-            "Weather and route alerts briefly replace directions. Calls and nearby turns take priority.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 56.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-        )
-    }
-}
-
-@Composable
-private fun AppThemeSection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-) {
-    SettingsSection("Appearance") {
-        SettingsChoiceRow(
-            title = "Theme",
-            choices = ThemeMode.entries,
-            selectedChoice = settings.themeMode,
-            icon = Icons.Outlined.Palette,
-            choiceLabel = ThemeMode::name,
-            onSelected = settingsActions.onThemeModeChanged,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "Dynamic color",
-            "Use your device's Material You palette",
-            settings.dynamicColor,
-            icon = Icons.Outlined.ColorLens
-        ) {
-            settingsActions.onDynamicColorChanged(it)
-        }
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            "High contrast",
-            "Use stronger surface and text contrast",
-            settings.highContrast,
-            icon = Icons.Outlined.Contrast
-        ) {
-            settingsActions.onHighContrastChanged(it)
-        }
-    }
-}
-
-/**
- * Diagnostics and validation tools.
- *
- * Includes the parked display test, which is the intended way to verify vehicle output
- * before enabling it for real, and the packet capture, whose privacy note is part of the
- * dialog rather than buried in this section.
- */
-@Composable
-private fun DeveloperToolsSection(
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-    bleCapture: BleCaptureState,
-    onOpenDiagnostics: () -> Unit,
-    onViewCapture: () -> Unit,
-    onRequestStationaryTest: () -> Unit,
-) {
-    SettingsSection("Developer tools") {
-        SettingsRow(
-            icon = Icons.Outlined.Info,
-            title = "Use only while parked",
-            supportingText = "For protocol research and troubleshooting. Raw Bluetooth payloads may " +
-                "include personal data; capture only what you intend to inspect or share.",
-        )
-        HorizontalDivider()
-        DeveloperToolsGroupLabel("Connection")
-        SettingsRow(
-            icon = Icons.Outlined.Bluetooth,
-            title = "Connection details",
-            supportingText = "Connection state, GATT services, and recent activity",
-            onClick = onOpenDiagnostics,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsSwitchRow(
-            title = "Save diagnostic history",
-            supportingText = if (settings.persistConnectionDiagnostics) {
-                "Recent connection activity is saved across app restarts"
-            } else {
-                "Off — connection activity is kept only for this app session"
-            },
-            icon = Icons.Outlined.History,
-            checked = settings.persistConnectionDiagnostics,
-            onCheckedChange = settingsActions.onPersistConnectionDiagnosticsChanged,
-        )
-        HorizontalDivider()
-        DeveloperToolsGroupLabel("Protocol capture")
-        SettingsSwitchRow(
-            title = "Capture BLE traffic",
-            supportingText = if (bleCapture.enabled) {
-                "Capturing raw GATT reads, notifications, and writes in memory"
-            } else {
-                "Off — enable before reproducing the behavior you want to inspect"
-            },
-            icon = Icons.Outlined.BugReport,
-            checked = settings.bleCaptureEnabled,
-            onCheckedChange = settingsActions.onBleCaptureEnabledChanged,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
-            title = "Review captured packets",
-            supportingText = when {
-                bleCapture.entries.isEmpty() -> "No packets captured"
-                bleCapture.droppedEntries > 0 ->
-                    "${bleCapture.entries.size} kept • ${bleCapture.droppedEntries} older packets dropped"
-                else -> "${bleCapture.entries.size} packets kept in memory"
-            },
-            trailingContent = { TextButton(onClick = onViewCapture) { Text("View") } },
-        )
-        HorizontalDivider()
-        DeveloperToolsGroupLabel("Display validation")
-        SettingsRow(
-            icon = Icons.Outlined.Tv,
-            title = "Stationary TFT validation",
-            supportingText = "Send diagnostic navigation and caller writes while parked.",
-            trailingContent = { TextButton(onClick = onRequestStationaryTest) { Text("Run") } },
-        )
-    }
-}
-
-@Composable
-private fun PermissionsSection(
-    onOpenAppPermissions: () -> Unit,
-    onShowAbout: () -> Unit,
-    onResetOnboarding: () -> Unit,
-) {
-    SettingsSection("Permissions & system") {
-        SettingsRow(
-            icon = Icons.Outlined.Security,
-            title = "Permissions & privacy",
-            supportingText = "Bluetooth and location are requested only when needed",
-            onClick = onOpenAppPermissions,
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.Info,
-            title = "About",
-            supportingText = "RideBuddy ${BuildConfig.VERSION_NAME}",
-            onClick = { onShowAbout() },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.RestartAlt,
-            title = "Run setup again",
-            supportingText = "Review permissions, pairing, and navigation",
-            onClick = onResetOnboarding,
-        )
-    }
-}
-
-@Composable
-private fun RideDataSection(
-    rideCount: Int,
-    settings: AppSettings,
-    settingsActions: MoreSettingsActions,
-    onExportRideHistory: () -> Unit,
-    onRequestClearHistory: () -> Unit,
-) {
-    SettingsSection("Ride data & export") {
-        SettingsRow(
-            icon = Icons.Outlined.History,
-            title = "Ride history",
-            supportingText = "$rideCount saved rides stored on this device",
-            trailingContent = {
-                TextButton(onClick = onRequestClearHistory, enabled = rideCount > 0) { Text("Clear") }
-            },
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsPickerRow(
-            icon = Icons.Outlined.Storage,
-            title = "Keep detailed ride data",
-            choices = SampleRetention.entries,
-            selectedChoice = settings.sampleRetention,
-            choiceLabel = SampleRetention::label,
-            onSelected = settingsActions.onSampleRetentionChanged,
-        )
-        Text(
-            "Rides, records and insights are kept for good. This is how long each ride also " +
-                "keeps its speed, engine and throttle charts and its detailed export, which is " +
-                "what makes stored history grow.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 56.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-        )
-        HorizontalDivider(Modifier.padding(start = 56.dp))
-        SettingsRow(
-            icon = Icons.Outlined.FileDownload,
-            title = "Export ride history",
-            supportingText = "Share a CSV summary of every saved ride",
-            onClick = onExportRideHistory,
-        )
-    }
-}
-
-@Composable
-private fun DeveloperToolsGroupLabel(label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp, end = 16.dp),
-    )
-}
-
-
-@Composable
-private fun StationaryTestDialog(
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("Test the TFT?") },
-        text = {
-            Text(
-                "Keep the motorcycle stationary and make sure no real call is in progress. The " +
-                    "test writes a maneuver, trip distance, text and speed limit, then shows a " +
-                    "test caller ringing, answered, cleared and outgoing.",
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onDismiss(); onConfirm()
-            }) { Text("Run test") }
-        },
-        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun ForgetBikeDialog(
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("Forget this bike?") },
-        text = { Text("The app will stop reconnecting automatically. You can pair the bike again at any time.") },
-        confirmButton = {
-            Button(
-                onClick = { onDismiss(); onConfirm() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
-            ) { Text("Forget") }
-        },
-        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun ClearHistoryDialog(
-    rideCount: Int,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("Clear all ride history?") },
-        text = { Text("This permanently deletes $rideCount rides and their routes and stats. Export anything you want to keep first.") },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onDismiss()
-                    onConfirm()
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
-            ) { Text("Delete history") }
-        },
-        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun AboutDialog(
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("About RideBuddy") },
-        text = {
-            Text(
-                "Version ${BuildConfig.VERSION_NAME}\n\n" +
-                        "RideBuddy is a third-party companion app for your motorcycle.\n\n" +
-                        "It brings turn-by-turn navigation, speed limits, incoming call controls, and safety alerts directly to your motorcycle's display, while automatically logging your rides and trip statistics privately on your phone.",
-            )
-        },
-        confirmButton = { TextButton(onClick = { onDismiss() }) { Text("Close") } },
-    )
-}
-
-@Composable
-private fun SupportedAppsDialog(
-    installedSupportedApps: List<SupportedNotificationApp>,
-    disabledPackages: Set<String>,
-    onPackageChanged: (String, Boolean) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Dialog(onDismissRequest = { onDismiss() }) {
-        Surface(
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 520.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-            ) {
-                Text(
-                    "Supported notification apps",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "Manage notification alerts for messaging and social apps installed on your device.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (installedSupportedApps.isEmpty()) {
-                        Text(
-                            "No supported apps (WhatsApp, Messages, Instagram, Facebook, Gmail, Outlook, X) were detected on this device.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        installedSupportedApps.forEach { app ->
-                            val enabled = app.packageName !in disabledPackages
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .toggleable(
-                                        value = enabled,
-                                        role = Role.Switch,
-                                        onValueChange = { value ->
-                                            onPackageChanged(app.packageName, value)
-                                        },
-                                    )
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        app.label,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        app.packageName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Switch(
-                                    checked = enabled,
-                                    onCheckedChange = null,
-                                )
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = { onDismiss() }) {
-                        Text("Done")
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Shows the captured packets, newest first, with share and clear.
- *
- * The privacy note is shown here rather than only at the toggle, because this is the point
- * at which the rider is about to share the contents somewhere.
- */
-@Composable
-private fun BleCaptureDialog(
-    bleCapture: BleCaptureState,
-    onExport: () -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { onDismiss() },
-        title = { Text("BLE capture") },
-        text = {
-            Column(
-                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    "Raw GATT packets can include identifiers and notification text. The capture stays in memory until cleared or the app closes.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (bleCapture.entries.isEmpty()) {
-                    Text("No packets captured yet. Enable capture before connecting or using a feature.")
-                } else {
-                    bleCapture.entries.asReversed().forEach { entry ->
-                        Text(entry.format(), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onExport, enabled = bleCapture.entries.isNotEmpty()) { Text("Share") }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onClear, enabled = bleCapture.entries.isNotEmpty()) { Text("Clear") }
-                TextButton(onClick = { onDismiss() }) { Text("Close") }
-            }
-        },
-    )
-}

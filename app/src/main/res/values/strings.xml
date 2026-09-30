@@ -43,7 +43,6 @@
     <string name="history_this_week">This week</string>
     <string name="history_this_month">This month</string>
     <string name="history_choose_dates">Choose dates</string>
-    <string name="history_clear_filter">Clear filter</string>
     <string name="history_empty">Your rides will appear here</string>
     <string name="history_empty_period">No rides in this period</string>
     <string name="history_today">Today</string>
