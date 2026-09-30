@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 
 /**
  * A labelled figure: value above, caption below.
@@ -17,9 +18,10 @@ internal fun Metric(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
+    valueStyle: TextStyle = MaterialTheme.typography.titleLarge,
 ) {
     Column(modifier = modifier) {
-        Text(value, style = MaterialTheme.typography.titleLarge)
+        Text(value, style = valueStyle)
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

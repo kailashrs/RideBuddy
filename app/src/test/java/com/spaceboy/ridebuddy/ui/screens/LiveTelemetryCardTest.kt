@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -80,6 +82,9 @@ class LiveTelemetryCardTest {
         show(ride = LiveCardFixture.recording())
 
         composeRule.onNodeWithText("End ride").performClick()
+        // Confirmed first, so a stray tap beside Details cannot split the ride.
+        assertEquals(0, endedRide)
+        composeRule.onNode(hasText("End ride") and hasAnyAncestor(isDialog())).performClick()
 
         assertEquals(1, endedRide)
     }

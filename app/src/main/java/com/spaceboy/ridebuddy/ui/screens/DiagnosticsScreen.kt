@@ -202,7 +202,7 @@ private fun BleCaptureDialog(capture: BleCaptureState, onShare: () -> Unit, onCl
         },
         confirmButton = { TextButton(onClick = onShare, enabled = capture.entries.isNotEmpty()) { Text("Share") } },
         dismissButton = {
-            Row {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onClear, enabled = capture.entries.isNotEmpty()) { Text("Clear") }
                 TextButton(onClick = onDismiss) { Text("Close") }
             }

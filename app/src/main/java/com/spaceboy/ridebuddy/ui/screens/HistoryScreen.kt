@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import com.spaceboy.ridebuddy.ui.components.EmptyState
+import com.spaceboy.ridebuddy.ui.components.Metric
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -254,9 +255,9 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
             }
             FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RideValue("Distance", UnitFormatter.distance(ride.distanceKilometres, units, locale))
-                RideValue("Duration", formatDuration(ride.durationMillis))
-                RideValue("Average", UnitFormatter.speed(ride.averageSpeedKph, units, locale))
+                Metric("Distance", valueStyle = MaterialTheme.typography.titleMedium, value = UnitFormatter.distance(ride.distanceKilometres, units, locale))
+                Metric("Duration", valueStyle = MaterialTheme.typography.titleMedium, value = formatDuration(ride.durationMillis))
+                Metric("Average", valueStyle = MaterialTheme.typography.titleMedium, value = UnitFormatter.speed(ride.averageSpeedKph, units, locale))
             }
             Text(
                 "Top ${UnitFormatter.speed(ride.maximumSpeedKph, units, locale)} · ${UnitFormatter.fuel(ride.estimatedFuelLitres, units, locale)} fuel · ${UnitFormatter.mileage(ride.averageMileageKilometresPerLitre, units, locale)}",
@@ -264,14 +265,6 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-@Composable
-private fun RideValue(label: String, value: String) {
-    Column {
-        Text(value, style = MaterialTheme.typography.titleMedium)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

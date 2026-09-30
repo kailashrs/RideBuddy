@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BluetoothConnected
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -250,7 +251,7 @@ fun LiveScreen(
         AlertDialog(
             onDismissRequest = onCancelNavigationStart,
             title = { Text("Finding route…") },
-            text = { CircularProgressIndicator(Modifier.size(32.dp)) },
+            text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } },
             confirmButton = {},
             dismissButton = { TextButton(onClick = onCancelNavigationStart) { Text("Cancel") } },
         )
@@ -314,10 +315,6 @@ internal fun ConnectionCard(
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
             )
-            state is BikeConnectionState.Connected -> CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
             else -> CardDefaults.cardColors()
         },
     ) {
@@ -325,10 +322,13 @@ internal fun ConnectionCard(
             headlineContent = { Text(headline, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             supportingContent = supporting?.let { { Text(it) } },
             leadingContent = {
-                Icon(
-                    if (state is BikeConnectionState.Connected) Icons.Outlined.BluetoothConnected else Icons.Outlined.TwoWheeler,
-                    contentDescription = null,
-                )
+                // With a red brand, error and primary share a hue, so failure is also told by its icon.
+                when {
+                    failed -> Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+                    state is BikeConnectionState.Connected ->
+                        Icon(Icons.Outlined.BluetoothConnected, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    else -> Icon(Icons.Outlined.TwoWheeler, contentDescription = null)
+                }
             },
             trailingContent = {
                 when {
@@ -360,6 +360,17 @@ private fun TelemetryCard(
     val displayedSpeed = UnitFormatter.chartSpeed(frame.speedKilometresPerHour, units).roundToInt()
     val rpmFraction = (frame.engineRpm / RedlineRpm.toFloat()).coerceIn(0f, 1f)
 
+    // One tap beside Details would otherwise split a ride in two with no way back.
+    var confirmEnd by rememberSaveable { mutableStateOf(false) }
+    if (confirmEnd) {
+        AlertDialog(
+            onDismissRequest = { confirmEnd = false },
+            title = { Text("End this ride?") },
+            text = { Text("It is saved to your history now. A new ride starts when you next set off.") },
+            confirmButton = { TextButton(onClick = { confirmEnd = false; onEndRide() }) { Text("End ride") } },
+            dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Keep recording") } },
+        )
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // Baseline alignment keeps the unit on the speed's baseline at any display scale.
@@ -391,14 +402,16 @@ private fun TelemetryCard(
                 label = "RPM",
                 value = "${frame.engineRpm}",
                 fraction = rpmFraction,
-                color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                // Red is kept for the redline alone; the brand's primary is red too, so the normal
+                // fill is secondary or the warning would not look like a change.
+                color = if (rpmFraction > 0.85f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                 reading = "${frame.engineRpm} rpm of $RedlineRpm",
             )
             Gauge(
                 label = "Throttle",
                 value = "${frame.throttlePercent}%",
                 fraction = frame.throttlePercent / 100f,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.secondary,
                 reading = "${frame.throttlePercent} percent",
             )
             // Stacks rather than clips at large display scales.
@@ -407,7 +420,7 @@ private fun TelemetryCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (activeRide != null) OutlinedButton(onClick = onEndRide) { Text("End ride") }
+                if (activeRide != null) OutlinedButton(onClick = { confirmEnd = true }) { Text("End ride") }
                 FilledTonalButton(onClick = onDetails) { Text("Details") }
             }
         }

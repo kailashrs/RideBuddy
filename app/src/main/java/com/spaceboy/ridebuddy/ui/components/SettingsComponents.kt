@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
@@ -71,6 +73,12 @@ internal fun SettingsRow(
         supportingContent = supportingText?.let { { Text(it) } },
         leadingContent = icon?.let { { Icon(it, contentDescription = null) } },
         trailingContent = trailingContent,
+        // ListItem has no enabled state of its own; this is Material's 38% disabled content.
+        colors = if (enabled) ListItemDefaults.colors() else ListItemDefaults.colors(
+            headlineColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            supportingColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            leadingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        ),
         modifier = if (onClick != null) {
             modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         } else modifier,
@@ -120,7 +128,8 @@ internal fun SettingsSliderRow(
         ListItem(
             headlineContent = { Text(title) },
             supportingContent = { Text(valueLabel(sliderValue)) },
-            leadingContent = icon?.let { { Icon(it, contentDescription = null) } },
+            // Without an icon the slot is still reserved, so a threshold nests under its switch.
+            leadingContent = { if (icon != null) Icon(icon, contentDescription = null) else Spacer(Modifier.size(24.dp)) },
         )
         Slider(
             value = sliderValue,
@@ -130,7 +139,7 @@ internal fun SettingsSliderRow(
             steps = steps,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = if (icon != null) 56.dp else 16.dp, end = 16.dp)
+                .padding(start = 56.dp, end = 16.dp)
                 .semantics { contentDescription = title; stateDescription = valueLabel(sliderValue) },
         )
     }

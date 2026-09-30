@@ -59,8 +59,8 @@ private data class DestinationItem(
 
 private val destinations = listOf(
     DestinationItem(TopLevelDestination.Live, "Live", Icons.Filled.Speed, Icons.Outlined.Speed),
-    DestinationItem(TopLevelDestination.History, "History", Icons.Filled.History, Icons.Outlined.History),
     DestinationItem(TopLevelDestination.Insights, "Insights", Icons.Filled.Insights, Icons.Outlined.Insights),
+    DestinationItem(TopLevelDestination.History, "History", Icons.Filled.History, Icons.Outlined.History),
     DestinationItem(TopLevelDestination.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
@@ -117,45 +117,44 @@ fun MainScreen(
                     }
                 }
             }
-            // Keyed per screen so each one starts with its own, unscrolled top app bar.
-            key(contentKey) {
-                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-                Scaffold(
-                    modifier = Modifier.weight(1f).nestedScroll(scrollBehavior.nestedScrollConnection),
-                    topBar = {
-                        TopAppBar(
-                            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            navigationIcon = {
-                                if (childScreen) {
-                                    IconButton(onClick = closeChild) {
-                                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                                    }
-                                }
-                            },
-                            scrollBehavior = scrollBehavior,
-                        )
-                    },
-                    bottomBar = {
-                        if (!useRail && !childScreen) {
-                            NavigationBar {
-                                destinations.forEach { item ->
-                                    val selected = item.destination == uiState.selectedDestination
-                                    NavigationBarItem(
-                                        selected = selected,
-                                        onClick = { onDestinationSelected(item.destination) },
-                                        icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
-                                        label = { Text(item.label) },
-                                        modifier = Modifier.testTag("top-level-${item.destination.name}"),
-                                    )
+            // Only the scroll state is keyed per screen, so each starts with an unscrolled top
+            // app bar while the Scaffold and navigation bar persist and animate between tabs.
+            val scrollBehavior = key(contentKey) { TopAppBarDefaults.pinnedScrollBehavior() }
+            Scaffold(
+                modifier = Modifier.weight(1f).nestedScroll(scrollBehavior.nestedScrollConnection),
+                topBar = {
+                    TopAppBar(
+                        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = {
+                            if (childScreen) {
+                                IconButton(onClick = closeChild) {
+                                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
                                 }
                             }
+                        },
+                        scrollBehavior = scrollBehavior,
+                    )
+                },
+                bottomBar = {
+                    if (!useRail && !childScreen) {
+                        NavigationBar {
+                            destinations.forEach { item ->
+                                val selected = item.destination == uiState.selectedDestination
+                                NavigationBarItem(
+                                    selected = selected,
+                                    onClick = { onDestinationSelected(item.destination) },
+                                    icon = { Icon(if (selected) item.selectedIcon else item.unselectedIcon, contentDescription = null) },
+                                    label = { Text(item.label) },
+                                    modifier = Modifier.testTag("top-level-${item.destination.name}"),
+                                )
+                            }
                         }
-                    },
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                ) { padding ->
-                    destinationStateHolder.SaveableStateProvider(contentKey) {
-                        content(Modifier.padding(padding))
                     }
+                },
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) { padding ->
+                destinationStateHolder.SaveableStateProvider(contentKey) {
+                    content(Modifier.padding(padding))
                 }
             }
         }

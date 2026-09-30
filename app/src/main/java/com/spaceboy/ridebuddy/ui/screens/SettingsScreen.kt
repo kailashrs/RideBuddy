@@ -6,6 +6,13 @@ import android.provider.Telephony
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -398,8 +405,17 @@ private fun SupportedAppsDialog(
                     )
                 }
                 installedApps.forEach { app ->
-                    SettingsSwitchRow(app.label, null, app.packageName !in disabledPackages) {
-                        onPackageChanged(app.packageName, it)
+                    val enabled = app.packageName !in disabledPackages
+                    // Plain rows: a ListItem's own inset would double the dialog's.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .toggleable(enabled, role = Role.Switch) { onPackageChanged(app.packageName, it) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(app.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Switch(checked = enabled, onCheckedChange = null)
                     }
                 }
             }

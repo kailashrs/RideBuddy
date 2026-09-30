@@ -162,7 +162,7 @@ data class AutoStartSharedDestinationRequest(
 /** The app's top-level navigation destinations, in bar order. */
 enum class TopLevelDestination {
     Live,
-    History,
     Insights,
+    History,
     Settings,
 }

@@ -12,7 +12,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Eco
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.SportsMotorsports
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
@@ -88,44 +99,51 @@ fun InsightsScreen(
         MetricSection(
             "Totals",
             listOf(
-                "Rides" to insights.rideCount.toString(),
-                "Ride time" to formatDuration(insights.totalDurationMillis),
-                "Fuel (est.)" to UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale),
-                "Mileage (est.)" to UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale),
+                InsightMetric("Rides", insights.rideCount.toString(), Icons.Outlined.Route),
+                InsightMetric("Ride time", formatDuration(insights.totalDurationMillis), Icons.Outlined.Timer),
+                InsightMetric("Fuel (est.)", UnitFormatter.fuel(insights.estimatedFuelLitres, units, locale), Icons.Outlined.LocalGasStation),
+                InsightMetric("Mileage (est.)", UnitFormatter.mileage(insights.averageMileageKilometresPerLitre, units, locale), Icons.Outlined.Eco),
             ),
         )
         MetricSection(
             "Averages",
             listOf(
-                "Distance" to UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale),
-                "Duration" to formatDuration(insights.averageRideDurationMillis),
-                "Speed" to UnitFormatter.speed(insights.averageSpeedKph, units, locale),
-                "RPM" to "%.0f".format(locale, insights.averageRpm),
-                "Throttle" to "%.0f%%".format(locale, insights.averageThrottlePercent),
+                InsightMetric("Distance", UnitFormatter.distance(insights.averageRideDistanceKilometres, units, locale), Icons.Outlined.Timeline),
+                InsightMetric("Duration", formatDuration(insights.averageRideDurationMillis), Icons.Outlined.Timer),
+                InsightMetric("Speed", UnitFormatter.speed(insights.averageSpeedKph, units, locale), Icons.Outlined.Speed),
+                InsightMetric("RPM", "%.0f".format(locale, insights.averageRpm), Icons.Outlined.Settings),
+                InsightMetric("Throttle", "%.0f%%".format(locale, insights.averageThrottlePercent), Icons.Outlined.Sync),
             ),
         )
         MetricSection(
             "Records",
             listOfNotNull(
-                "Longest ride" to UnitFormatter.distance(insights.longestRideKilometres, units, locale),
-                "Top speed" to UnitFormatter.speed(insights.highestSpeedKph, units, locale),
-                insights.bestZeroToSixtyMillis?.let { "0–60 km/h" to "%.1f s".format(locale, it / 1_000.0) },
-                insights.bestZeroToHundredMillis?.let { "0–100 km/h" to "%.1f s".format(locale, it / 1_000.0) },
+                InsightMetric("Longest ride", UnitFormatter.distance(insights.longestRideKilometres, units, locale), Icons.Outlined.EmojiEvents),
+                InsightMetric("Top speed", UnitFormatter.speed(insights.highestSpeedKph, units, locale), Icons.Outlined.SportsMotorsports),
+                insights.bestZeroToSixtyMillis?.let { InsightMetric("0–60 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
+                insights.bestZeroToHundredMillis?.let { InsightMetric("0–100 km/h", "%.1f s".format(locale, it / 1_000.0), Icons.Outlined.Timer) },
             ),
         )
     }
 }
 
-/** A titled group of figures in two equal columns. */
+private data class InsightMetric(val label: String, val value: String, val icon: ImageVector)
+
+/** A titled group of figures in two equal columns, each marked by its icon. */
 @Composable
-private fun MetricSection(title: String, metrics: List<Pair<String, String>>) {
+private fun MetricSection(title: String, metrics: List<InsightMetric>) {
     Column {
         SectionHeader(title)
         OutlinedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 metrics.chunked(2).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        row.forEach { (label, value) -> Metric(label, value, Modifier.weight(1f)) }
+                        row.forEach { (label, value, icon) ->
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Metric(label, value)
+                            }
+                        }
                         if (row.size < 2) Spacer(Modifier.weight(1f))
                     }
                 }
