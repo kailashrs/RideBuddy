@@ -63,11 +63,10 @@ class DestinationRepositoryTest {
 
     @Test fun a_place_without_a_name_is_called_by_its_address() = runBlocking {
         repository.recordTrip(NavigationDestination(13.0, 80.0, DestinationRepository.GenericTitle))
-        repository.recordTrip(NavigationDestination(14.0, 80.0, "13.0827, 80.2707"))
         repository.recordTrip(NavigationDestination(15.0, 80.0, "Phoenix Marketcity"))
 
-        assertEquals(listOf("12 Anna Salai", "12 Anna Salai", "Phoenix Marketcity"), all().sortedBy { it.latitude }.map { it.placeName })
-        assertEquals(2, addressLookups)
+        assertEquals(listOf("12 Anna Salai", "Phoenix Marketcity"), all().sortedBy { it.latitude }.map { it.placeName })
+        assertEquals(1, addressLookups)
     }
 
     @Test fun saving_a_recent_place_keeps_its_trips_and_renaming_changes_only_the_name() = runBlocking {

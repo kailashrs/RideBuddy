@@ -494,16 +494,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openPreview(place: NavigationDestination, autoStartGuidance: Boolean) {
-        runCatching { startActivity(NavigationActivity.intent(this, place, autoStartGuidance = autoStartGuidance)) }
-            .onFailure { viewModel.showMessage(getString(R.string.navigation_map_unavailable)) }
+        startActivity(NavigationActivity.intent(this, place, autoStartGuidance = autoStartGuidance))
     }
 
     /** Shares are the way in for a new place, so this opens Maps for the rider to find and share one. */
     private fun openGoogleMaps() {
-        val maps = Intent(Intent.ACTION_VIEW, "https://www.google.com/maps".toUri())
-        runCatching { startActivity(Intent(maps).setPackage(GoogleMapsPackage)) }
-            .recoverCatching { startActivity(maps) }
-            .onFailure { viewModel.showMessage("Google Maps isn't available on this phone") }
+        startActivity(Intent(Intent.ACTION_VIEW, "https://www.google.com/maps".toUri()))
     }
 
     /** Backs out of a route lookup; the share is dropped, since backing out is the rider's answer. */
@@ -720,7 +716,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val GoogleMapsPackage = "com.google.android.apps.maps"
         const val NotificationPermission = "android.permission.POST_NOTIFICATIONS"
         val LocationPermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,

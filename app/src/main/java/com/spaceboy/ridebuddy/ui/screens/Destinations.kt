@@ -232,7 +232,7 @@ internal fun NameDestinationDialog(
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { if (it.text.length <= MaxNameLength) name = it },
+                onValueChange = { name = it },
                 label = { Text("Name") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
@@ -245,4 +245,3 @@ internal fun NameDestinationDialog(
     )
 }
 
-private const val MaxNameLength = 40
