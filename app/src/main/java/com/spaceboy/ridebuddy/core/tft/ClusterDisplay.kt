@@ -341,7 +341,7 @@ class ClusterDisplay(
      * A call or an imminent turn outranks it.
      */
     fun presentTextAlert(message: String): Boolean {
-        if (message.isBlank() || !transportReady || !settings.value.tftNavigationOutputEnabled) return false
+        if (!transportReady || !settings.value.tftNavigationOutputEnabled) return false
         if (call.value != null || route.value.turnIsImminent()) return false
         alertJob?.cancel()
         alert.value = message
@@ -354,7 +354,7 @@ class ClusterDisplay(
 
     override fun preview(destination: NavigationDestination, distanceMetres: Int?, durationSeconds: Int?) {
         val trip = if (distanceMetres != null && durationSeconds != null) {
-            TftPacketEncoder.trip(System.currentTimeMillis() + durationSeconds.coerceAtLeast(0) * 1_000L, distanceMetres, 0)
+            TftPacketEncoder.trip(System.currentTimeMillis() + durationSeconds * 1_000L, distanceMetres, 0)
         } else {
             null
         }

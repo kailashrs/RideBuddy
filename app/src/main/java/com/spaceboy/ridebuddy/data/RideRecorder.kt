@@ -141,7 +141,7 @@ class RideRecorder(
         val frame = reading.frame
         val nowElapsedRealtime = reading.receivedAtElapsedRealtime
         val now = mutableActiveRide.value?.let {
-            it.startedAtMillis + (nowElapsedRealtime - it.startedAtElapsedRealtime).coerceAtLeast(0L)
+            it.startedAtMillis + nowElapsedRealtime - it.startedAtElapsedRealtime
         } ?: reading.receivedAtMillis
         // Acceleration over the last second of wheel speed rather than since the previous frame.
         // The bike reports speed in 0.377 km/h steps about four times a second, so a single step
@@ -155,7 +155,7 @@ class RideRecorder(
         val liveAcceleration = if (windowMillis >= MinimumAccelerationWindowMillis) {
             ((frame.speedKilometresPerHour - windowStartKph) / 3.6) / (windowMillis / 1_000.0)
         } else 0.0
-        val liveSample = sample(frame, now, liveAcceleration.coerceIn(-20.0, 20.0))
+        val liveSample = sample(frame, now, liveAcceleration)
         mutableLiveSampleEvents.tryEmit(liveSample)
 
         liveWindow.addLast(liveSample)
@@ -420,9 +420,7 @@ internal fun shouldStopRide(speedKph: Double, stopSpeedKph: Double): Boolean = s
  * two distant readings would silently invent distance.
  */
 internal fun distanceDeltaKilometres(lastSpeedKph: Double, currentSpeedKph: Double, elapsedMillis: Long): Double =
-    if (elapsedMillis !in 1..MaxDistanceIntegrationGapMillis ||
-        !lastSpeedKph.isFinite() || !currentSpeedKph.isFinite() || lastSpeedKph < 0.0 || currentSpeedKph < 0.0
-    ) 0.0
+    if (elapsedMillis !in 1..MaxDistanceIntegrationGapMillis) 0.0
     else ((lastSpeedKph + currentSpeedKph) / 2.0) * elapsedMillis / 3_600_000.0
 
 internal const val MaxDistanceIntegrationGapMillis = 2_500L
@@ -442,17 +440,11 @@ internal fun fuelDeltaLitres(
     previousSpeedKph: Double,
     currentSpeedKph: Double,
 ): Double? {
-    if (!distanceKilometres.isFinite() || distanceKilometres <= 0.0) return null
-    val previousFuelLitresPerKilometre = previousMileageKilometresPerLitre
-        ?.takeIf { it.isFinite() && it > 0.0 }
-        ?.let { 1.0 / it }
-        ?: return null
-    val currentFuelLitresPerKilometre = currentMileageKilometresPerLitre
-        ?.takeIf { it.isFinite() && it > 0.0 }
-        ?.let { 1.0 / it }
-        ?: return null
+    // No distance means both speeds were zero, and there is nothing to weight by.
+    if (distanceKilometres <= 0.0) return null
+    val previousFuelLitresPerKilometre = 1.0 / (previousMileageKilometresPerLitre ?: return null)
+    val currentFuelLitresPerKilometre = 1.0 / (currentMileageKilometresPerLitre ?: return null)
     val speedSum = previousSpeedKph + currentSpeedKph
-    if (!speedSum.isFinite() || previousSpeedKph < 0.0 || currentSpeedKph < 0.0 || speedSum <= 0.0) return null
     // Distance was integrated from speed, so weight endpoint L/km by endpoint speed.
     // Multiplying two independent endpoint averages introduces incorrect cross terms.
     return distanceKilometres *
@@ -466,29 +458,27 @@ internal fun fuelDeltaLitres(
  * than taken as the first sample above it. At a few samples a second, that rounding alone
  * would be a meaningful share of the measurement.
  *
- * Runs are rejected when they are implausibly short or long, or when frames were dropped
- * mid-run — a gap makes the elapsed time real but the acceleration unverifiable.
+ * Runs are rejected when they take over a minute, which is crawling in traffic rather than an
+ * acceleration run, or when frames were dropped mid-run — a gap makes the elapsed time real but the acceleration unverifiable.
  */
 internal fun List<RideSample>.accelerationTime(targetKph: Double): Long? {
-    if (size < 2 || !targetKph.isFinite() || targetKph <= LaunchSpeedKph) return null
+    if (size < 2) return null
     var launchAtMillis: Long? = null
     var previous: RideSample? = null
     var bestMillis: Long? = null
     for (sample in this) {
         val prior = previous
-        if (!sample.speedKph.isFinite() || sample.speedKph < 0.0 ||
-            (prior != null && sample.timestampMillis - prior.timestampMillis !in 1..MaxPerformanceSampleGapMillis)
-        ) {
+        if (prior != null && sample.timestampMillis - prior.timestampMillis !in 1..MaxPerformanceSampleGapMillis) {
             launchAtMillis = null
         }
-        if (sample.speedKph in 0.0..LaunchSpeedKph) {
+        if (sample.speedKph <= LaunchSpeedKph) {
             launchAtMillis = sample.timestampMillis
         } else if (launchAtMillis != null && sample.speedKph >= targetKph) {
             val crossingAt = if (prior != null && prior.speedKph < targetKph && sample.speedKph > prior.speedKph) {
                 val fraction = ((targetKph - prior.speedKph) / (sample.speedKph - prior.speedKph)).coerceIn(0.0, 1.0)
                 prior.timestampMillis + ((sample.timestampMillis - prior.timestampMillis) * fraction).toLong()
             } else sample.timestampMillis
-            val duration = (crossingAt - launchAtMillis).takeIf { it in MinimumPerformanceMillis..MaximumPerformanceMillis }
+            val duration = (crossingAt - launchAtMillis).takeIf { it <= MaximumPerformanceMillis }
             if (duration != null) bestMillis = bestMillis?.let { minOf(it, duration) } ?: duration
             launchAtMillis = null
         }
@@ -500,7 +490,6 @@ internal fun List<RideSample>.accelerationTime(targetKph: Double): Long? {
 /** Treated as a standing start. Not zero: wheel speed idles noisily just above it. */
 private const val LaunchSpeedKph = 0.5
 private const val MaxPerformanceSampleGapMillis = 2_500L
-private const val MinimumPerformanceMillis = 500L
 private const val MaximumPerformanceMillis = 60_000L
 
 /**
@@ -526,7 +515,7 @@ private fun List<RideSample>.routePreview(maxPoints: Int = 32): List<RoutePoint>
     val points = mapNotNull { sample ->
         val latitude = sample.latitude ?: return@mapNotNull null
         val longitude = sample.longitude ?: return@mapNotNull null
-        RoutePoint(latitude, longitude).takeIf(RoutePoint::isValid)
+        RoutePoint(latitude, longitude)
     }
     if (points.size <= maxPoints) return points
     val step = (points.lastIndex.toDouble() / (maxPoints - 1)).coerceAtLeast(1.0)
@@ -590,7 +579,7 @@ data class ActiveRide(
         return Ride(
             id = 0,
             startedAtMillis = startedAtMillis,
-            endedAtMillis = startedAtMillis + (lastSampleAtElapsedRealtime - startedAtElapsedRealtime).coerceAtLeast(0L),
+            endedAtMillis = startedAtMillis + lastSampleAtElapsedRealtime - startedAtElapsedRealtime,
             distanceKilometres = distanceKilometres,
             averageSpeedKph = distanceKilometres * 3_600_000.0 / measuredMillis,
             maximumSpeedKph = maximumSpeedKph,

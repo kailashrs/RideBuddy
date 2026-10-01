@@ -44,8 +44,7 @@ class NavigationApiKey(
 
     init {
         scope.launch(Dispatchers.IO) {
-            val stored = runCatching { store.load() }.getOrNull()
-            mutableState.value = stored?.let(::apply) ?: NavigationKeyUiState()
+            mutableState.value = store.load()?.let(::apply) ?: NavigationKeyUiState()
         }
     }
 

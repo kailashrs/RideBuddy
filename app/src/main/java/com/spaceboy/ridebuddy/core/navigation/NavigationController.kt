@@ -16,7 +16,6 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeControlEvent
 import com.spaceboy.ridebuddy.service.NavInfoReceivingService
 import kotlin.coroutines.resume
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +26,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The current turn, flattened out of the SDK's guidance snapshot. Distances and times are
@@ -121,13 +119,8 @@ class NavigationController(
     /** The navigator, for the map view to follow. Null when no route is in play. */
     val currentNavigator: Navigator? get() = navigator
 
-    private val arrivalListener = Navigator.ArrivalListener { event ->
-        if (event.isFinalDestination) {
-            scope.launch { arrive() }
-        } else {
-            runCatching { navigator?.continueToNextDestination() }
-        }
-    }
+    /** Routes have a single waypoint, so every arrival is at the destination. */
+    private val arrivalListener = Navigator.ArrivalListener { scope.launch { arrive() } }
 
     init {
         scope.launch(Dispatchers.Main) {
@@ -138,8 +131,6 @@ class NavigationController(
                         log("Handlebar exit; stopping navigation")
                         stop()
                     }
-                    BikeControlEvent.SkipManeuver -> navigator?.takeIf { (it.timeAndDistanceList?.size ?: 0) > 1 }
-                        ?.let { runCatching(it::continueToNextDestination) }
                     else -> Unit
                 }
             }
@@ -194,17 +185,11 @@ class NavigationController(
         val ready = mutableSession.value as? NavigationSession.Ready ?: return@serially false
         val navigator = navigator ?: return@serially false
         if (connection.connectionState.value !is BikeConnectionState.Connected) return@serially false
-        val registered = runCatching {
-            navigator.registerServiceForNavUpdates(
-                application.packageName,
-                NavInfoReceivingService::class.java.name,
-                NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build(),
-            )
-        }.getOrDefault(false)
-        if (!registered) {
-            fail(ready.destination, "The bike display could not receive navigation updates")
-            return@serially false
-        }
+        navigator.registerServiceForNavUpdates(
+            application.packageName,
+            NavInfoReceivingService::class.java.name,
+            NavigationUpdatesOptions.builder().setNumNextStepsToPreview(1).build(),
+        )
         mutableSession.value = NavigationSession.Guiding(ready.destination)
         output.started(ready.destination)
         navigator.startGuidance()
@@ -268,8 +253,8 @@ class NavigationController(
     }
 
     private fun endGuidance(navigator: Navigator) {
-        runCatching(navigator::stopGuidance)
-        runCatching(navigator::unregisterServiceForNavUpdates)
+        navigator.stopGuidance()
+        navigator.unregisterServiceForNavUpdates()
         mutableGuidance.value = GuidanceState()
     }
 
@@ -282,8 +267,8 @@ class NavigationController(
         navigator = null
         current.removeArrivalListener(arrivalListener)
         endGuidance(current)
-        runCatching(current::clearDestinations)
-        runCatching(current::cleanup)
+        current.clearDestinations()
+        current.cleanup()
     }
 
     /** One route change at a time, on the main thread the SDK requires. */
@@ -292,20 +277,20 @@ class NavigationController(
 
 }
 
-/** The SDK's navigator. The Activity is what lets it show its terms dialog on first use. */
-private suspend fun sdkNavigator(activity: Activity, log: (String) -> Unit): Navigator? = withTimeoutOrNull(10.seconds) {
+/**
+ * The SDK's navigator. The Activity is what lets it show its terms dialog on first use, so this
+ * waits for as long as the rider takes to answer it; the SDK always calls back one way or the other.
+ */
+private suspend fun sdkNavigator(activity: Activity, log: (String) -> Unit): Navigator? =
     suspendCancellableCoroutine { continuation ->
-        runCatching {
-            NavigationApi.getNavigator(activity, object : NavigationApi.NavigatorListener {
-                override fun onNavigatorReady(navigator: Navigator) {
-                    if (continuation.isActive) continuation.resume(navigator)
-                }
+        NavigationApi.getNavigator(activity, object : NavigationApi.NavigatorListener {
+            override fun onNavigatorReady(navigator: Navigator) {
+                if (continuation.isActive) continuation.resume(navigator)
+            }
 
-                override fun onError(errorCode: Int) {
-                    log("Navigation SDK initialization failed: $errorCode")
-                    if (continuation.isActive) continuation.resume(null)
-                }
-            })
-        }.onFailure { if (continuation.isActive) continuation.resume(null) }
+            override fun onError(errorCode: Int) {
+                log("Navigation SDK initialization failed: $errorCode")
+                if (continuation.isActive) continuation.resume(null)
+            }
+        })
     }
-}

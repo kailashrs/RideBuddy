@@ -46,8 +46,7 @@ internal object AppUiFixture {
         guidance = GuidanceState(),
         destinations = destinations,
         settings = AppSettings(distanceUnits = DistanceUnits.Metric, dynamicColor = false, onboardingComplete = true),
-        bikeAssociation = BikeAssociationState(supported = true,
-            bike = AssociatedBike(MacAddress.fromString("00:00:00:00:00:01"), "Aprilia RS 457", associationId = 1), observingPresence = true),
+        bikeAssociation = BikeAssociationState(bike = AssociatedBike(MacAddress.fromString("00:00:00:00:00:01"), "Aprilia RS 457", associationId = 1), observingPresence = true),
         backgroundLocationGranted = true,
     )
     val settingsActions = MoreSettingsActions(

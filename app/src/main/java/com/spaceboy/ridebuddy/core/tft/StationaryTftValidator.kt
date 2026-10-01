@@ -144,9 +144,7 @@ class StationaryTftValidator(
      * Why the run must not continue, or null when it may.
      *
      * Telemetry age is checked as well as speed, because a stale reading of zero says
-     * nothing about whether the bike is moving now. The negative-age branch catches a
-     * reading stamped in the future, which means the clocks disagree and the age cannot be
-     * trusted either way.
+     * nothing about whether the bike is moving now.
      */
     private fun safetyStopReason(): StationaryTftSafetyReason? {
         if (connection.connectionState.value !is BikeConnectionState.Connected) {
@@ -158,7 +156,7 @@ class StationaryTftValidator(
         val reading = connection.latestReading.value
             ?: return StationaryTftSafetyReason.TelemetryUnavailable
         val readingAgeMillis = elapsedRealtimeMillis() - reading.receivedAtElapsedRealtime
-        if (readingAgeMillis !in 0..MaxTelemetryAgeMillis) {
+        if (readingAgeMillis > MaxTelemetryAgeMillis) {
             return StationaryTftSafetyReason.TelemetryStale
         }
         if (reading.frame.speedKilometresPerHour > MaxStationarySpeedKph) {

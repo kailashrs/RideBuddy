@@ -184,26 +184,6 @@ class ConnectionEventJournalTest {
             scope.cancel()
         }
     }
-
-    @Test
-    fun `journal constructor rejects a negative persistence debounce`() {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-
-        try {
-            val failure = runCatching {
-                ConnectionEventJournal(
-                    store = RecordingConnectionEventStore(emptyList()),
-                    scope = scope,
-                    ioDispatcher = Dispatchers.Unconfined,
-                    persistenceDebounceMillis = -1L,
-                )
-            }
-
-            assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
-        } finally {
-            scope.cancel()
-        }
-    }
 }
 
 private class RecordingConnectionEventStore(

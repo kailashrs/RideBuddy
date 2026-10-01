@@ -10,15 +10,12 @@ import android.companion.ObservingDevicePresenceRequest
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
-import android.content.pm.PackageManager
 import android.net.MacAddress
 import android.os.ParcelUuid
-import android.util.Log
 import com.spaceboy.ridebuddy.ble.BikeHogpServiceUuidString
 import com.spaceboy.ridebuddy.ble.BikeIdentityRepository
 import com.spaceboy.ridebuddy.ble.BikeNameFilter
 import com.spaceboy.ridebuddy.ble.ProtectionAcceptanceStore
-import com.spaceboy.ridebuddy.ble.isApriliaBikeName
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,12 +28,8 @@ data class AssociatedBike(
     val associationId: Int,
 )
 
-/**
- * Pairing state for the UI. [supported] is false on devices without companion-device
- * setup, where none of this is available at all.
- */
+/** Pairing state for the UI. */
 data class BikeAssociationState(
-    val supported: Boolean,
     val bike: AssociatedBike? = null,
     val observingPresence: Boolean = false,
     val associationInProgress: Boolean = false,
@@ -57,15 +50,8 @@ class BikeCompanionManager internal constructor(
     private val bikeIdentityRepository: BikeIdentityRepository,
 ) {
     private val appContext = context.applicationContext
-    private val manager: CompanionDeviceManager? =
-        if (appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
-            appContext.getSystemService(CompanionDeviceManager::class.java)
-        } else {
-            null
-        }
-    private val mutableState = MutableStateFlow(
-        BikeAssociationState(supported = manager != null, bike = runCatching { readAssociation() }.getOrNull()),
-    )
+    private val manager = appContext.getSystemService(CompanionDeviceManager::class.java)
+    private val mutableState = MutableStateFlow(BikeAssociationState(bike = readAssociation()))
 
     val state: StateFlow<BikeAssociationState> = mutableState.asStateFlow()
 
@@ -85,7 +71,6 @@ class BikeCompanionManager internal constructor(
         onAssociated: (AssociatedBike) -> Unit,
         onFailure: (String) -> Unit,
     ) {
-        val companionManager = manager ?: return onFailure("Companion device setup is unavailable on this phone")
         mutableState.update { it.copy(associationInProgress = true, errorMessage = null) }
 
         // The picker is scoped by the bike's name family and the HID-over-GATT service UUID
@@ -116,8 +101,7 @@ class BikeCompanionManager internal constructor(
 
             override fun onFailure(error: CharSequence?) = fail("Pairing canceled", onFailure)
         }
-        runCatching { companionManager.associate(request, appContext.mainExecutor, callback) }
-            .onFailure { fail("Couldn't start bike pairing. Try again.", onFailure) }
+        manager.associate(request, appContext.mainExecutor, callback)
     }
 
     /** The Activity-result path out of the picker, for platforms that answer that way. */
@@ -136,20 +120,9 @@ class BikeCompanionManager internal constructor(
         return bike
     }
 
-    /**
-     * Re-reads the association. The rider can remove it from system settings without the app
-     * being told; a refresh that cannot reach the service says nothing about the pairing, so
-     * the current state is kept and only an error is surfaced.
-     */
+    /** Re-reads the association. The rider can remove it from system settings without the app being told. */
     fun refresh() {
-        if (manager == null) return
-        val current = runCatching { readAssociation() }.getOrElse { error ->
-            Log.w(LogTag, "Could not read companion associations", error)
-            mutableState.update {
-                it.copy(associationInProgress = false, errorMessage = "Couldn't refresh the bike pairing.")
-            }
-            return
-        }
+        val current = readAssociation()
         val previous = mutableState.value.bike
         if (previous != null && previous.address != current?.address) forgetPerBikeState(previous.address)
         current?.let { bikeIdentityRepository.select(it.address) }
@@ -169,11 +142,10 @@ class BikeCompanionManager internal constructor(
      * what makes reconnection work without the app running. Idempotent.
      */
     fun ensurePresenceObservation() {
-        val companionManager = manager ?: return
         val bike = state.value.bike ?: return
         if (state.value.observingPresence) return
         val result = runCatching {
-            companionManager.startObservingDevicePresence(
+            manager.startObservingDevicePresence(
                 ObservingDevicePresenceRequest.Builder().setAssociationId(bike.associationId).build(),
             )
         }
@@ -185,44 +157,23 @@ class BikeCompanionManager internal constructor(
         }
     }
 
-    /**
-     * Removes the association, returning whether it was removed. Per-bike state is only cleared
-     * once the system has confirmed the removal, so a failure leaves the pairing intact.
-     */
-    fun forget(): Boolean {
-        val companionManager = manager ?: return false
-        val bike = state.value.bike ?: return true
-        runCatching {
-            companionManager.stopObservingDevicePresence(
-                ObservingDevicePresenceRequest.Builder().setAssociationId(bike.associationId).build(),
-            )
-        }
-        val removed = runCatching { companionManager.disassociate(bike.associationId) }.isSuccess
-        if (!removed) {
-            mutableState.update { it.copy(observingPresence = false, errorMessage = "Couldn't forget the bike. Try again.") }
-            ensurePresenceObservation()
-            return false
-        }
+    /** Removes the association and everything recorded against the bike. */
+    fun forget() {
+        val bike = state.value.bike ?: return
+        manager.stopObservingDevicePresence(
+            ObservingDevicePresenceRequest.Builder().setAssociationId(bike.associationId).build(),
+        )
+        manager.disassociate(bike.associationId)
         forgetPerBikeState(bike.address)
-        mutableState.value = BikeAssociationState(supported = true)
-        return true
+        mutableState.value = BikeAssociationState()
     }
 
     fun associatedBike(associationId: Int? = null): AssociatedBike? =
         state.value.bike?.takeIf { associationId == null || it.associationId == associationId }
 
-    /**
-     * Validates and records a device returned by the picker. The name is re-checked because a
-     * peripheral outside this motorcycle family would be decoded with the wrong telemetry layout.
-     */
+    /** Records a device returned by the picker, which only offers this motorcycle family. */
     private fun accept(associationInfo: AssociationInfo): AssociatedBike? {
-        val bike = associationInfo.toBike()
-        if (bike == null || !bike.name.isApriliaBikeName()) {
-            mutableState.update {
-                it.copy(associationInProgress = false, errorMessage = "Choose an Aprilia RS 457 or Tuono 457.")
-            }
-            return null
-        }
+        val bike = associationInfo.toBike() ?: return null
         val previous = mutableState.value.bike
         if (previous != null && previous.address != bike.address) forgetPerBikeState(previous.address)
         bikeIdentityRepository.select(bike.address)
@@ -233,7 +184,7 @@ class BikeCompanionManager internal constructor(
 
     /** The most recent association; the picker only ever offers this motorcycle family. */
     private fun readAssociation(): AssociatedBike? =
-        manager?.myAssociations?.sortedBy(AssociationInfo::getId)?.lastOrNull { it.toBike() != null }?.toBike()
+        manager.myAssociations.sortedBy(AssociationInfo::getId)?.lastOrNull { it.toBike() != null }?.toBike()
 
     private fun forgetPerBikeState(address: MacAddress) {
         protectionAcceptanceStore.clear(address)
@@ -244,17 +195,11 @@ class BikeCompanionManager internal constructor(
         mutableState.update { it.copy(associationInProgress = false, errorMessage = message) }
         onFailure(message)
     }
-
-    private companion object {
-        const val LogTag = "BikeCompanionManager"
-    }
 }
 
 /** The name comes from the scan record the picker matched, falling back to the display name. */
 private fun AssociationInfo.toBike(): AssociatedBike? {
-    val address = deviceMacAddress
-        ?: associatedDevice?.bleDevice?.device?.address?.let { runCatching { MacAddress.fromString(it) }.getOrNull() }
-        ?: return null
+    val address = deviceMacAddress ?: return null
     val name = associatedDevice?.bleDevice?.scanRecord?.deviceName
         ?: displayName?.toString()?.takeIf(String::isNotBlank)
         ?: return null

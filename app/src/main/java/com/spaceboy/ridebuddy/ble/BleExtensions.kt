@@ -24,8 +24,6 @@ val BikeNameFilter: Pattern = Pattern.compile("$RsFamilyPrefix[-_]?[0-9A-F]{1,8}
  */
 const val BikeHogpServiceUuidString: String = "00001812-0000-1000-8000-00805f9b34fb"
 
-fun String.isApriliaBikeName(): Boolean = contains(RsFamilyPrefix, ignoreCase = true)
-
 private val Hex = HexFormat.of().withUpperCase()
 private val SpacedHex = HexFormat.ofDelimiter(" ").withUpperCase()
 

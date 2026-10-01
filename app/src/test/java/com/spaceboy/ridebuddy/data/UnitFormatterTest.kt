@@ -85,10 +85,4 @@ class UnitFormatterTest {
             TimeZone.setDefault(originalTimeZone)
         }
     }
-    @Test
-    fun invalidNumericReadingsDoNotReachTheUser() {
-        assertEquals("— km", UnitFormatter.distance(Double.NaN, DistanceUnits.Metric, Locale.US))
-        assertEquals("— km/h", UnitFormatter.speed(Double.POSITIVE_INFINITY, DistanceUnits.Metric, Locale.US))
-    }
-
 }

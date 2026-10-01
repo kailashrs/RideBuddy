@@ -79,8 +79,6 @@ fun DiagnosticsScreen(
         Readout("Characteristic writes", diagnostics.writesCompleted.toString())
         Readout("Telemetry rate", "%.1f Hz".format(diagnostics.telemetryHz))
         Readout("Last frame", diagnostics.lastFrameAtMillis?.let(UnitFormatter::formatDateTime) ?: "—")
-        Readout("Estimated malformed frames", diagnostics.malformedTelemetryFrames.toString())
-        Readout("Dropped ride frames", diagnostics.droppedRawTelemetryFrames.toString())
         Readout("Estimated packet gaps", rideMetrics.estimatedPacketGapPercent?.let { "$it%" } ?: "—")
 
         Header("Errors")

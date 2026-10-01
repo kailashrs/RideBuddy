@@ -9,7 +9,6 @@ internal fun telemetryChartData(
     maxPoints: Int = 600,
     value: (RideSample) -> Double,
 ): TelemetryChartData {
-    require(maxPoints >= 4)
     if (samples.isEmpty()) return TelemetryChartData(emptyList(), emptyList())
     val selected = sortedSetOf(0, samples.lastIndex)
     val bucketSize = ((samples.size + maxPoints / 2 - 1) / (maxPoints / 2)).coerceAtLeast(1)
@@ -35,7 +34,7 @@ internal fun telemetryChartData(
             values += null
             timestamps += samples[index].timestampMillis
         }
-        values += value(samples[index]).takeIf(Double::isFinite)
+        values += value(samples[index])
         timestamps += samples[index].timestampMillis
         previousIndex = index
     }
