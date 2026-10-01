@@ -25,6 +25,8 @@ import com.spaceboy.ridebuddy.service.PhoneBatteryReporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
 import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
+import com.spaceboy.ridebuddy.data.db.bridgeLegacyRides
+import com.spaceboy.ridebuddy.data.db.bridgeLegacyTelemetry
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -74,8 +76,14 @@ class AppContainer(context: Context) {
     )
     val rideLocationTracker = RideLocationTracker(context)
     private val rideLocationLabeler = RideLocationLabeler(context)
-    private val database = RideBuddyDatabase.open(context)
-    val rideRepository = RideRepository(database, RawTelemetryDatabase.open(context), applicationScope)
+    // TEMPORARY: the two bridge calls carry a development install's data over from the pre-1.2
+    // file names; see LegacyDatabaseBridge. Remove them with that file.
+    private val database = RideBuddyDatabase.open(context).also { bridgeLegacyRides(context, it) }
+    val rideRepository = RideRepository(
+        database,
+        RawTelemetryDatabase.open(context).also { bridgeLegacyTelemetry(context, it) },
+        applicationScope,
+    )
     val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, bikeIdentityRepository)
     val rideRecorder = RideRecorder(
         bikeConnection,
