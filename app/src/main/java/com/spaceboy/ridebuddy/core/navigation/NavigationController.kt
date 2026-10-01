@@ -36,12 +36,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 data class GuidanceState(
     val active: Boolean = false,
     val instruction: String = "",
-    val roadName: String = "",
     val distanceToManeuverMetres: Int? = null,
     val distanceToDestinationMetres: Int? = null,
     val timeToDestinationSeconds: Int? = null,
     val maneuver: Int = 0,
-    val nextManeuver: Int = 0,
     val roundaboutExit: Int = 0,
 )
 
@@ -62,12 +60,10 @@ internal fun NavInfo.toGuidanceState(): GuidanceState {
     return GuidanceState(
         active = true,
         instruction = current.fullInstructionText.orEmpty(),
-        roadName = current.fullRoadName.orEmpty(),
         distanceToManeuverMetres = distanceToCurrentStepMeters,
         distanceToDestinationMetres = distanceToFinalDestinationMeters,
         timeToDestinationSeconds = timeToFinalDestinationSeconds,
         maneuver = current.maneuver,
-        nextManeuver = remainingSteps.firstOrNull()?.maneuver ?: 0,
         roundaboutExit = current.roundaboutTurnNumber ?: 0,
     )
 }

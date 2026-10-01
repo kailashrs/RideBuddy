@@ -142,11 +142,6 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
-    // The real org.json, for unit tests only. android.jar ships stubs that throw at runtime,
-    // so without this the ride-backup format could only be exercised on a device. It is a
-    // test-only dependency: on device the platform's own implementation is used and nothing
-    // from this artifact is packaged.
-    testImplementation("org.json:json:20260814")
     // Compose UI tests on the JVM. The live card is a visual surface, and rendering it on a
     // device means either an emulator system image or an install; neither belongs in the
     // ordinary test loop. Robolectric's native graphics mode draws the real thing with Skia,

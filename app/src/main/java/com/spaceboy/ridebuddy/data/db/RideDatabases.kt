@@ -26,14 +26,8 @@ interface RideDao {
     @Query("SELECT * FROM rides WHERE id = :id")
     suspend fun find(id: Long): Ride?
 
-    @Query("SELECT COUNT(*) FROM rides")
-    suspend fun count(): Int
-
     @Insert
     suspend fun insert(ride: Ride): Long
-
-    @Insert
-    suspend fun insertAll(rides: List<Ride>)
 
     @Query("UPDATE rides SET startArea = :startArea, endArea = :endArea WHERE id = :id")
     suspend fun updateAreas(id: Long, startArea: String?, endArea: String?)
@@ -61,14 +55,8 @@ interface RideSampleDao {
     @Upsert
     suspend fun upsert(series: RideSampleSeries)
 
-    @Upsert
-    suspend fun upsertAll(series: List<RideSampleSeries>)
-
     @Query("SELECT data FROM ride_samples WHERE rideId = :rideId")
     suspend fun data(rideId: Long): ByteArray?
-
-    @Query("SELECT COUNT(*) FROM ride_samples")
-    suspend fun count(): Int
 
     @Query("DELETE FROM ride_samples WHERE rideId = :rideId")
     suspend fun delete(rideId: Long)

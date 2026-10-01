@@ -90,12 +90,5 @@ object BleCharacteristics {
         Vin,
     )
 
-    /**
-     * The SIG-standard Client Characteristic Configuration descriptor. Subscribing to a
-     * bike→phone characteristic means writing the enable value to this descriptor on it.
-     */
-    val ClientCharacteristicConfiguration: UUID =
-        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
     private fun uuid(suffix: String): UUID = UUID.fromString(Prefix + suffix)
 }

@@ -105,7 +105,6 @@ class MainViewModel internal constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.0)
     val rides = rideRepository.rides
     val guidance = navigationController.guidance
-    val navigationSession = navigationController.session
     val settings = appSettings.settings
     private val insightPeriod = MutableStateFlow(InsightPeriod.ThirtyDays)
     val selectedInsightPeriod: StateFlow<InsightPeriod> = insightPeriod.asStateFlow()

@@ -120,7 +120,7 @@ class UiReviewRenderTest {
         })
         both("live-navigating", shell(base) {
             AppUiFixture.state(it).copy(guidance = GuidanceState(active = true, instruction = "Turn left onto Anna Salai",
-                roadName = "Anna Salai", distanceToManeuverMetres = 350, distanceToDestinationMetres = 12_400, timeToDestinationSeconds = 1_500))
+                distanceToManeuverMetres = 350, distanceToDestinationMetres = 12_400, timeToDestinationSeconds = 1_500))
         })
         both("live-shared-error", shell(base.copy(sharedDestination = "https://maps.app.goo.gl/abc", sharedDestinationError = "That link doesn't contain a destination.")))
     }

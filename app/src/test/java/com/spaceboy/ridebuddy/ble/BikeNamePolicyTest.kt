@@ -106,10 +106,5 @@ class BikeNamePolicyTest {
             UUID.fromString("00001812-0000-1000-8000-00805f9b34fb"),
             UUID.fromString(BikeHogpServiceUuidString),
         )
-        // Shares the SIG base with the CCCD descriptor, differing only in the
-        // 16-bit slot — a cheap guard against corrupting the base by hand.
-        val sigBase = "-0000-1000-8000-00805f9b34fb"
-        assertTrue(BikeHogpServiceUuidString.endsWith(sigBase))
-        assertTrue(BleCharacteristics.ClientCharacteristicConfiguration.toString().endsWith(sigBase))
     }
 }
