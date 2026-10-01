@@ -14,12 +14,10 @@ they talk through `StateFlow`s and a few constructor-injected interfaces.
 | Rides | `data/RideRecorder`, `data/RideRepository` | Detects and records rides from telemetry. Summaries live in `ride_history.db` (backed up); each ride's samples are one gzipped ProtoBuf blob in `ride_samples.db` (not backed up). |
 | Settings | `data/AppSettingsRepository` | One `@Serializable` value in a DataStore (`settings.json`, backed up). Link state — protection acceptance, bike identity, connection demand — is a second DataStore (`link_state.json`, not backed up). |
 
-## Upgrading from 1.0
+## Schema versions
 
-`LegacyRideImporter` reads the 1.0 `rides.db` (schema version 6 only) once, keeps ride ids,
-verifies counts, and renames the file to `rides.db.migrated`. DataStore's
-`SharedPreferencesMigration` carries the 1.0 preference files over once. Both go in a later
-release, once 1.1 has been confirmed on the bike.
+Both Room databases are at version 1, the 1.1.0 baseline. Their schemas are exported to
+`app/schemas`; a change to either needs a new version, a migration, and the new exported schema.
 
 ## Sources of truth
 

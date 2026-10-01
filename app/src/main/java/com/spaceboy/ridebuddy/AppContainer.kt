@@ -22,7 +22,6 @@ import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
 import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
 import com.spaceboy.ridebuddy.service.NotificationIcons
-import com.spaceboy.ridebuddy.data.LegacyRideImporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
 import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
@@ -75,9 +74,7 @@ class AppContainer(context: Context) {
     )
     val rideLocationTracker = RideLocationTracker(context)
     private val rideLocationLabeler = RideLocationLabeler(context)
-    private val rideHistoryDatabase = RideHistoryDatabase.open(context)
-    private val rideSamplesDatabase = RideSamplesDatabase.open(context)
-    val rideRepository = RideRepository(rideHistoryDatabase, rideSamplesDatabase, applicationScope)
+    val rideRepository = RideRepository(RideHistoryDatabase.open(context), RideSamplesDatabase.open(context), applicationScope)
     val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, bikeIdentityRepository)
     val rideRecorder = RideRecorder(
         bikeConnection,
@@ -87,17 +84,7 @@ class AppContainer(context: Context) {
         appSettings,
         rideLocationLabeler,
     )
-    private val rideHistoryMaintenance = RideHistoryMaintenance(
-        repository = rideRepository,
-        legacyImporter = LegacyRideImporter(
-            legacyDatabase = context.getDatabasePath("rides.db"),
-            legacyBackupSnapshot = java.io.File(context.filesDir, "backup/rides.backup"),
-            history = rideHistoryDatabase,
-            sampleStore = rideSamplesDatabase,
-        ),
-        settingsRepository = appSettings,
-        scope = applicationScope,
-    )
+    private val rideHistoryMaintenance = RideHistoryMaintenance(rideRepository, appSettings, applicationScope)
     val navigationApiKey = NavigationApiKey(SecureNavigationApiKeyStore(context), applicationScope)
     val destinationParser = DestinationParser(rideLocationLabeler)
     val clusterDisplay = ClusterDisplay(bikeConnection, appSettings.settings, applicationScope)

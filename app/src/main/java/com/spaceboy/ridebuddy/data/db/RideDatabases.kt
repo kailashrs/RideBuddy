@@ -92,7 +92,7 @@ internal class RouteConverter {
  * Ride summaries. Small, and the part Android's backup service carries — which copies the file
  * itself, so it is kept out of WAL mode where recent writes would sit in a separate log.
  */
-@Database(entities = [Ride::class], version = 1, exportSchema = false)
+@Database(entities = [Ride::class], version = 1)
 @TypeConverters(RouteConverter::class)
 abstract class RideHistoryDatabase : RoomDatabase() {
     abstract fun rides(): RideDao
@@ -111,7 +111,7 @@ abstract class RideHistoryDatabase : RoomDatabase() {
  * Sample series, kept in their own file so the backup rules can leave them out: they run to
  * megabytes per riding hour against the backup service's 25 MB allowance.
  */
-@Database(entities = [RideSampleSeries::class], version = 1, exportSchema = false)
+@Database(entities = [RideSampleSeries::class], version = 1)
 abstract class RideSamplesDatabase : RoomDatabase() {
     abstract fun samples(): RideSampleDao
 

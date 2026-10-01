@@ -24,15 +24,6 @@ class ConnectionEventStoreTest {
     }
 
     @Test
-    fun `the legacy journal is read only while no file exists`() {
-        val store = FileConnectionEventStore(file) { listOf("legacy event") }
-
-        assertEquals(listOf("legacy event"), store.read())
-        store.write(listOf("new event"))
-        assertEquals(listOf("new event"), store.read())
-    }
-
-    @Test
     fun `writes are capped at the journal limit`() {
         val store = FileConnectionEventStore(file)
 

@@ -104,6 +104,11 @@ android {
     }
 }
 
+// Room writes each database's schema here, so every released version is a committed baseline
+// that future migrations are written and tested against.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")

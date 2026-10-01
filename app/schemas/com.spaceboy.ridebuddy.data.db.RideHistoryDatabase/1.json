@@ -1,0 +1,145 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "3155b2d69a3256ced7e7d7d54016c90e",
+    "entities": [
+      {
+        "tableName": "rides",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startedAtMillis` INTEGER NOT NULL, `endedAtMillis` INTEGER NOT NULL, `distanceKilometres` REAL NOT NULL, `averageSpeedKph` REAL NOT NULL, `maximumSpeedKph` REAL NOT NULL, `averageRpm` REAL NOT NULL, `maximumRpm` INTEGER NOT NULL, `averageThrottlePercent` REAL NOT NULL, `estimatedFuelLitres` REAL, `startArea` TEXT, `endArea` TEXT, `startLatitude` REAL, `startLongitude` REAL, `endLatitude` REAL, `endLongitude` REAL, `routePreview` TEXT NOT NULL, `zeroToSixtyMillis` INTEGER, `zeroToHundredMillis` INTEGER, `telemetryDurationMillis` INTEGER, `peakAccelerationG` REAL, `peakBrakingG` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMillis",
+            "columnName": "startedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtMillis",
+            "columnName": "endedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceKilometres",
+            "columnName": "distanceKilometres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "averageSpeedKph",
+            "columnName": "averageSpeedKph",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumSpeedKph",
+            "columnName": "maximumSpeedKph",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "averageRpm",
+            "columnName": "averageRpm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumRpm",
+            "columnName": "maximumRpm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "averageThrottlePercent",
+            "columnName": "averageThrottlePercent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimatedFuelLitres",
+            "columnName": "estimatedFuelLitres",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "startArea",
+            "columnName": "startArea",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "endArea",
+            "columnName": "endArea",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startLatitude",
+            "columnName": "startLatitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "startLongitude",
+            "columnName": "startLongitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "endLatitude",
+            "columnName": "endLatitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "endLongitude",
+            "columnName": "endLongitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "routePreview",
+            "columnName": "routePreview",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zeroToSixtyMillis",
+            "columnName": "zeroToSixtyMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "zeroToHundredMillis",
+            "columnName": "zeroToHundredMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "telemetryDurationMillis",
+            "columnName": "telemetryDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "peakAccelerationG",
+            "columnName": "peakAccelerationG",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "peakBrakingG",
+            "columnName": "peakBrakingG",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3155b2d69a3256ced7e7d7d54016c90e')"
+    ]
+  }
+}

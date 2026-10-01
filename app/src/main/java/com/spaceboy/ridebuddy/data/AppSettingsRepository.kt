@@ -8,8 +8,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.Serializer
 import androidx.datastore.dataStoreFile
-import androidx.datastore.migrations.SharedPreferencesMigration
-import androidx.datastore.migrations.SharedPreferencesView
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.Locale
@@ -147,7 +145,6 @@ class AppSettingsRepository(
                     AppSettings.serializer(),
                     AppSettings(distanceUnits = DistanceUnits.defaultFor(Locale.getDefault())),
                 ),
-                migrations = listOf(legacySettingsMigration(context)),
                 scope = CoroutineScope(scope.coroutineContext + Dispatchers.IO),
                 produceFile = { context.dataStoreFile(FileName) },
             ),
@@ -155,54 +152,6 @@ class AppSettingsRepository(
         )
     }
 }
-
-/**
- * Reads the pre-1.1 `app_settings` preferences once. Only keys the previous build wrote are
- * mapped; anything absent keeps its default.
- */
-internal fun legacySettingsMigration(context: Context) =
-    SharedPreferencesMigration<AppSettings>(context, "app_settings") { old, defaults ->
-        old.toAppSettings(defaults)
-    }
-
-internal fun SharedPreferencesView.toAppSettings(defaults: AppSettings): AppSettings = AppSettings(
-    distanceUnits = enum("units", defaults.distanceUnits),
-    voiceGuidance = getBoolean("voice_guidance", defaults.voiceGuidance),
-    avoidTolls = getBoolean("avoid_tolls", defaults.avoidTolls),
-    avoidHighways = getBoolean("avoid_highways", defaults.avoidHighways),
-    avoidFerries = getBoolean("avoid_ferries", defaults.avoidFerries),
-    autoStartSharedDestinations = getBoolean("auto_start_shared_v2", defaults.autoStartSharedDestinations),
-    callerDisplay = getBoolean("caller_display", defaults.callerDisplay),
-    tftCallControls = getBoolean("tft_call_controls", defaults.tftCallControls),
-    tftNavigationOutputEnabled = getBoolean("tft_navigation_output", defaults.tftNavigationOutputEnabled),
-    bleCaptureEnabled = getBoolean("ble_capture_enabled", defaults.bleCaptureEnabled),
-    persistConnectionDiagnostics = getBoolean("persist_connection_diagnostics", defaults.persistConnectionDiagnostics),
-    onboardingComplete = getBoolean("onboarding_complete", defaults.onboardingComplete),
-    rideStartSpeedKph = getFloat("ride_start_speed", defaults.rideStartSpeedKph.toFloat()).toDouble(),
-    rideStopSpeedKph = getFloat("ride_stop_speed", defaults.rideStopSpeedKph.toFloat()).toDouble(),
-    rideStopDelaySeconds = getInt("ride_stop_delay", defaults.rideStopDelaySeconds),
-    overspeedAlerts = getBoolean("overspeed_alerts", defaults.overspeedAlerts),
-    overspeedThresholdKph = getInt("overspeed_threshold", defaults.overspeedThresholdKph),
-    rpmAlerts = getBoolean("rpm_alerts", defaults.rpmAlerts),
-    rpmThreshold = getInt("rpm_threshold", defaults.rpmThreshold),
-    accelerationAlerts = getBoolean("acceleration_alerts", defaults.accelerationAlerts),
-    brakingAlerts = getBoolean("braking_alerts", defaults.brakingAlerts),
-    weatherAlerts = getBoolean("weather_alerts", defaults.weatherAlerts),
-    hazardAlerts = getBoolean("hazard_alerts", defaults.hazardAlerts),
-    tftTextMode = enum("tft_text_mode", defaults.tftTextMode),
-    sampleRetention = enum("sample_retention", defaults.sampleRetention),
-    themeMode = enum("theme_mode", defaults.themeMode),
-    dynamicColor = getBoolean("dynamic_color", defaults.dynamicColor),
-    highContrast = getBoolean("high_contrast", defaults.highContrast),
-    // 1.0 also read two older keys that held the enabled apps rather than the disabled ones.
-    disabledNotificationPackages = getStringSet("notification_packages_disabled")
-        ?: getStringSet("notification_packages_v2")?.let { enabled -> SupportedNotificationAppsByPackage.keys - enabled }
-        ?: getStringSet("notification_packages")?.let { enabled -> SupportedNotificationAppsByPackage.keys - enabled }
-        ?: defaults.disabledNotificationPackages,
-)
-
-private inline fun <reified T : Enum<T>> SharedPreferencesView.enum(key: String, fallback: T): T =
-    getString(key)?.let { name -> enumValues<T>().firstOrNull { it.name == name } } ?: fallback
 
 /** A DataStore serializer for any `@Serializable` value, stored as JSON. */
 internal class JsonSerializer<T>(
