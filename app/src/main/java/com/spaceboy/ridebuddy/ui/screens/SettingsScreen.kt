@@ -2,30 +2,22 @@ package com.spaceboy.ridebuddy.ui.screens
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import android.content.pm.PackageManager
 import android.os.PowerManager
-import android.provider.Telephony
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
-import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.Call
@@ -44,7 +36,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.ReportProblem
@@ -67,9 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -83,12 +72,9 @@ import com.spaceboy.ridebuddy.BuildConfig
 import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.SampleRetention
-import com.spaceboy.ridebuddy.data.SupportedNotificationApp
-import com.spaceboy.ridebuddy.data.SupportedNotificationApps
 import com.spaceboy.ridebuddy.data.TftTextMode
 import com.spaceboy.ridebuddy.data.ThemeMode
 import com.spaceboy.ridebuddy.data.UnitFormatter
-import com.spaceboy.ridebuddy.data.defaultSmsNotificationApp
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.ui.MainScreenActions
 import com.spaceboy.ridebuddy.ui.MainScreenState
@@ -99,8 +85,6 @@ import com.spaceboy.ridebuddy.ui.components.SettingsSliderRow
 import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import java.util.Locale
 import kotlin.math.roundToInt
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * Every setting, as one Material list under subheaders.
@@ -122,16 +106,11 @@ fun SettingsScreen(
     val speed = remember(settings.distanceUnits, locale) { SpeedFormat(settings.distanceUnits, locale) }
     val uriHandler = LocalUriHandler.current
 
-    // Re-read on resume: these are changed in system settings, which do not notify.
-    var resumeCount by remember { mutableIntStateOf(0) }
+    // Re-read on resume: this is changed in system settings, which does not notify.
     var unrestrictedBattery by remember { mutableStateOf(false) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        resumeCount++
         unrestrictedBattery = context.getSystemService(PowerManager::class.java)
             ?.isIgnoringBatteryOptimizations(context.packageName) == true
-    }
-    val installedApps by produceState(emptyList<SupportedNotificationApp>(), context, resumeCount) {
-        value = withContext(Dispatchers.IO) { installedSupportedApps(context) }
     }
 
     var dialog by rememberSaveable { mutableStateOf<SettingsDialog?>(null) }
@@ -149,12 +128,6 @@ fun SettingsScreen(
             confirm = "Delete",
             onDismiss = { dialog = null },
             onConfirm = actions.onClearRideHistory,
-        )
-        SettingsDialog.SupportedApps -> SupportedAppsDialog(
-            installedApps = installedApps,
-            disabledPackages = settings.disabledNotificationPackages,
-            onPackageChanged = settingsActions.onNotificationPackageChanged,
-            onDismiss = { dialog = null },
         )
         SettingsDialog.About -> AlertDialog(
             onDismissRequest = { dialog = null },
@@ -176,8 +149,7 @@ fun SettingsScreen(
                 Text(
                     "Only while parked, with no call in progress. In turn, the display shows:\n\n" +
                         "1. A turn, distances and a speed limit\n" +
-                        "2. A test caller ringing, answered, ended and outgoing\n" +
-                        "3. The Messages, Instagram and Gmail notification icons\n\n" +
+                        "2. A test caller ringing, answered, ended and outgoing\n\n" +
                         "You'll be asked whether each part appeared.",
                 )
             },
@@ -251,16 +223,6 @@ fun SettingsScreen(
                 icon = Icons.Outlined.ContactPage, onCheckedChange = settingsActions.onCallerDisplayChanged)
             SettingsSwitchRow("Handlebar call controls", "Answer or decline calls from the handlebar",
                 settings.tftCallControls, icon = Icons.Outlined.Call, onCheckedChange = settingsActions.onTftCallControlsChanged)
-            SettingsRow(
-                title = "App notifications",
-                supportingText = when {
-                    !state.notificationAccessEnabled -> "Notification access is off"
-                    installedApps.isEmpty() -> "No supported apps installed"
-                    else -> "${installedApps.count { it.packageName !in settings.disabledNotificationPackages }} of ${installedApps.size} apps"
-                },
-                icon = Icons.Outlined.Apps,
-                onClick = { if (state.notificationAccessEnabled) dialog = SettingsDialog.SupportedApps else actions.onOpenNotificationAccess() },
-            )
         }
         section("Riding alerts") {
             SettingsSwitchRow("Overspeed", "Alert above ${speed.label(settings.overspeedThresholdKph.toDouble())}",
@@ -357,8 +319,6 @@ fun SettingsScreen(
                 icon = Icons.Outlined.ColorLens, onCheckedChange = settingsActions.onDynamicColorChanged)
             SettingsSwitchRow("High contrast", null, settings.highContrast,
                 icon = Icons.Outlined.Contrast, onCheckedChange = settingsActions.onHighContrastChanged)
-            SettingsRow("Notification access", if (state.notificationAccessEnabled) "Allowed" else "Needed for bike alerts",
-                icon = Icons.Outlined.Notifications, onClick = actions.onOpenNotificationAccess)
             SettingsRow("Battery use", if (unrestrictedBattery) "Unrestricted" else "Optimized — may delay reconnecting",
                 icon = Icons.Outlined.BatteryAlert, onClick = actions.onOpenAppPermissions)
             SettingsRow("App permissions", null, icon = Icons.Outlined.Security, onClick = actions.onOpenAppPermissions)
@@ -370,7 +330,7 @@ fun SettingsScreen(
         section("Developer tools") {
             SettingsRow("Connection details", "Live link state, recent events and a shareable report",
                 icon = Icons.Outlined.Bluetooth, onClick = actions.onOpenDiagnostics)
-            SettingsRow("Test the bike's display", "Sample directions, a test call and notification icons",
+            SettingsRow("Test the bike's display", "Sample directions and a test call",
                 icon = Icons.Outlined.Tv, onClick = { dialog = SettingsDialog.DisplayTest })
             SettingsSwitchRow("Capture Bluetooth traffic", "Raw packets in memory; may include names and message text",
                 state.settings.bleCaptureEnabled, icon = Icons.Outlined.BugReport,
@@ -390,7 +350,7 @@ fun SettingsScreen(
     }
 }
 
-private enum class SettingsDialog { ForgetBike, ClearHistory, SupportedApps, About, DisplayTest, Capture }
+private enum class SettingsDialog { ForgetBike, ClearHistory, About, DisplayTest, Capture }
 
 private fun LazyListScope.section(title: String, content: @Composable () -> Unit) {
     item(key = title) {
@@ -422,61 +382,6 @@ internal fun ConfirmDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
-
-@Composable
-private fun SupportedAppsDialog(
-    installedApps: List<SupportedNotificationApp>,
-    disabledPackages: Set<String>,
-    onPackageChanged: (String, Boolean) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("App notifications") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Choose which apps can show notifications on the bike.")
-                if (installedApps.isEmpty()) {
-                    Text(
-                        "None of the supported apps (WhatsApp, Messages, Instagram, Facebook, Gmail, Outlook, X) are installed.",
-                        Modifier.padding(top = 16.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                installedApps.forEach { app ->
-                    val enabled = app.packageName !in disabledPackages
-                    // Plain rows: a ListItem's own inset would double the dialog's.
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 56.dp)
-                            .toggleable(enabled, role = Role.Switch) { onPackageChanged(app.packageName, it) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(app.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                        Switch(checked = enabled, onCheckedChange = null)
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
-}
-
-/** The default SMS app first (resolved, so always installed), then the listed apps that are. */
-private fun installedSupportedApps(context: android.content.Context): List<SupportedNotificationApp> {
-    val packages = context.packageManager
-    val defaultSms = runCatching {
-        val packageName = Telephony.Sms.getDefaultSmsPackage(context)
-        defaultSmsNotificationApp(packageName, packageName?.let {
-            packages.getApplicationLabel(packages.getApplicationInfo(it, PackageManager.ApplicationInfoFlags.of(0))).toString()
-        })
-    }.getOrNull()
-    return listOfNotNull(defaultSms) + SupportedNotificationApps.filter { app ->
-        app.packageName != defaultSms?.packageName &&
-            runCatching { packages.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0)) }.isSuccess
-    }
 }
 
 private fun formatSeconds(total: Int): String = when {

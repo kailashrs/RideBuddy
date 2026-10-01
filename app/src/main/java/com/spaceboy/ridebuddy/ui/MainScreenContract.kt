@@ -61,7 +61,6 @@ data class MainScreenState(
     val guidance: GuidanceState,
     val settings: AppSettings,
     val bikeAssociation: BikeAssociationState,
-    val notificationAccessEnabled: Boolean,
     val backgroundLocationGranted: Boolean,
 )
 
@@ -91,7 +90,6 @@ data class MainScreenActions(
     val onInsightPeriodSelected: (InsightPeriod) -> Unit,
     val onClearRideHistory: () -> Unit,
     val onExportRideHistory: () -> Unit,
-    val onOpenNotificationAccess: () -> Unit,
     val onAssociateBike: () -> Unit,
     val onForgetBike: () -> Unit,
     val onRideSelected: (Ride) -> Unit,

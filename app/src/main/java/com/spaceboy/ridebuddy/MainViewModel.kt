@@ -200,15 +200,6 @@ class MainViewModel internal constructor(
     fun setAvoidHighways(value: Boolean) = appSettings.update { it.copy(avoidHighways = value) }
     fun setAvoidFerries(value: Boolean) = appSettings.update { it.copy(avoidFerries = value) }
     fun setAutoStartSharedDestinations(value: Boolean) = appSettings.update { it.copy(autoStartSharedDestinations = value) }
-    fun setNotificationPackageEnabled(packageName: String, enabled: Boolean) = appSettings.update { settings ->
-        settings.copy(
-            disabledNotificationPackages = if (enabled) {
-                settings.disabledNotificationPackages - packageName
-            } else {
-                settings.disabledNotificationPackages + packageName
-            },
-        )
-    }
     fun setCallerDisplay(value: Boolean) = appSettings.update { it.copy(callerDisplay = value) }
     fun setTftCallControls(value: Boolean) = appSettings.update { it.copy(tftCallControls = value) }
     fun setTftNavigationOutput(value: Boolean) = appSettings.update { it.copy(tftNavigationOutputEnabled = value) }

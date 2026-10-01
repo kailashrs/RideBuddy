@@ -12,7 +12,6 @@ import com.spaceboy.ridebuddy.data.ThemeMode
  * screen uses them; nothing above it needs to see this many handlers.
  */
 data class MoreSettingsActions(
-    val onNotificationPackageChanged: (String, Boolean) -> Unit,
     val onCallerDisplayChanged: (Boolean) -> Unit,
     val onTftCallControlsChanged: (Boolean) -> Unit,
     val onRideStartSpeedChanged: (Double) -> Unit,

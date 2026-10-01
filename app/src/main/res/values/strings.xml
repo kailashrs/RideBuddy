@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RideBuddy</string>
-    <string name="notification_listener_label">RideBuddy TFT alerts</string>
     <string name="destination_too_long">Enter a destination of 4,096 characters or fewer</string>
     <string name="navigation_preparing_route">Preparing route…</string>
     <string name="navigation_arrived">You have arrived</string>

@@ -106,14 +106,6 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val dynamicColor: Boolean = true,
     val highContrast: Boolean = false,
-    /**
-     * Apps whose icon the rider has switched off.
-     *
-     * Stored as the exclusions rather than the inclusions so an app that is resolved at
-     * runtime — the default SMS app — is on by default like every listed one, instead of
-     * being invisible until something remembers to add it.
-     */
-    val disabledNotificationPackages: Set<String> = emptySet(),
 )
 
 /**

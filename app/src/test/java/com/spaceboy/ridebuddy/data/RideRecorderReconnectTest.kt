@@ -17,6 +17,7 @@ import com.spaceboy.ridebuddy.domain.BleDiagnostics
 import com.spaceboy.ridebuddy.domain.TelemetryReading
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -84,6 +86,46 @@ class RideRecorderReconnectTest {
 
             bike.connectionState.value = BikeConnectionState.Failed("Link lost", retriesExhausted = true)
             await { recorder.activeRide.value == null && recorder.liveSamples.value.isEmpty() }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test fun accelerationIgnoresWheelSpeedStepJitterButKeepsASustainedLaunch() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val bike = RecordingBikeConnection()
+        val repository = RideRepository(
+            Room.inMemoryDatabaseBuilder(context, RideHistoryDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RideSamplesDatabase::class.java).build(),
+            scope,
+        )
+        val recorder = RideRecorder(bike, repository,
+            scope, RideLocationTracker(context), AppSettingsRepository(InMemoryDataStore(AppSettings()), scope),
+            RideLocationLabeler(context))
+        val seen = java.util.Collections.synchronizedList(mutableListOf<Double>())
+        try {
+            recorder.start()
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                recorder.liveSampleEvents.collect { seen += it.accelerationMetresPerSecondSquared }
+            }
+            withTimeout(3_000) { bike.raw.subscriptionCount.first { it > 0 } }
+            bike.connectionState.value = BikeConnectionState.Connected("Test bike", null)
+            suspend fun frame(elapsed: Long, speed: Double) {
+                val count = seen.size
+                bike.raw.emit(reading(elapsed, speed))
+                await { seen.size > count }
+            }
+
+            // Steady 30 km/h reported as eight 0.377 km/h steps up and back every frame, as the
+            // wheel sensor does: ±3.4 m/s² frame to frame, though the bike is not accelerating.
+            for (index in 0..11) frame(index * 250L, 30.0 + if (index % 2 == 0) 0.0 else 8 * 0.377)
+            assertTrue(seen.drop(4).all { kotlin.math.abs(it) < 3.0 })
+
+            // A real 4 m/s² launch, 3.6 km/h every 250 ms, still reads as one.
+            seen.clear()
+            for (index in 0..7) frame(10_000L + index * 250L, 10.0 + index * 3.6)
+            assertEquals(4.0, seen.last(), 0.01)
         } finally {
             scope.cancel()
         }

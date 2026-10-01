@@ -26,15 +26,6 @@ class ClusterControlEventTest {
         assertNull(callControlEvent(byteArrayOf(3)))
         assertNull(callControlEvent(byteArrayOf()))
     }
-
-    @Test
-    fun `the app event packet matches the OEM builder`() {
-        // looper.b.l(i, helper) = {11, i, battery, 0}
-        assertEquals(
-            listOf(11, 7, 55, 0),
-            com.spaceboy.ridebuddy.service.appEventPacket(7, 55).map { it.toInt() },
-        )
-    }
 }
 
 /** Mirrors the CallControl branch in AndroidBikeConnection.onNotification. */

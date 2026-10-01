@@ -78,7 +78,6 @@ fun DiagnosticsScreen(
         Readout("RSSI", diagnostics.rssi?.let { "$it dBm" } ?: "—")
         Readout("ATT MTU", diagnostics.attMtu?.let { "$it bytes" } ?: "—")
         Readout("GATT services", diagnostics.servicesDiscovered.takeIf { it > 0 }?.toString() ?: "—")
-        Readout("Notification access", if (state.notificationAccessEnabled) "Enabled" else "Disabled")
         Readout("VIN", identity.vin ?: "Not reported")
         Readout("Cluster software", identity.clusterSoftwareVersion ?: "Not reported")
 

@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.service
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -21,6 +22,9 @@ import com.spaceboy.ridebuddy.domain.BikeConnectionState
 internal class BikeConnectionNotifications(private val context: Context) {
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
 
+    /** The status last handed to the platform, whether by [publish] or by `startForeground`. */
+    private var shownStatus: String? = null
+
     fun createChannel() {
         notificationManager.createNotificationChannel(
             NotificationChannel(ChannelId, "Bike connection", NotificationManager.IMPORTANCE_LOW),
@@ -28,44 +32,52 @@ internal class BikeConnectionNotifications(private val context: Context) {
     }
 
     /** The ongoing notification. Low importance: it is a status line, not an alert. */
-    fun build(status: String) = NotificationCompat.Builder(context, ChannelId)
-        .setSmallIcon(R.drawable.ic_launcher)
-        .setContentTitle("RideBuddy")
-        .setContentText(status)
-        .setOngoing(true)
-        .setContentIntent(
-            PendingIntent.getActivity(
-                context,
+    fun build(status: String): Notification {
+        shownStatus = status
+        return NotificationCompat.Builder(context, ChannelId)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle("RideBuddy")
+            .setContentText(status)
+            .setOngoing(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    context,
+                    0,
+                    Intent(context, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+            .addAction(
                 0,
-                Intent(context, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            ),
-        )
-        .addAction(
-            0,
-            "Disconnect",
-            PendingIntent.getBroadcast(
-                context,
-                1,
-                Intent(context, BikeConnectionActionReceiver::class.java)
-                    .setAction(BikeConnectionService.ActionDisconnect),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            ),
-        )
-        .build()
+                "Disconnect",
+                PendingIntent.getBroadcast(
+                    context,
+                    1,
+                    Intent(context, BikeConnectionActionReceiver::class.java)
+                        .setAction(BikeConnectionService.ActionDisconnect),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+            .build()
+    }
 
     /**
-     * Updates the notification in place. Failures are logged rather than thrown: notification
-     * posting can be refused, and losing a status line must not take the connection down.
+     * Updates the notification in place, and only when its text changes: the connection state
+     * changes with every signal-strength reading, every 10 s, without changing what this says.
+     * Failures are logged rather than thrown: notification posting can be refused, and losing a
+     * status line must not take the connection down.
      */
     fun publish(status: String) {
+        if (status == shownStatus) return
         runCatching { notificationManager.notify(BikeConnectionService.NotificationId, build(status)) }
             .onFailure { error ->
+                shownStatus = null
                 Log.w("BikeConnectionService", "Unable to update connection notification", error)
             }
     }
 
     fun cancel() {
+        shownStatus = null
         notificationManager.cancel(BikeConnectionService.NotificationId)
     }
 

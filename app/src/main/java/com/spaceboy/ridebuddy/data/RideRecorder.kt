@@ -66,8 +66,8 @@ class RideRecorder(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val liveSampleEvents: SharedFlow<RideSample> = mutableLiveSampleEvents.asSharedFlow()
-    private var lastLiveFrame: TelemetryFrame? = null
-    private var lastLiveAtElapsedRealtime: Long? = null
+    /** Wheel speed over the last [AccelerationWindowMillis], as (elapsed realtime, km/h). */
+    private val recentSpeeds = ArrayDeque<Pair<Long, Double>>()
     private var lastLiveEmitAtElapsedRealtime: Long = 0L
     private var stopCandidate: StopCandidate? = null
     private var resumePending = false
@@ -127,13 +127,11 @@ class RideRecorder(
             stopCandidate = null
             resumePending = true
         }
-        lastLiveFrame = null
-        lastLiveAtElapsedRealtime = null
+        recentSpeeds.clear()
     }
 
     private fun clearLiveTelemetryState() {
-        lastLiveFrame = null
-        lastLiveAtElapsedRealtime = null
+        recentSpeeds.clear()
         liveWindow.clear()
         mutableLiveSamples.value = emptyList()
     }
@@ -145,18 +143,19 @@ class RideRecorder(
         val now = mutableActiveRide.value?.let {
             it.startedAtMillis + (nowElapsedRealtime - it.startedAtElapsedRealtime).coerceAtLeast(0L)
         } ?: reading.receivedAtMillis
-        val previousFrame = lastLiveFrame
-        val previousAt = lastLiveAtElapsedRealtime
-        val liveElapsedMillis = previousAt?.let { nowElapsedRealtime - it } ?: 0L
-        // Acceleration from the speed difference over the monotonic interval. Skipped
-        // across a long gap: dropped frames would otherwise show as a huge spike, since the
-        // speed change is real but the elapsed time is not what it appears.
-        val liveAcceleration = if (previousFrame != null && liveElapsedMillis in 1..MaxAccelerationSampleGapMillis) {
-            ((frame.speedKilometresPerHour - previousFrame.speedKilometresPerHour) / 3.6) / (liveElapsedMillis / 1_000.0)
+        // Acceleration over the last second of wheel speed rather than since the previous frame.
+        // The bike reports speed in 0.377 km/h steps about four times a second, so a single step
+        // between frames already reads as 0.4 m/s², and frame-to-frame figures crossed the
+        // hard-acceleration threshold on that jitter alone. After a telemetry gap the window
+        // holds only the current frame, and the figure is zero rather than an artefact of the gap.
+        recentSpeeds.addLast(nowElapsedRealtime to frame.speedKilometresPerHour)
+        while (nowElapsedRealtime - recentSpeeds.first().first > AccelerationWindowMillis) recentSpeeds.removeFirst()
+        val (windowStartAt, windowStartKph) = recentSpeeds.first()
+        val windowMillis = nowElapsedRealtime - windowStartAt
+        val liveAcceleration = if (windowMillis >= MinimumAccelerationWindowMillis) {
+            ((frame.speedKilometresPerHour - windowStartKph) / 3.6) / (windowMillis / 1_000.0)
         } else 0.0
         val liveSample = sample(frame, now, liveAcceleration.coerceIn(-20.0, 20.0))
-        lastLiveFrame = frame
-        lastLiveAtElapsedRealtime = nowElapsedRealtime
         mutableLiveSampleEvents.tryEmit(liveSample)
 
         liveWindow.addLast(liveSample)
@@ -385,8 +384,11 @@ class RideRecorder(
          */
         const val MaxStoredSamples = 36_000
 
-        /** Beyond this gap, an acceleration figure would be an artefact of the gap itself. */
-        const val MaxAccelerationSampleGapMillis = 2_500L
+        /** Long enough to average out the wheel-speed steps, short enough to follow a hard stop. */
+        const val AccelerationWindowMillis = 1_000L
+
+        /** Below this, the window has too few frames to be more than one speed step. */
+        const val MinimumAccelerationWindowMillis = 500L
         // Telemetry arrives about every 250 ms, so these are sized against that rate rather
         // than against a fast stream: a 250 ms throttle would have let every single frame
         // through and copied the whole live window four times a second for nothing.

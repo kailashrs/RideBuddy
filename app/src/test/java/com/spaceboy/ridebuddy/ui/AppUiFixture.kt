@@ -34,11 +34,9 @@ internal object AppUiFixture {
         settings = AppSettings(distanceUnits = DistanceUnits.Metric, dynamicColor = false, onboardingComplete = true),
         bikeAssociation = BikeAssociationState(supported = true,
             bike = AssociatedBike(MacAddress.fromString("00:00:00:00:00:01"), "Aprilia RS 457", associationId = 1), observingPresence = true),
-        notificationAccessEnabled = true,
         backgroundLocationGranted = true,
     )
     val settingsActions = MoreSettingsActions(
-        onNotificationPackageChanged = { _, _ -> },
         onCallerDisplayChanged = { _ -> },
         onTftCallControlsChanged = { _ -> },
         onRideStartSpeedChanged = { _ -> },
@@ -80,7 +78,6 @@ internal object AppUiFixture {
         onInsightPeriodSelected = { _ -> },
         onClearRideHistory = { },
         onExportRideHistory = { },
-        onOpenNotificationAccess = { },
         onAssociateBike = { },
         onForgetBike = { },
         onRideSelected = { _ -> },

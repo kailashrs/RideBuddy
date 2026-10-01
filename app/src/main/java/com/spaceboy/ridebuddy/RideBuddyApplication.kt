@@ -12,7 +12,7 @@ class RideBuddyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         // Force construction here rather than on first use. Several entry points are
-        // system-driven — the notification listener, the presence service — and the first
+        // system-driven — the presence service, the call service — and the first
         // touch could otherwise happen on a callback thread mid-work.
         container
     }

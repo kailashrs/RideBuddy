@@ -22,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,7 +70,6 @@ import kotlinx.coroutines.withContext
  * the background, and none of that produces a callback.
  */
 class MainActivity : ComponentActivity() {
-    private var notificationAccessEnabled by mutableStateOf(false)
     private var appNotificationPermissionGranted by mutableStateOf(false)
     private var nearbyDeviceAccessGranted by mutableStateOf(false)
     private var preciseLocationGranted by mutableStateOf(false)
@@ -141,7 +139,6 @@ class MainActivity : ComponentActivity() {
                 .collectAsStateWithLifecycle().value
             val settingsActions = remember {
                 MoreSettingsActions(
-                    onNotificationPackageChanged = viewModel::setNotificationPackageEnabled,
                     onCallerDisplayChanged = { enabled ->
                         viewModel.setCallerDisplay(enabled)
                         if (enabled && checkSelfPermission(Manifest.permission.READ_CONTACTS) !=
@@ -213,7 +210,6 @@ class MainActivity : ComponentActivity() {
             bikeAssociated = bikeAssociation.bike != null,
             nearbyDeviceAccessGranted = nearbyDeviceAccessGranted,
             preciseLocationGranted = preciseLocationGranted,
-            notificationAccessEnabled = notificationAccessEnabled,
             appNotificationPermissionGranted = appNotificationPermissionGranted,
             telemetryReceiving = telemetryReceiving,
             authenticated = authenticated,
@@ -221,7 +217,6 @@ class MainActivity : ComponentActivity() {
             onRequestNearbyDeviceAccess = ::requestOnboardingNearbyDeviceAccess,
             onRequestPreciseLocation = { onboardingLocationPermissionLauncher.launch(LocationPermissions) },
             onAssociateBike = bikeConnectionActions::requestConnection,
-            onOpenNotificationAccess = ::openNotificationAccessSettings,
             onRequestAppNotificationPermission = ::requestAppNotificationPermission,
             onSetUpNavigation = {
                 viewModel.completeOnboarding()
@@ -275,7 +270,6 @@ class MainActivity : ComponentActivity() {
                 guidance = viewModel.guidance.collectAsStateWithLifecycle().value,
                 settings = settings,
                 bikeAssociation = bikeAssociation,
-                notificationAccessEnabled = notificationAccessEnabled,
                 backgroundLocationGranted = backgroundLocationGranted,
             ),
             actions = actions,
@@ -304,7 +298,6 @@ class MainActivity : ComponentActivity() {
         onInsightPeriodSelected = viewModel::selectInsightPeriod,
         onClearRideHistory = viewModel::clearRideHistory,
         onExportRideHistory = ::exportRideHistory,
-        onOpenNotificationAccess = ::openNotificationAccessSettings,
         onAssociateBike = bikeConnectionActions::requestConnection,
         onForgetBike = ::forgetBike,
         onRideSelected = { ride -> startActivity(RideDetailActivity.intent(this, ride.id)) },
@@ -331,13 +324,12 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Re-reads everything the rider can change outside the app: notification access, runtime
-     * permissions, and the companion association. None of these notify on change, so a
+     * Re-reads everything the rider can change outside the app: runtime permissions and the
+     * companion association. None of these notify on change, so a
      * resume is the only reliable point to reconcile them.
      */
     override fun onResume() {
         super.onResume()
-        notificationAccessEnabled = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
         refreshRuntimePermissionState()
         backgroundLocationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
@@ -393,13 +385,6 @@ class MainActivity : ComponentActivity() {
     private fun openAppPermissionSettings() {
         launchExternalActivity(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri()),
-            R.string.settings_unavailable,
-        )
-    }
-
-    private fun openNotificationAccessSettings() {
-        launchExternalActivity(
-            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
             R.string.settings_unavailable,
         )
     }
@@ -632,7 +617,6 @@ class MainActivity : ComponentActivity() {
                         when (phase) {
                             StationaryTftPhase.Navigation -> "navigation display"
                             StationaryTftPhase.Calls -> "caller display"
-                            StationaryTftPhase.Notifications -> "notification icons"
                         }
                     }
                 },
@@ -680,10 +664,6 @@ class MainActivity : ComponentActivity() {
                         "While parked, did you see TEST CALLER ring, answer, clear, then show " +
                             "again as an outgoing call? The number should read 9876543210 — " +
                             "if it shows +919876543 the cluster is being sent too many digits."
-
-                    StationaryTftPhase.Notifications ->
-                        "While parked, did you see the Messages, Instagram and Gmail " +
-                            "notification icons appear one after another, each for a few seconds?"
                 }
                 return viewModel.awaitTftTestConfirmation(
                     "The Bluetooth stack accepted ${result.acceptedWrites} test writes. $prompt",

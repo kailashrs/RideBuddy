@@ -44,21 +44,6 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage"
         tools:node="remove" />
-    <queries>
-        <!-- The default SMS app is resolved at runtime, so it is matched by capability
-             rather than named; the rest are the packages the cluster has icons for. -->
-        <intent>
-            <action android:name="android.intent.action.SENDTO" />
-            <data android:scheme="smsto" />
-        </intent>
-        <package android:name="com.whatsapp" />
-        <package android:name="com.instagram.android" />
-        <package android:name="com.instagram.lite" />
-        <package android:name="com.facebook.katana" />
-        <package android:name="com.facebook.lite" />
-        <package android:name="com.twitter.android" />
-        <package android:name="com.google.android.gm" />
-    </queries>
 
     <application
         android:name=".RideBuddyApplication"
@@ -116,16 +101,6 @@
                 android:value="false" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-        </service>
-
-        <service
-            android:name=".service.BikeNotificationListenerService"
-            android:exported="false"
-            android:label="@string/notification_listener_label"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
 

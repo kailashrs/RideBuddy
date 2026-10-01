@@ -21,8 +21,8 @@ is an optional parked diagnostic that waits for expected GATT completions and
 asks the rider to visually confirm the response; it is not a substitute for
 broader live-vehicle validation.
 
-The current vehicle-display integration exposes fixed notification icons, not
-arbitrary notification or media text. Weather alerts use the Open-Meteo
+The vehicle display shows the phone's battery level; it does not show
+notification icons or notification text, although the OEM protocol defines icons. Weather alerts use the Open-Meteo
 forecast endpoint when a current riding location is available.
 Road-hazard alerts remain available for navigation providers that supply hazard
 events because turn-by-turn data alone does not expose a general hazard feed.
@@ -81,8 +81,7 @@ verification never receives release secrets or builds a signed release.
 ## Bike and call setup
 
 1. Open **Settings → Motorcycle Connection** and associate the motorcycle in Android's system companion-device picker.
-2. Enable notification access under **Settings → Alerts & notifications** for the per-app icons on the display. Calls do not need it: they arrive through Telecom.
-3. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
+2. Before relying on **TFT navigation output**, **Caller display**, or **TFT call controls**, run **Settings → Developer tools → Stationary TFT validation** and confirm the visible display states. Keep the motorcycle parked and never perform first protocol validation while riding.
 
 The key is supplied programmatically and is intentionally absent from source files and `AndroidManifest.xml`. Replacing an active key requires restarting the app.
 

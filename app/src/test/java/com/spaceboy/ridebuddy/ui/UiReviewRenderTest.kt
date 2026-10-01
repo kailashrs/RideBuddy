@@ -155,10 +155,10 @@ class UiReviewRenderTest {
             OnboardingScreen(
                 connectionState = BikeConnectionState.Disconnected, bikeAssociated = false,
                 nearbyDeviceAccessGranted = true, preciseLocationGranted = false,
-                notificationAccessEnabled = false, appNotificationPermissionGranted = false,
+                appNotificationPermissionGranted = false,
                 telemetryReceiving = false, authenticated = false, navigationConfigured = false,
                 onRequestNearbyDeviceAccess = {}, onRequestPreciseLocation = {}, onAssociateBike = {},
-                onOpenNotificationAccess = {}, onRequestAppNotificationPermission = {},
+                onRequestAppNotificationPermission = {},
                 onSetUpNavigation = {}, onComplete = {},
             )
         }
@@ -196,7 +196,7 @@ class UiReviewRenderTest {
     @Test fun settingsDialogs() {
         start()
         val settings = shell(configured.copy(selectedDestination = TopLevelDestination.Settings))
-        listOf("App notifications" to "dialog-supported-apps", "Theme" to "dialog-theme", "Keep detailed ride data" to "dialog-retention",
+        listOf("Theme" to "dialog-theme", "Keep detailed ride data" to "dialog-retention",
             "About" to "dialog-about", "Test the bike's display" to "dialog-display-test",
             "Captured packets" to "dialog-captured-packets").forEach { (row, name) ->
             both(name, settings) {

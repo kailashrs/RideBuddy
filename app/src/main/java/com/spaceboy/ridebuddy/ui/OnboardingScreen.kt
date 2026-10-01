@@ -18,7 +18,6 @@ import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material.icons.outlined.VerifiedUser
@@ -63,7 +62,6 @@ fun OnboardingScreen(
     bikeAssociated: Boolean,
     nearbyDeviceAccessGranted: Boolean,
     preciseLocationGranted: Boolean,
-    notificationAccessEnabled: Boolean,
     appNotificationPermissionGranted: Boolean,
     telemetryReceiving: Boolean,
     authenticated: Boolean,
@@ -71,7 +69,6 @@ fun OnboardingScreen(
     onRequestNearbyDeviceAccess: () -> Unit,
     onRequestPreciseLocation: () -> Unit,
     onAssociateBike: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
     onRequestAppNotificationPermission: () -> Unit,
     onSetUpNavigation: () -> Unit,
     onComplete: () -> Unit,
@@ -119,8 +116,6 @@ fun OnboardingScreen(
                             nearbyDeviceAccessGranted, onRequestNearbyDeviceAccess)
                         Permission(Icons.Outlined.LocationOn, "Precise location", "Maps each ride and powers navigation",
                             preciseLocationGranted, onRequestPreciseLocation)
-                        Permission(Icons.Outlined.Notifications, "Notification access", "Shows app notifications on the bike",
-                            notificationAccessEnabled, onOpenNotificationAccess)
                         Permission(Icons.Outlined.NotificationsActive, "Phone notifications", "Riding alerts on this phone",
                             appNotificationPermissionGranted, onRequestAppNotificationPermission)
                     }

@@ -53,7 +53,7 @@ Capture the Diagnostics export, Android version, device model, and a timestamped
 - Reconnecting to a bonded bike takes the stored-acceptance path (no challenge wait).
 - Losing the link mid-ride reconnects within the three-attempt cycle and the ride continues.
 - With the bike switched off, attempts stop after three with "Couldn't connect."
-- Stationary test: navigation, call screen and notification icons all appear.
+- Stationary test: navigation and the call screen both appear.
 - Handlebar GO starts a staged route and EXIT ends it with the phone stowed.
 - The dashboard battery reading updates on a long ride with no notifications.
 - A saved contact's name, not the number, appears for an incoming call.

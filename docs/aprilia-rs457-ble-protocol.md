@@ -415,7 +415,8 @@ The bundled `assets/ble_characteristic.json` lists 42 fixed maneuver labels with
 
 ## Phone notifications and calls
 
-`8110` only communicates fixed application-event icons. The OEM mapping is:
+`8110` only communicates fixed application-event icons. The RS 457 cluster does not draw them:
+in a 2026-10-01 test it acknowledged the packets and showed only the battery byte. The OEM mapping is:
 
 | Application | hidden/off | shown/on |
 |---|---:|---:|

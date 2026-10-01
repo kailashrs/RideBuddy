@@ -367,14 +367,13 @@ Questions the source cannot answer. Each needs a parked bike.
 
 ## 1.1 decisions
 
-### D9 — Notification icons follow the OEM app
+### D9 — The phone battery level, and no notification icons
 
-Shown on every post and hidden when the last notification behind the icon is dismissed; never
-gated by navigation or calls, and never timed out. Unlike the OEM app, every live notification is
-tracked, so dismissing one of several keeps the icon, and icons are relit when the bike connects.
-The battery level travels in the same packet, so a battery change relights the current icons
-rather than sending the OEM's bare event 0, which clears them. WhatsApp lights the Messages icon;
-the OEM app sends nothing for it.
+The RS 457 cluster draws the battery byte of the OEM app-event packet on `8110` but not the icon
+byte: on 2026-10-01 the bike acknowledged icon packets (for example `0B 07 15 00`) while the
+display showed only the battery level. The notification listener and its per-app settings were
+removed. The packet is still sent with event 0 — the OEM's own no-icon value — on connect, when
+the cluster reports it has started, and when the battery level changes, at most once a minute.
 
 ### D10 — The cluster is driven from its desired state
 

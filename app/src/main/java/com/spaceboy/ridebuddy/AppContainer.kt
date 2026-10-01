@@ -21,7 +21,7 @@ import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
 import com.spaceboy.ridebuddy.core.companion.BikeCompanionManager
 import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
-import com.spaceboy.ridebuddy.service.NotificationIcons
+import com.spaceboy.ridebuddy.service.PhoneBatteryReporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
 import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
@@ -112,8 +112,8 @@ class AppContainer(context: Context) {
             ?.coerceIn(0, 100)
             ?: 0
     }
-    val stationaryTftValidator = StationaryTftValidator(bikeConnection, phoneBatteryPercent)
-    internal val notificationIcons = NotificationIcons(bikeConnection, appSettings.settings, phoneBatteryPercent)
+    val stationaryTftValidator = StationaryTftValidator(bikeConnection)
+    private val phoneBatteryReporter = PhoneBatteryReporter(bikeConnection, phoneBatteryPercent)
     val ridingAlertMonitor = RidingAlertMonitor(context, bikeConnection, rideRecorder, appSettings, applicationScope)
     val weatherAlertProvider = WeatherAlertProvider(
         rideLocationTracker,
@@ -140,7 +140,7 @@ class AppContainer(context: Context) {
                 .distinctUntilChanged()
                 .collect(connectionEventJournal::setPersistenceEnabled)
         }
-        notificationIcons.start(appContext, applicationScope)
+        phoneBatteryReporter.start(appContext, applicationScope)
         rideRecorder.start()
         rideHistoryMaintenance.start()
         ridingAlertMonitor.start()

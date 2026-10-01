@@ -217,7 +217,7 @@ sealed interface BikeControlEvent {
     /**
      * The cluster has restarted and wants the phone's state again.
      *
-     * Answered by rewriting the current call state and clearing the notification icons.
+     * Answered by resending everything the cluster shows, and the phone battery level.
      * This arrives without a BLE reconnect, so it is a different signal from
      * [BikeConnectionState.Connected] — the link never dropped, but the display forgot
      * everything it was showing.

@@ -53,14 +53,14 @@ class OnboardingCopyTest {
     }
 
     @Test
-    fun notificationAccessIsExplainedForAppAlertsAndNotCallControl() {
+    fun permissionsAskOnlyForPhoneNotificationsNotNotificationAccess() {
         bikeIsPaired = true
         show()
         repeat(1) { composeRule.onNodeWithText("Continue").performClick() }
 
-        composeRule.onNodeWithText("Notification access").assertIsDisplayed()
-        composeRule.onNodeWithText("Shows app notifications on the bike").assertIsDisplayed()
-        composeRule.onNodeWithText("Allow notification access to display incoming caller names, call controls, and weather alerts directly on your motorcycle screen.").assertDoesNotExist()
+        composeRule.onNodeWithText("Phone notifications").assertIsDisplayed()
+        composeRule.onNodeWithText("Riding alerts on this phone").assertIsDisplayed()
+        composeRule.onNodeWithText("Notification access").assertDoesNotExist()
         capture("onboarding-permissions")
     }
 
@@ -73,7 +73,6 @@ class OnboardingCopyTest {
                         bikeAssociated = bikeIsPaired,
                         nearbyDeviceAccessGranted = true,
                         preciseLocationGranted = false,
-                        notificationAccessEnabled = false,
                         appNotificationPermissionGranted = false,
                         telemetryReceiving = false,
                         authenticated = false,
@@ -81,7 +80,6 @@ class OnboardingCopyTest {
                         onRequestNearbyDeviceAccess = {},
                         onRequestPreciseLocation = {},
                         onAssociateBike = {},
-                        onOpenNotificationAccess = {},
                         onRequestAppNotificationPermission = {},
                         onSetUpNavigation = {},
                         onComplete = {},
