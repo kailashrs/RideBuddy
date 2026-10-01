@@ -9,6 +9,7 @@ import com.spaceboy.ridebuddy.core.companion.BikeAssociationState
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
 import com.spaceboy.ridebuddy.data.ActiveRide
 import com.spaceboy.ridebuddy.data.AppSettings
+import com.spaceboy.ridebuddy.data.db.Destination
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
 import com.spaceboy.ridebuddy.data.LiveRideMetrics
@@ -59,6 +60,7 @@ data class MainScreenState(
     val insights: RideInsights,
     val insightPeriod: InsightPeriod,
     val guidance: GuidanceState,
+    val destinations: List<Destination>,
     val settings: AppSettings,
     val bikeAssociation: BikeAssociationState,
     val backgroundLocationGranted: Boolean,
@@ -82,10 +84,15 @@ data class MainScreenActions(
     val onTestNavigationApiKey: () -> Unit,
     val onDisconnectBike: () -> Unit,
     val onEndRide: () -> Unit,
-    val onStartNavigation: (String) -> Unit,
+    val onNavigateTo: (Destination) -> Unit,
+    val onOpenGoogleMaps: () -> Unit,
+    /** Names a place: saves a recent one, or renames one already saved. */
+    val onRenameDestination: (id: Long, name: String) -> Unit,
+    val onDeleteDestination: (id: Long) -> Unit,
+    val onClearRecentDestinations: () -> Unit,
+    val onRetryShare: () -> Unit,
     val onOpenActiveNavigation: () -> Unit,
     val onStopNavigation: () -> Unit,
-    val onSharedDestinationHandled: () -> Unit,
     val onCancelNavigationStart: () -> Unit,
     val onInsightPeriodSelected: (InsightPeriod) -> Unit,
     val onClearRideHistory: () -> Unit,

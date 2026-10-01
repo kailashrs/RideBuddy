@@ -24,6 +24,8 @@ import android.os.BatteryManager
 import com.spaceboy.ridebuddy.service.PhoneBatteryReporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
+import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
+import com.spaceboy.ridebuddy.data.DestinationRepository
 import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
 import com.spaceboy.ridebuddy.data.db.bridgeLegacyRides
 import com.spaceboy.ridebuddy.data.db.bridgeLegacyTelemetry
@@ -96,10 +98,21 @@ class AppContainer(context: Context) {
     private val rideHistoryMaintenance = RideHistoryMaintenance(rideRepository, appSettings, applicationScope)
     val navigationApiKey = NavigationApiKey(SecureNavigationApiKeyStore(context), applicationScope)
     val destinationParser = DestinationParser(rideLocationLabeler)
+    val destinationRepository = DestinationRepository(
+        database.destinations(),
+        applicationScope,
+        rideLocationLabeler::addressFirstLine,
+    )
     val clusterDisplay = ClusterDisplay(bikeConnection, appSettings.settings, applicationScope)
 
     /** The hazard alert is raised before the reroute reaches the cluster, so it owns the rows first. */
     private val guidanceOutput = object : GuidanceOutput by clusterDisplay {
+        /** A trip counts once guidance starts, so an abandoned preview does not make a place frequent. */
+        override fun started(destination: NavigationDestination) {
+            clusterDisplay.started(destination)
+            applicationScope.launch { destinationRepository.recordTrip(destination) }
+        }
+
         override fun rerouting() {
             if (ridingAlertMonitor.navigationHazard("The route is being recalculated; check for changed road conditions")) {
                 clusterDisplay.presentTextAlert("ROUTE ALERT. Recalculating. Check road conditions.")

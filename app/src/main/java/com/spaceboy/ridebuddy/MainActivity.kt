@@ -48,6 +48,8 @@ import com.spaceboy.ridebuddy.ui.OnboardingScreen
 import com.spaceboy.ridebuddy.ui.labelResource
 import com.spaceboy.ridebuddy.ui.screens.MoreSettingsActions
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
+import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
+import com.spaceboy.ridebuddy.data.db.Destination
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -127,11 +129,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
             val settings = viewModel.settings.collectAsStateWithLifecycle().value
-            val autoStartSharedDestination = uiState.autoStartSharedDestination
-            LaunchedEffect(autoStartSharedDestination?.requestId, uiState.navigationKey.isLoading) {
-                if (!uiState.navigationKey.isLoading) autoStartSharedDestination?.let { request ->
+            val pendingShare = uiState.pendingShare
+            LaunchedEffect(pendingShare?.requestId, uiState.navigationKey.isLoading) {
+                if (!uiState.navigationKey.isLoading) pendingShare?.let { share ->
                     lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                        startNavigation(request.destination, request.requestId)
+                        startShare(share.destination, share.requestId)
                     }
                 }
             }
@@ -268,6 +270,7 @@ class MainActivity : ComponentActivity() {
                 insights = viewModel.insights.collectAsStateWithLifecycle().value,
                 insightPeriod = viewModel.selectedInsightPeriod.collectAsStateWithLifecycle().value,
                 guidance = viewModel.guidance.collectAsStateWithLifecycle().value,
+                destinations = viewModel.destinations.collectAsStateWithLifecycle().value,
                 settings = settings,
                 bikeAssociation = bikeAssociation,
                 backgroundLocationGranted = backgroundLocationGranted,
@@ -287,13 +290,14 @@ class MainActivity : ComponentActivity() {
         onTestNavigationApiKey = viewModel::testNavigationApiKey,
         onDisconnectBike = { BikeConnectionService.disconnect(this) },
         onEndRide = { BikeConnectionService.endRide(this) },
-        onStartNavigation = ::startNavigation,
+        onNavigateTo = ::navigateTo,
+        onOpenGoogleMaps = ::openGoogleMaps,
+        onRenameDestination = viewModel::renameDestination,
+        onDeleteDestination = viewModel::deleteDestination,
+        onClearRecentDestinations = viewModel::clearRecentDestinations,
+        onRetryShare = viewModel::retryFailedShare,
         onOpenActiveNavigation = ::openActiveNavigation,
         onStopNavigation = ::stopNavigation,
-        onSharedDestinationHandled = {
-            navigationStartJob?.cancel()
-            viewModel.clearSharedDestination()
-        },
         onCancelNavigationStart = ::cancelNavigationStart,
         onInsightPeriodSelected = viewModel::selectInsightPeriod,
         onClearRideHistory = viewModel::clearRideHistory,
@@ -423,76 +427,40 @@ class MainActivity : ComponentActivity() {
         // Always queued, never parked in the field behind a confirmation sheet: the route
         // preview is now the prompt, so a second one before it would ask twice. The setting
         // decides whether that preview is skipped too, at the launch below.
-        viewModel.queueAutoStartSharedDestination(destination)
+        viewModel.queueShare(destination)
     }
 
     private fun requiredNearbyDevicePermissions(): Array<String> =
         arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
 
-    /** Resolves the link before opening the route preview. */
-    private fun startNavigation(rawDestination: String) {
-        viewModel.uiState.value.autoStartSharedDestination
-            ?.requestId
-            ?.let(viewModel::completeAutoStartSharedDestination)
-        lifecycleScope.launch { startNavigation(rawDestination, autoStartRequestId = null) }
-    }
-
     /**
-     * The single navigation-start path. A newer request always cancels the one in flight, and an
-     * auto-start request that has been superseded or consumed elsewhere is abandoned silently.
+     * Turns a share into a route preview. A newer share always cancels the one in flight, and a
+     * share that has been superseded or consumed elsewhere is abandoned silently.
      */
-    private suspend fun startNavigation(rawDestination: String, autoStartRequestId: Long?) {
+    private suspend fun startShare(rawDestination: String, requestId: Long) {
         val currentJob = currentCoroutineContext().job
         navigationStartJob?.takeIf { it !== currentJob }?.cancel()
         navigationStartJob = currentJob
 
-        fun autoStartSuperseded(): Boolean = autoStartRequestId != null &&
-            viewModel.uiState.value.autoStartSharedDestination?.requestId != autoStartRequestId
-
-        fun abandon(errorMessage: String? = null) {
-            autoStartRequestId?.let { viewModel.restoreAutoStartSharedDestination(it, errorMessage) }
-        }
+        fun superseded(): Boolean = viewModel.uiState.value.pendingShare?.requestId != requestId
 
         var navigationStartAttemptId: Long? = null
         try {
-            // The field and share handler constrain input; the parser reports invalid links.
-            val destination = rawDestination.trim()
-            if (autoStartSuperseded()) return
+            if (superseded()) return
             navigationStartAttemptId = viewModel.beginNavigationStart()
-
-            if (viewModel.uiState.value.navigationKey.isLoading) {
-                abandon()
-                viewModel.showMessage("Navigation setup is still loading")
+            navigationKeyProblem()?.let { problem ->
+                viewModel.failShare(requestId, problem)
                 return
             }
-            if (!viewModel.uiState.value.navigationKey.isConfigured) {
-                abandon()
-                viewModel.openNavigationSettings()
-                viewModel.showMessage("Add a Google Navigation key to start a route.")
-                return
-            }
-
-            val parsed = appContainer.destinationParser.parse(destination)
-            if (autoStartSuperseded()) return
+            val parsed = appContainer.destinationParser.parse(rawDestination.trim())
+            if (superseded()) return
             parsed.fold(
                 onSuccess = { place ->
-                    startActivity(
-                        NavigationActivity.intent(
-                            this, place,
-                            // A share only skips the preview when the rider opted into that;
-                            // otherwise it still stops on the preview for a Go.
-                            autoStartGuidance = autoStartRequestId != null &&
-                                viewModel.settings.value.autoStartSharedDestinations,
-                        ),
-                    )
-                    autoStartRequestId?.let(viewModel::completeAutoStartSharedDestination)
-                    viewModel.clearSharedDestination()
+                    // A share only skips the preview's Go when the rider opted into that.
+                    openPreview(place, autoStartGuidance = viewModel.settings.value.autoStartSharedDestinations)
+                    viewModel.completeShare(requestId)
                 },
-                onFailure = { error ->
-                    val message = error.message ?: "Could not read that destination"
-                    abandon(message)
-                    viewModel.showMessage(message)
-                },
+                onFailure = { error -> viewModel.failShare(requestId, error.message ?: "Could not read that destination") },
             )
         } finally {
             navigationStartAttemptId?.let(viewModel::finishNavigationStart)
@@ -500,15 +468,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Backs out of a route lookup. An auto-started share is handed back to the destination field
-     * rather than discarded, so the rider still has what they shared.
-     */
+    /** A recent or saved place: its coordinates are known, so the preview opens straight away. */
+    private fun navigateTo(destination: Destination) {
+        navigationKeyProblem()?.let { problem ->
+            viewModel.showMessage(problem)
+            return
+        }
+        openPreview(
+            NavigationDestination(destination.latitude, destination.longitude, destination.savedName ?: destination.placeName),
+            autoStartGuidance = false,
+        )
+    }
+
+    /** Why a route cannot start yet, or null when it can. Opens the key setup when that is why. */
+    private fun navigationKeyProblem(): String? {
+        val key = viewModel.uiState.value.navigationKey
+        return when {
+            key.isLoading -> "Navigation setup is still loading"
+            !key.isConfigured -> {
+                viewModel.openNavigationSettings()
+                "Add a Google Navigation key to start a route."
+            }
+            else -> null
+        }
+    }
+
+    private fun openPreview(place: NavigationDestination, autoStartGuidance: Boolean) {
+        runCatching { startActivity(NavigationActivity.intent(this, place, autoStartGuidance = autoStartGuidance)) }
+            .onFailure { viewModel.showMessage(getString(R.string.navigation_map_unavailable)) }
+    }
+
+    /** Shares are the way in for a new place, so this opens Maps for the rider to find and share one. */
+    private fun openGoogleMaps() {
+        val maps = Intent(Intent.ACTION_VIEW, "https://www.google.com/maps".toUri())
+        runCatching { startActivity(Intent(maps).setPackage(GoogleMapsPackage)) }
+            .recoverCatching { startActivity(maps) }
+            .onFailure { viewModel.showMessage("Google Maps isn't available on this phone") }
+    }
+
+    /** Backs out of a route lookup; the share is dropped, since backing out is the rider's answer. */
     private fun cancelNavigationStart() {
         navigationStartJob?.cancel()
-        viewModel.uiState.value.autoStartSharedDestination
-            ?.requestId
-            ?.let { requestId -> viewModel.restoreAutoStartSharedDestination(requestId) }
+        viewModel.uiState.value.pendingShare?.requestId?.let(viewModel::completeShare)
     }
 
     /** Brings the map back for guidance that is already running in the background. */
@@ -719,6 +720,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val GoogleMapsPackage = "com.google.android.apps.maps"
         const val NotificationPermission = "android.permission.POST_NOTIFICATIONS"
         val LocationPermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,

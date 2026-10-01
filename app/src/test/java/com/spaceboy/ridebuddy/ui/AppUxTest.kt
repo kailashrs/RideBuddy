@@ -247,6 +247,18 @@ class AppUxTest {
         capture("app-navigation-large-text")
     }
 
+    @Test fun retrying_a_failed_share_happens_before_the_message_is_cleared() {
+        val calls = mutableListOf<String>()
+        compose.setContent { Rs457Theme(dynamicColor = false) {
+            val ui = MainUiState(transientMessage = "Could not read that destination", failedShare = "https://maps.app.goo.gl/x")
+            val actions = AppUiFixture.actions().copy(onRetryShare = { calls += "retry" }, onMessageShown = { calls += "shown" })
+            MainScreen(ui, actions) { modifier -> MainScreenContent(modifier, AppUiFixture.state(ui), actions) }
+        } }
+        compose.onNodeWithText("Retry").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("retry", "shown"), calls)
+    }
+
     private fun capture(name: String, dialog: Boolean = false) {
         val node = if (dialog) compose.onNode(isDialog()) else compose.onRoot()
         val bitmap = node.captureToImage().asAndroidBitmap()

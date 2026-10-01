@@ -27,7 +27,21 @@ class RideLocationLabeler(val geocoder: Geocoder) {
     suspend fun placeName(latitude: Double, longitude: Double): String? =
         geocoder.awaitAddress(GeocoderTimeoutMillis) { listener -> getFromLocation(latitude, longitude, 1, listener) }
             ?.shortPlaceLabel()
+
+    /**
+     * The first line of the address at a point — "12 Anna Salai" rather than the area around it —
+     * for naming a destination, which is one door rather than a neighbourhood.
+     */
+    suspend fun addressFirstLine(latitude: Double, longitude: Double): String? =
+        geocoder.awaitAddress(GeocoderTimeoutMillis) { listener -> getFromLocation(latitude, longitude, 1, listener) }
+            ?.firstAddressLine()
 }
+
+internal fun Address.firstAddressLine(): String? =
+    featureName?.takeIf { name -> name.any(Char::isLetter) && name != thoroughfare }
+        ?: listOfNotNull(subThoroughfare, thoroughfare).filter(String::isNotBlank).joinToString(" ").takeIf(String::isNotBlank)
+        ?: getAddressLine(0)?.substringBefore(',')?.trim()?.takeIf(String::isNotBlank)
+        ?: shortPlaceLabel()
 
 /**
  * The first address from one of the listener-based [Geocoder] calls, or null on error, no

@@ -9,18 +9,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BluetoothConnected
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.ListItem
@@ -28,7 +25,6 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import com.spaceboy.ridebuddy.ui.components.SectionHeader
 import androidx.compose.material.icons.outlined.Directions
-import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -38,17 +34,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -65,7 +58,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
-import com.spaceboy.ridebuddy.MaxDestinationInputLength
+import com.spaceboy.ridebuddy.data.db.Destination
 import com.spaceboy.ridebuddy.R
 import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.navigation.GuidanceState
@@ -92,8 +85,6 @@ import kotlin.math.roundToInt
 @Composable
 fun LiveScreen(
     modifier: Modifier = Modifier,
-    sharedDestination: String?,
-    sharedDestinationError: String?,
     isNavigationStarting: Boolean,
     connectionState: BikeConnectionState,
     bikeAssociated: Boolean,
@@ -105,26 +96,20 @@ fun LiveScreen(
     onConnectBike: () -> Unit,
     onDisconnectBike: () -> Unit,
     onEndRide: () -> Unit,
-    onStartNavigation: (String) -> Unit,
+    destinations: List<Destination>,
+    onNavigateTo: (Destination) -> Unit,
+    onOpenGoogleMaps: () -> Unit,
+    onRenameDestination: (id: Long, name: String) -> Unit,
+    onDeleteDestination: (id: Long) -> Unit,
     onOpenActiveNavigation: () -> Unit,
     onStopNavigation: () -> Unit,
-    onSharedDestinationHandled: () -> Unit,
     onCancelNavigationStart: () -> Unit,
     onRideSelected: (Ride) -> Unit,
 ) {
     val locale = LocalConfiguration.current.locales[0]
-    // Keep edits when a share is consumed; a newer share is applied by the effect below.
-    var destination by rememberSaveable { mutableStateOf(sharedDestination.orEmpty()) }
     var showLiveDetails by rememberSaveable { mutableStateOf(false) }
-    // Applies a share that arrives while this screen is already composed; the initial value above
-    // covers first composition and state restore. Blank is ignored rather than assigned, so
-    // clearing the share leaves the field alone.
-    LaunchedEffect(sharedDestination, sharedDestinationError) {
-        if (!sharedDestination.isNullOrBlank()) {
-            destination = sharedDestination
-            showLiveDetails = false
-        }
-    }
+    // A share that arrives while the details sheet is open should not open its preview behind it.
+    LaunchedEffect(isNavigationStarting) { if (isNavigationStarting) showLiveDetails = false }
 
     Column(
         modifier = modifier
@@ -152,45 +137,12 @@ fun LiveScreen(
         Column {
             SectionHeader("Navigate")
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (guidance.active) {
+                if (guidance.active) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         ActiveGuidance(guidance, units, onStopNavigation, onOpenActiveNavigation)
-                    } else {
-                        OutlinedTextField(
-                            value = destination,
-                            onValueChange = { value ->
-                                if (sharedDestination != null) onSharedDestinationHandled()
-                                destination = value.take(MaxDestinationInputLength)
-                            },
-                            label = { Text("Google Maps link") },
-                            placeholder = { Text("Paste a link") },
-                            leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
-                            trailingIcon = if (destination.isNotBlank()) {
-                                {
-                                    IconButton(onClick = {
-                                        destination = ""
-                                        if (sharedDestination != null) onSharedDestinationHandled()
-                                    }) { Icon(Icons.Outlined.Close, contentDescription = "Clear") }
-                                }
-                            } else null,
-                            isError = sharedDestinationError != null,
-                            supportingText = sharedDestinationError?.let { message -> { Text(message) } },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Button(
-                            onClick = {
-                                if (sharedDestinationError != null) onSharedDestinationHandled()
-                                onStartNavigation(destination)
-                            },
-                            enabled = destination.isNotBlank(),
-                            modifier = Modifier.align(Alignment.End),
-                        ) {
-                            Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Start navigation")
-                        }
                     }
+                } else {
+                    DestinationList(destinations, onNavigateTo, onOpenGoogleMaps, onRenameDestination, onDeleteDestination)
                 }
             }
         }

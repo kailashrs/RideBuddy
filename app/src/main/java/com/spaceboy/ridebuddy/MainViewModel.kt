@@ -9,6 +9,8 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
+import com.spaceboy.ridebuddy.data.DestinationRepository
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
 import com.spaceboy.ridebuddy.core.navigation.NavigationController
@@ -68,11 +70,12 @@ class MainViewModel internal constructor(
     private val rideRepository: RideRepository,
     navigationController: NavigationController,
     private val appSettings: AppSettingsRepository,
+    private val destinationRepository: DestinationRepository,
 ) : ViewModel() {
     private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
     private val restoredSharedDestinationState = sharedDestinationStateStore.restore()
     private val sharedDestinationRequestIds = AtomicLong(
-        restoredSharedDestinationState.autoStartSharedDestination?.requestId ?: 0L,
+        restoredSharedDestinationState.pendingShare?.requestId ?: 0L,
     )
     private val navigationStartAttemptIds = AtomicLong()
     private val autoConnectAttempted = AtomicBoolean(false)
@@ -235,45 +238,51 @@ class MainViewModel internal constructor(
     }
 
     /**
-     * A destination to start navigating without further input. Only reached when the rider
-     * has opted into automatic starts. Each request gets a fresh id so a late result cannot
-     * be mistaken for a newer request's.
+     * Queues a shared destination for the route preview. Each share gets a fresh id so a late
+     * result cannot be mistaken for a newer share's.
      */
-    fun queueAutoStartSharedDestination(value: String) {
+    fun queueShare(value: String) {
         val destination = value.normalizedDestinationInput() ?: return
-        val request = AutoStartSharedDestinationRequest(
-            requestId = sharedDestinationRequestIds.incrementAndGet(),
-            destination = destination,
-        )
-        updateSharedDestinationState { it.withAutoStartSharedDestination(request) }
+        val share = PendingShare(requestId = sharedDestinationRequestIds.incrementAndGet(), destination = destination)
+        updateSharedDestinationState { it.withPendingShare(share) }
     }
 
-    fun completeAutoStartSharedDestination(requestId: Long) {
-        updateSharedDestinationState { it.withCompletedAutoStartSharedDestination(requestId) }
+    fun completeShare(requestId: Long) {
+        updateSharedDestinationState { it.withCompletedShare(requestId) }
     }
 
-    /**
-     * An automatic start failed. Puts the destination back in the manual field with the
-     * reason, so the rider can retry rather than losing the share.
-     */
-    fun restoreAutoStartSharedDestination(requestId: Long, errorMessage: String? = null) {
-        updateSharedDestinationState { it.withRestoredAutoStartSharedDestination(requestId, errorMessage) }
+    /** Reports a share that did not become a route; the snackbar offers to try it again. */
+    fun failShare(requestId: Long, message: String) {
+        updateSharedDestinationState { it.withFailedShare(requestId, message) }
     }
 
-    fun clearSharedDestination() {
-        updateSharedDestinationState {
-            it.copy(
-                sharedDestination = null,
-                sharedDestinationError = null,
-                autoStartSharedDestination = null,
-                isNavigationStarting = false,
-                navigationStartAttemptId = null,
-            )
+    fun retryFailedShare() {
+        mutableUiState.value.failedShare?.let(::queueShare)
+    }
+
+    val destinations = destinationRepository.destinations
+
+    fun saveDestination(destination: NavigationDestination, name: String) {
+        viewModelScope.launch { destinationRepository.save(destination, name) }
+    }
+
+    fun renameDestination(id: Long, name: String) {
+        viewModelScope.launch { destinationRepository.rename(id, name) }
+    }
+
+    fun deleteDestination(id: Long) {
+        viewModelScope.launch { destinationRepository.delete(id) }
+    }
+
+    fun clearRecentDestinations() {
+        viewModelScope.launch {
+            destinationRepository.clearRecents()
+            showMessage("Recent destinations cleared")
         }
     }
 
     fun clearTransientMessage() {
-        mutableUiState.update { it.copy(transientMessage = null) }
+        mutableUiState.update { it.copy(transientMessage = null, failedShare = null) }
     }
 
     fun showMessage(message: String) {
@@ -323,6 +332,7 @@ class MainViewModel internal constructor(
                     rideRepository = container.rideRepository,
                     navigationController = container.navigationController,
                     appSettings = container.appSettings,
+                    destinationRepository = container.destinationRepository,
                 )
             }
         }

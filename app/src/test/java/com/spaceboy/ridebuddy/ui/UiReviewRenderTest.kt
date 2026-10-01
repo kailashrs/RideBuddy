@@ -4,6 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -122,7 +125,32 @@ class UiReviewRenderTest {
             AppUiFixture.state(it).copy(guidance = GuidanceState(active = true, instruction = "Turn left onto Anna Salai",
                 distanceToManeuverMetres = 350, distanceToDestinationMetres = 12_400, timeToDestinationSeconds = 1_500))
         })
-        both("live-shared-error", shell(base.copy(sharedDestination = "https://maps.app.goo.gl/abc", sharedDestinationError = "That link doesn't contain a destination.")))
+        both("live-no-destinations", shell(base) { AppUiFixture.state(it).copy(destinations = emptyList()) })
+    }
+
+    @Test fun routePreviewHeading() {
+        start()
+        for (saved in listOf(false, true)) {
+            both("preview-${if (saved) "saved" else "unsaved"}", {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
+                    androidx.compose.material3.ElevatedCard(
+                        Modifier.padding(16.dp),
+                        shape = androidx.compose.material3.MaterialTheme.shapes.extraLarge,
+                    ) {
+                        androidx.compose.foundation.layout.Column(
+                            Modifier.padding(20.dp),
+                            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                        ) {
+                            com.spaceboy.ridebuddy.ui.screens.RoutePreviewTitle(
+                                if (saved) "Home" else "Phoenix Marketcity", saved = saved, onSave = {},
+                            )
+                            androidx.compose.material3.Text("12.4 km • 28 min")
+                            androidx.compose.material3.Button(onClick = {}, Modifier.fillMaxWidth()) { androidx.compose.material3.Text("Go") }
+                        }
+                    }
+                }
+            })
+        }
     }
 
     @Test fun liveSheet() {

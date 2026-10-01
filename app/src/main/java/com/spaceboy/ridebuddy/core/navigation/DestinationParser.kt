@@ -40,7 +40,7 @@ class DestinationParser(private val labeler: RideLocationLabeler) {
         val namedDestination = if (destination.title == "Destination") {
             // Naming a pin is optional; do not hold up a valid route for a slow lookup.
             val name = withTimeoutOrNull(1_500L) {
-                labeler.placeName(destination.latitude, destination.longitude)
+                labeler.addressFirstLine(destination.latitude, destination.longitude)
             }
             destination.copy(title = name ?: destination.title)
         } else destination
