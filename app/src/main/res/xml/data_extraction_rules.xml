@@ -12,7 +12,8 @@
 
     Two things go:
 
-      ride_history.db      ride summaries. Not ride_samples.db — the sample series is around
+      ridebuddy.db         ride summaries and saved and recent destinations. Not
+                           ride_telemetry_raw.db — the sample series is around
                            half a megabyte for every hour ridden against a 25 MB allowance for
                            the whole app, so it would blow the budget in a couple of days and
                            then stop backing anything up at all.
@@ -28,7 +29,7 @@
 -->
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
-        <include domain="database" path="ride_history.db" />
+        <include domain="database" path="ridebuddy.db" />
         <include domain="file" path="datastore/settings.json" />
     </cloud-backup>
 
@@ -38,7 +39,7 @@
         means there is one thing to reason about rather than two.
     -->
     <device-transfer>
-        <include domain="database" path="ride_history.db" />
+        <include domain="database" path="ridebuddy.db" />
         <include domain="file" path="datastore/settings.json" />
     </device-transfer>
 </data-extraction-rules>

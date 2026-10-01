@@ -23,8 +23,8 @@ import com.spaceboy.ridebuddy.core.companion.BikeConnectionDemandController
 import android.os.BatteryManager
 import com.spaceboy.ridebuddy.service.PhoneBatteryReporter
 import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
-import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
-import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
+import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
+import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.AppSettingsRepository
@@ -74,7 +74,8 @@ class AppContainer(context: Context) {
     )
     val rideLocationTracker = RideLocationTracker(context)
     private val rideLocationLabeler = RideLocationLabeler(context)
-    val rideRepository = RideRepository(RideHistoryDatabase.open(context), RideSamplesDatabase.open(context), applicationScope)
+    private val database = RideBuddyDatabase.open(context)
+    val rideRepository = RideRepository(database, RawTelemetryDatabase.open(context), applicationScope)
     val bikeCompanionManager = BikeCompanionManager(context, protectionAcceptanceStore, bikeIdentityRepository)
     val rideRecorder = RideRecorder(
         bikeConnection,

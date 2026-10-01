@@ -11,7 +11,7 @@ they talk through `StateFlow`s and a few constructor-injected interfaces.
 | Phone battery | `service/PhoneBatteryReporter` | The OEM app-event packet on `8110` with no event: sent on connect, on a cluster restart, and on a level change at most once a minute. |
 | Navigation | `core/navigation/NavigationController` | Owns the Navigation SDK navigator and the route: prepare, start (phone Go or handlebar GO), skip, stop (phone or handlebar EXIT), arrival, and stop on link loss. The map screen is a view of it. |
 | Calls | `service/RideBuddyInCallService` | Reads calls from Telecom and hands them to `ClusterDisplay`, which also acts on the handlebar answer/reject. |
-| Rides | `data/RideRecorder`, `data/RideRepository` | Detects and records rides from telemetry. Summaries live in `ride_history.db` (backed up); each ride's samples are one gzipped ProtoBuf blob in `ride_samples.db` (not backed up). |
+| Rides | `data/RideRecorder`, `data/RideRepository` | Detects and records rides from telemetry. Summaries live in `ridebuddy.db` (backed up) alongside recent and saved destinations (`data/DestinationRepository`); each ride's samples are one gzipped ProtoBuf blob in `ride_telemetry_raw.db` (not backed up). |
 | Settings | `data/AppSettingsRepository` | One `@Serializable` value in a DataStore (`settings.json`, backed up). Link state — protection acceptance, bike identity, connection demand — is a second DataStore (`link_state.json`, not backed up). |
 
 ## Schema versions

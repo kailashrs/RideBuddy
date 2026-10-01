@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "3155b2d69a3256ced7e7d7d54016c90e",
+    "identityHash": "0fdb69bcb90e297be6146ca0ba14eb52",
     "entities": [
       {
         "tableName": "rides",
@@ -135,11 +135,63 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "destinations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `placeName` TEXT NOT NULL, `savedName` TEXT, `tripCount` INTEGER NOT NULL, `lastTripAtMillis` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeName",
+            "columnName": "placeName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedName",
+            "columnName": "savedName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "tripCount",
+            "columnName": "tripCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastTripAtMillis",
+            "columnName": "lastTripAtMillis",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3155b2d69a3256ced7e7d7d54016c90e')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0fdb69bcb90e297be6146ca0ba14eb52')"
     ]
   }
 }

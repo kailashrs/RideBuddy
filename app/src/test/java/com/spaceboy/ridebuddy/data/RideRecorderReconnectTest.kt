@@ -2,8 +2,8 @@ package com.spaceboy.ridebuddy.data
 
 import androidx.room.Room
 import com.spaceboy.ridebuddy.InMemoryDataStore
-import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
-import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
+import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
+import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
 import com.spaceboy.ridebuddy.domain.BikeConnectionTarget
 import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.core.location.RideLocationLabeler
@@ -47,8 +47,8 @@ class RideRecorderReconnectTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bike = RecordingBikeConnection()
         val repository = RideRepository(
-            Room.inMemoryDatabaseBuilder(context, RideHistoryDatabase::class.java).build(),
-            Room.inMemoryDatabaseBuilder(context, RideSamplesDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RideBuddyDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RawTelemetryDatabase::class.java).build(),
             scope,
         )
         val recorder = RideRecorder(bike, repository,
@@ -96,8 +96,8 @@ class RideRecorderReconnectTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bike = RecordingBikeConnection()
         val repository = RideRepository(
-            Room.inMemoryDatabaseBuilder(context, RideHistoryDatabase::class.java).build(),
-            Room.inMemoryDatabaseBuilder(context, RideSamplesDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RideBuddyDatabase::class.java).build(),
+            Room.inMemoryDatabaseBuilder(context, RawTelemetryDatabase::class.java).build(),
             scope,
         )
         val recorder = RideRecorder(bike, repository,

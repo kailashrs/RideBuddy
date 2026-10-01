@@ -125,6 +125,8 @@ restore cannot bring a deleted ride back.
 
 **Superseded in 1.1.** Summaries and samples are separate Room databases, so the backup rules
 include `ride_history.db` directly and leave `ride_samples.db` out; the snapshot file is gone.
+In 1.2 the files were renamed: summaries now share `ridebuddy.db` with destinations, and samples
+live in `ride_telemetry_raw.db`.
 
 
 The database cannot be backed up. Auto Backup allows an app 25 MB in total, and the sample series

@@ -1,8 +1,8 @@
 package com.spaceboy.ridebuddy.data
 
-import com.spaceboy.ridebuddy.data.db.RideHistoryDatabase
+import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
 import com.spaceboy.ridebuddy.data.db.RideSampleSeries
-import com.spaceboy.ridebuddy.data.db.RideSamplesDatabase
+import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -13,12 +13,12 @@ import kotlinx.coroutines.withContext
 /**
  * Ride history: summaries in one database, each ride's samples as one blob in another.
  *
- * The split exists for backup, not for queries — see [RideSamplesDatabase]. It costs atomicity
+ * The split exists for backup, not for queries — see [RawTelemetryDatabase]. It costs atomicity
  * across the two files, so an insert that fails on the samples side removes the summary again.
  */
 class RideRepository(
-    private val history: RideHistoryDatabase,
-    private val sampleStore: RideSamplesDatabase,
+    private val history: RideBuddyDatabase,
+    private val sampleStore: RawTelemetryDatabase,
     scope: CoroutineScope,
 ) {
     val rides: StateFlow<List<Ride>> =

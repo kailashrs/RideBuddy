@@ -77,36 +77,38 @@ internal class RouteConverter {
 }
 
 /**
- * Ride summaries. Small, and the part Android's backup service carries — which copies the file
- * itself, so it is kept out of WAL mode where recent writes would sit in a separate log.
+ * The rider's own records: ride summaries and their recent and saved destinations. Small, and
+ * the file Android's backup service carries — which copies the file itself, so it is kept out of
+ * WAL mode where recent writes would sit in a separate log.
  */
-@Database(entities = [Ride::class], version = 1)
+@Database(entities = [Ride::class, Destination::class], version = 1)
 @TypeConverters(RouteConverter::class)
-abstract class RideHistoryDatabase : RoomDatabase() {
+abstract class RideBuddyDatabase : RoomDatabase() {
     abstract fun rides(): RideDao
+    abstract fun destinations(): DestinationDao
 
     companion object {
-        const val FileName = "ride_history.db"
+        const val FileName = "ridebuddy.db"
 
-        fun open(context: Context): RideHistoryDatabase =
-            Room.databaseBuilder(context.applicationContext, RideHistoryDatabase::class.java, FileName)
+        fun open(context: Context): RideBuddyDatabase =
+            Room.databaseBuilder(context.applicationContext, RideBuddyDatabase::class.java, FileName)
                 .setJournalMode(JournalMode.TRUNCATE)
                 .build()
     }
 }
 
 /**
- * Sample series, kept in their own file so the backup rules can leave them out: they run to
- * megabytes per riding hour against the backup service's 25 MB allowance.
+ * Each ride's raw telemetry, kept in its own file so the backup rules can leave it out: it runs
+ * to megabytes per riding hour against the backup service's 25 MB allowance.
  */
 @Database(entities = [RideSampleSeries::class], version = 1)
-abstract class RideSamplesDatabase : RoomDatabase() {
+abstract class RawTelemetryDatabase : RoomDatabase() {
     abstract fun samples(): RideSampleDao
 
     companion object {
-        const val FileName = "ride_samples.db"
+        const val FileName = "ride_telemetry_raw.db"
 
-        fun open(context: Context): RideSamplesDatabase =
-            Room.databaseBuilder(context.applicationContext, RideSamplesDatabase::class.java, FileName).build()
+        fun open(context: Context): RawTelemetryDatabase =
+            Room.databaseBuilder(context.applicationContext, RawTelemetryDatabase::class.java, FileName).build()
     }
 }
