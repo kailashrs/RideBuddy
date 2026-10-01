@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.DirectionsBoat
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.LocationOn
@@ -124,6 +125,13 @@ fun SettingsScreen(
             confirm = "Delete",
             onDismiss = { dialog = null },
             onConfirm = actions.onClearRideHistory,
+        )
+        SettingsDialog.ClearDestinations -> ConfirmDialog(
+            title = "Clear recent destinations?",
+            text = "Places you've ridden to and their trip counts are forgotten. Saved places stay.",
+            confirm = "Clear",
+            onDismiss = { dialog = null },
+            onConfirm = actions.onClearRecentDestinations,
         )
         SettingsDialog.About -> AlertDialog(
             onDismissRequest = { dialog = null },
@@ -302,6 +310,10 @@ fun SettingsScreen(
             SettingsRow("Delete all rides", "${state.rides.size} ${if (state.rides.size == 1) "ride" else "rides"} on this phone",
                 icon = Icons.Outlined.DeleteOutline, enabled = state.rides.isNotEmpty(),
                 onClick = { dialog = SettingsDialog.ClearHistory })
+            SettingsRow("Clear recent destinations", "Saved places are kept",
+                icon = Icons.Outlined.History,
+                enabled = state.destinations.any { !it.isSaved || it.tripCount > 0 },
+                onClick = { dialog = SettingsDialog.ClearDestinations })
         }
         section("App") {
             SettingsSwitchRow("Use miles", "Distances and speeds in imperial units",
@@ -346,7 +358,7 @@ fun SettingsScreen(
     }
 }
 
-private enum class SettingsDialog { ForgetBike, ClearHistory, About, DisplayTest, Capture }
+private enum class SettingsDialog { ForgetBike, ClearHistory, ClearDestinations, About, DisplayTest, Capture }
 
 private fun LazyListScope.section(title: String, content: @Composable () -> Unit) {
     item(key = title) {

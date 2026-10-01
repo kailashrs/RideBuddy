@@ -23,7 +23,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -82,7 +84,15 @@ fun MainScreen(
     val destinationStateHolder = rememberSaveableStateHolder()
     LaunchedEffect(uiState.transientMessage) {
         uiState.transientMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            // A failed share is offered again here; it has no other place to wait now.
+            val retry = uiState.failedShare != null
+            val result = snackbarHostState.showSnackbar(
+                message,
+                actionLabel = if (retry) "Retry" else null,
+                duration = if (retry) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+            // Retry before the message is cleared: clearing it also forgets the failed share.
+            if (result == SnackbarResult.ActionPerformed) onRetryShare()
             onMessageShown()
         }
     }
@@ -199,8 +209,6 @@ internal fun MainScreenContent(
             else -> when (uiState.selectedDestination) {
                 TopLevelDestination.Live -> LiveScreen(
                     modifier = modifier,
-                    sharedDestination = uiState.autoStartSharedDestination?.destination ?: uiState.sharedDestination,
-                    sharedDestinationError = uiState.sharedDestinationError,
                     isNavigationStarting = uiState.isNavigationStarting,
                     connectionState = connectionState,
                     bikeAssociated = bikeAssociation.bike != null,
@@ -212,10 +220,13 @@ internal fun MainScreenContent(
                     onConnectBike = onAssociateBike,
                     onDisconnectBike = onDisconnectBike,
                     onEndRide = onEndRide,
-                    onStartNavigation = onStartNavigation,
+                    destinations = destinations,
+                    onNavigateTo = onNavigateTo,
+                    onOpenGoogleMaps = onOpenGoogleMaps,
+                    onRenameDestination = onRenameDestination,
+                    onDeleteDestination = onDeleteDestination,
                     onOpenActiveNavigation = onOpenActiveNavigation,
                     onStopNavigation = onStopNavigation,
-                    onSharedDestinationHandled = onSharedDestinationHandled,
                     onCancelNavigationStart = onCancelNavigationStart,
                     onRideSelected = onRideSelected,
                 )

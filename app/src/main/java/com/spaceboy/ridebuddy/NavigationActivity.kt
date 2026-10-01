@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -36,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -53,6 +53,11 @@ import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.core.navigation.NavigationSession
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.spaceboy.ridebuddy.data.savedAt
+import com.spaceboy.ridebuddy.ui.screens.NameDestinationDialog
+import com.spaceboy.ridebuddy.ui.screens.RoutePreviewTitle
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -154,7 +159,7 @@ class NavigationActivity : ComponentActivity() {
                 session is NavigationSession.Preparing || session is NavigationSession.Ready -> {
                     val ready = session as? NavigationSession.Ready
                     PreviewPanel(
-                        title = session.destination?.title ?: "Route preview",
+                        destination = session.destination,
                         summary = ready?.summary(settings.distanceUnits) ?: getString(R.string.navigation_preparing_route),
                     ) {
                         NavigationStartControls(
@@ -168,14 +173,32 @@ class NavigationActivity : ComponentActivity() {
                     }
                 }
                 session is NavigationSession.Arrived ->
-                    PreviewPanel(session.destination?.title.orEmpty(), getString(R.string.navigation_arrived)) {}
+                    PreviewPanel(session.destination, getString(R.string.navigation_arrived)) {}
                 else -> Unit
             }
         }
     }
 
     @androidx.compose.runtime.Composable
-    private fun PreviewPanel(title: String, summary: String, controls: @androidx.compose.runtime.Composable () -> Unit) {
+    private fun PreviewPanel(
+        destination: NavigationDestination?,
+        summary: String,
+        controls: @androidx.compose.runtime.Composable () -> Unit,
+    ) {
+        val places by appContainer.destinationRepository.destinations.collectAsStateWithLifecycle()
+        val saved = destination?.let { places.savedAt(it.latitude, it.longitude) }
+        var naming by rememberSaveable { mutableStateOf(false) }
+        if (naming && destination != null) {
+            NameDestinationDialog(
+                title = if (saved != null) "Rename place" else "Save place",
+                initialName = saved?.savedName ?: destination.title,
+                onDismiss = { naming = false },
+                onConfirm = { name ->
+                    naming = false
+                    appContainer.applicationScope.launch { appContainer.destinationRepository.save(destination, name) }
+                },
+            )
+        }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).onSizeChanged { size ->
@@ -187,7 +210,11 @@ class NavigationActivity : ComponentActivity() {
                 shape = MaterialTheme.shapes.extraLarge,
             ) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    RoutePreviewTitle(
+                        title = saved?.savedName ?: destination?.title ?: "Route preview",
+                        saved = saved != null,
+                        onSave = if (destination != null) ({ naming = true }) else null,
+                    )
                     Text(summary, style = MaterialTheme.typography.bodyMedium)
                     controls()
                 }
