@@ -163,7 +163,7 @@ fun LiveScreen(
                                 destination = value.take(MaxDestinationInputLength)
                             },
                             label = { Text("Google Maps link") },
-                            placeholder = { Text("Share or paste a place from Maps") },
+                            placeholder = { Text("Paste a link") },
                             leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
                             trailingIcon = if (destination.isNotBlank()) {
                                 {
@@ -175,7 +175,7 @@ fun LiveScreen(
                             } else null,
                             isError = sharedDestinationError != null,
                             supportingText = sharedDestinationError?.let { message -> { Text(message) } },
-                            maxLines = 3,
+                            singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
@@ -184,7 +184,7 @@ fun LiveScreen(
                                 onStartNavigation(destination)
                             },
                             enabled = destination.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.align(Alignment.End),
                         ) {
                             Icon(Icons.Outlined.Directions, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                             Spacer(Modifier.width(ButtonDefaults.IconSpacing))

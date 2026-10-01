@@ -134,8 +134,8 @@ class AppUxTest {
         compose.onNodeWithText("Google Navigation key").performClick()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Battery use"))
         compose.onNodeWithText("Battery use").performClick()
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Developer tools"))
-        compose.onNodeWithText("Developer tools").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Connection details"))
+        compose.onNodeWithText("Connection details").performClick()
         assertEquals(1, navigation); assertEquals(1, permissions); assertEquals(1, developer)
     }
 

@@ -95,7 +95,7 @@ fun MainScreen(
     }
     val title = when {
         uiState.isNavigationSettingsOpen -> "Navigation"
-        uiState.isDiagnosticsOpen -> "Developer tools"
+        uiState.isDiagnosticsOpen -> "Connection details"
         else -> destinations.first { it.destination == uiState.selectedDestination }.label
     }
     val contentKey = uiState.saveableContentKey()

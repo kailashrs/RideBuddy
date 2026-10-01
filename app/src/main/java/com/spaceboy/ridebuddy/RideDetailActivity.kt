@@ -71,6 +71,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -494,6 +496,11 @@ internal fun RideDetailContent(
                 Text(UnitFormatter.formatRideStart(ride.startedAtMillis), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (data.routePoints.size > 1) {
+            item(key = "route_card", contentType = "route_map") {
+                RouteCard(data.routePoints, hasParking, onOpenParking)
+            }
+        }
         item(key = "ride_summary", contentType = "summary_card") {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -519,11 +526,8 @@ internal fun RideDetailContent(
                 }
             }
         }
-        if (data.routePoints.size > 1) {
-            item(key = "route_card", contentType = "route_map") {
-                RouteCard(data.routePoints, hasParking, onOpenParking)
-            }
-        } else if (hasParking) {
+        // Without a route there is no map card to carry it, so parking follows the figures.
+        if (data.routePoints.size <= 1 && hasParking) {
             item(key = "parking", contentType = "action_buttons") {
                 OutlinedButton(onClick = onOpenParking, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.LocalParking, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -575,12 +579,23 @@ private fun RouteCard(points: List<Pair<Double, Double>>, hasParking: Boolean, o
     var exploring by rememberSaveable { mutableStateOf(false) }
     OutlinedCard(Modifier.fillMaxWidth()) {
         if (!exploring) RecordedRouteMap(points, Modifier.fillMaxWidth().height(220.dp), interactive = false)
+        // An even pair across the card's width, so neither action reads as an afterthought.
         Row(
-            Modifier.fillMaxWidth().padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (hasParking) TextButton(onClick = onOpenParking) { Text("Parking location") }
-            FilledTonalButton(onClick = { exploring = true }) { Text("Explore route") }
+            if (hasParking) {
+                OutlinedButton(onClick = onOpenParking, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.LocalParking, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                    Text("Parking", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            FilledTonalButton(onClick = { exploring = true }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.Map, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.navigation_full_map), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
     if (exploring) {

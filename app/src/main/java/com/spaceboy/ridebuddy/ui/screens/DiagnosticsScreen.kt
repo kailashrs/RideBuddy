@@ -40,8 +40,8 @@ import com.spaceboy.ridebuddy.ui.components.SettingsSwitchRow
 import com.spaceboy.ridebuddy.ui.labelResource
 
 /**
- * Tools for protocol research and troubleshooting, then a live readout of the link: state,
- * handshake phase, GATT counters, errors and recent events. The first stop when a connection
+ * Connection details: whether to keep the history, a shareable report, then a live readout of
+ * the link — state, handshake phase, GATT counters, errors and recent events. The first stop when a connection
  * misbehaves — [BikeConnectionState.Failed] carries one message; the journal here carries the
  * sequence that led to it.
  */
@@ -56,31 +56,7 @@ fun DiagnosticsScreen(
     val rideMetrics = state.live.rideMetrics.collectAsStateWithLifecycle().value
     val capture = state.bleCapture
     val identity = state.identity
-    var dialog by rememberSaveable { mutableStateOf<String?>(null) }
-    when (dialog) {
-        "capture" -> BleCaptureDialog(capture, actions.onExportBleCapture, actions.onClearBleCapture) { dialog = null }
-        "tft" -> AlertDialog(
-            onDismissRequest = { dialog = null },
-            title = { Text("Test the bike's display?") },
-            text = {
-                Text(
-                    "Only while parked, with no call in progress. The test sends a turn, distances, text and a " +
-                        "speed limit, then a test caller ringing, answered, cleared and outgoing.",
-                )
-            },
-            confirmButton = { TextButton(onClick = { dialog = null; actions.onRunStationaryTest() }) { Text("Run test") } },
-            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
-        )
-    }
-
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-        Text(
-            "Use these only while parked. Captured packets can include identifiers and notification text.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        Header("Tools")
         SettingsSwitchRow(
             "Keep connection history",
             "Save recent connection activity across app restarts",
@@ -88,26 +64,8 @@ fun DiagnosticsScreen(
             icon = Icons.Outlined.History,
             onCheckedChange = actions.settingsActions.onPersistConnectionDiagnosticsChanged,
         )
-        SettingsSwitchRow(
-            "Capture Bluetooth traffic",
-            "Record raw GATT reads, writes and notifications in memory",
-            state.settings.bleCaptureEnabled,
-            icon = Icons.Outlined.BugReport,
-            onCheckedChange = actions.settingsActions.onBleCaptureEnabledChanged,
-        )
-        SettingsRow(
-            "Captured packets",
-            when {
-                capture.entries.isEmpty() -> "None yet"
-                capture.droppedEntries > 0 -> "${capture.entries.size} kept, ${capture.droppedEntries} older dropped"
-                else -> "${capture.entries.size} kept"
-            },
-            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
-            onClick = { dialog = "capture" },
-        )
-        SettingsRow("Test the bike's display", "Send sample directions and calls while parked",
-            icon = Icons.Outlined.Tv, onClick = { dialog = "tft" })
-        SettingsRow("Share connection report", null, icon = Icons.Outlined.IosShare, onClick = actions.onExportDiagnostics)
+        SettingsRow("Share connection report", "State, errors and recent events as text",
+            icon = Icons.Outlined.IosShare, onClick = actions.onExportDiagnostics)
 
         Header("Connection")
         Readout("State", state.connectionState.diagnosticLabel())
@@ -177,7 +135,7 @@ private fun BikeConnectionState.diagnosticLabel(): String = when (this) {
 
 /** The captured packets, newest first. The privacy note is here because this is where they get shared. */
 @Composable
-private fun BleCaptureDialog(capture: BleCaptureState, onShare: () -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
+internal fun BleCaptureDialog(capture: BleCaptureState, onShare: () -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Captured packets") },

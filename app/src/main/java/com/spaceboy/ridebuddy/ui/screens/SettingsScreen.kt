@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.BatteryAlert
@@ -34,7 +35,7 @@ import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.ContactPage
 import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.DeveloperMode
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Directions
 import androidx.compose.material.icons.outlined.DirectionsBoat
 import androidx.compose.material.icons.outlined.FileDownload
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -143,7 +145,7 @@ fun SettingsScreen(
         )
         SettingsDialog.ClearHistory -> ConfirmDialog(
             title = "Delete all rides?",
-            text = "This permanently deletes ${state.rides.size} rides with their routes and stats. Export anything you want to keep first.",
+            text = "This permanently deletes ${state.rides.size} ${if (state.rides.size == 1) "ride" else "rides"} with their routes and stats. Export anything you want to keep first.",
             confirm = "Delete",
             onDismiss = { dialog = null },
             onConfirm = actions.onClearRideHistory,
@@ -166,6 +168,25 @@ fun SettingsScreen(
             },
             confirmButton = { TextButton(onClick = { dialog = null }) { Text("Close") } },
         )
+        SettingsDialog.DisplayTest -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            icon = { Icon(Icons.Outlined.Tv, contentDescription = null) },
+            title = { Text("Test the bike's display?") },
+            text = {
+                Text(
+                    "Only while parked, with no call in progress. In turn, the display shows:\n\n" +
+                        "1. A turn, distances and a speed limit\n" +
+                        "2. A test caller ringing, answered, ended and outgoing\n" +
+                        "3. The Messages, Instagram and Gmail notification icons\n\n" +
+                        "You'll be asked whether each part appeared.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { dialog = null; actions.onRunStationaryTest() }) { Text("Run test") } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+        )
+        SettingsDialog.Capture -> BleCaptureDialog(state.bleCapture, actions.onExportBleCapture, actions.onClearBleCapture) {
+            dialog = null
+        }
         null -> Unit
     }
 
@@ -320,7 +341,7 @@ fun SettingsScreen(
                 onSelected = settingsActions.onSampleRetentionChanged)
             SettingsRow("Export all rides", "A CSV summary of every saved ride",
                 icon = Icons.Outlined.FileDownload, enabled = state.rides.isNotEmpty(), onClick = actions.onExportRideHistory)
-            SettingsRow("Delete all rides", "${state.rides.size} rides on this phone",
+            SettingsRow("Delete all rides", "${state.rides.size} ${if (state.rides.size == 1) "ride" else "rides"} on this phone",
                 icon = Icons.Outlined.DeleteOutline, enabled = state.rides.isNotEmpty(),
                 onClick = { dialog = SettingsDialog.ClearHistory })
         }
@@ -342,15 +363,34 @@ fun SettingsScreen(
                 icon = Icons.Outlined.BatteryAlert, onClick = actions.onOpenAppPermissions)
             SettingsRow("App permissions", null, icon = Icons.Outlined.Security, onClick = actions.onOpenAppPermissions)
             SettingsRow("Run setup again", null, icon = Icons.Outlined.RestartAlt, onClick = actions.onResetOnboarding)
-            SettingsRow("Developer tools", "Connection details, packet capture and display tests",
-                icon = Icons.Outlined.DeveloperMode, onClick = actions.onOpenDiagnostics)
             SettingsRow("About", "Version ${BuildConfig.VERSION_NAME}", icon = Icons.Outlined.Info,
                 onClick = { dialog = SettingsDialog.About })
+        }
+        // For troubleshooting while parked; nothing here is needed to ride.
+        section("Developer tools") {
+            SettingsRow("Connection details", "Live link state, recent events and a shareable report",
+                icon = Icons.Outlined.Bluetooth, onClick = actions.onOpenDiagnostics)
+            SettingsRow("Test the bike's display", "Sample directions, a test call and notification icons",
+                icon = Icons.Outlined.Tv, onClick = { dialog = SettingsDialog.DisplayTest })
+            SettingsSwitchRow("Capture Bluetooth traffic", "Raw packets in memory; may include names and message text",
+                state.settings.bleCaptureEnabled, icon = Icons.Outlined.BugReport,
+                onCheckedChange = settingsActions.onBleCaptureEnabledChanged)
+            SettingsRow(
+                "Captured packets",
+                when {
+                    state.bleCapture.entries.isEmpty() -> "None yet"
+                    state.bleCapture.droppedEntries > 0 ->
+                        "${state.bleCapture.entries.size} kept, ${state.bleCapture.droppedEntries} older dropped"
+                    else -> "${state.bleCapture.entries.size} kept"
+                },
+                icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+                onClick = { dialog = SettingsDialog.Capture },
+            )
         }
     }
 }
 
-private enum class SettingsDialog { ForgetBike, ClearHistory, SupportedApps, About }
+private enum class SettingsDialog { ForgetBike, ClearHistory, SupportedApps, About, DisplayTest, Capture }
 
 private fun LazyListScope.section(title: String, content: @Composable () -> Unit) {
     item(key = title) {

@@ -182,7 +182,7 @@ class UiReviewRenderTest {
         val samples = LiveCardFixture.samples()
         val data = RideDetailUiData(
             AppUiFixture.ride.copy(endLatitude = 13.05, endLongitude = 80.28, zeroToSixtyMillis = 4_300),
-            hasSamples = true, hasLocations = true, routePoints = emptyList(),
+            hasSamples = true, hasLocations = true, routePoints = List(20) { 13.0 + it * 0.002 to 80.25 + it * 0.001 },
             speedValues = telemetryChartData(samples, 600) { it.speedKph },
             rpmValues = telemetryChartData(samples, 600) { it.rpm.toDouble() },
             throttleValues = telemetryChartData(samples, 600) { it.throttlePercent.toDouble() },
@@ -197,7 +197,8 @@ class UiReviewRenderTest {
         start()
         val settings = shell(configured.copy(selectedDestination = TopLevelDestination.Settings))
         listOf("App notifications" to "dialog-supported-apps", "Theme" to "dialog-theme", "Keep detailed ride data" to "dialog-retention",
-            "About" to "dialog-about").forEach { (row, name) ->
+            "About" to "dialog-about", "Test the bike's display" to "dialog-display-test",
+            "Captured packets" to "dialog-captured-packets").forEach { (row, name) ->
             both(name, settings) {
                 compose.onNode(androidx.compose.ui.test.hasScrollToNodeAction())
                     .performScrollToNode(androidx.compose.ui.test.hasText(row))
@@ -207,6 +208,13 @@ class UiReviewRenderTest {
                 compose.runOnIdle { scene = {} }
                 compose.waitForIdle()
             }
+        }
+        // The end of the list, where the developer tools section sits.
+        both("settings-bottom", settings) {
+            compose.onNode(androidx.compose.ui.test.hasScrollToNodeAction())
+                .performScrollToNode(androidx.compose.ui.test.hasText("Captured packets"))
+            compose.waitForIdle()
+            shot("settings-bottom")
         }
     }
 }
