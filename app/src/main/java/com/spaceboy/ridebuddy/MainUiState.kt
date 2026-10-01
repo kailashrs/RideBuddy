@@ -80,9 +80,8 @@ internal class SharedDestinationStateStore(
     }
 
     private companion object {
-        // Unchanged from when this was called the auto-start share, so a pending one survives the update.
-        const val RequestIdKey = "shared_destination.auto_start.request_id"
-        const val DestinationKey = "shared_destination.auto_start.destination"
+        const val RequestIdKey = "pending_share.request_id"
+        const val DestinationKey = "pending_share.destination"
     }
 }
 

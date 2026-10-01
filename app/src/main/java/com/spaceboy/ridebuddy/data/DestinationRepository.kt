@@ -1,6 +1,5 @@
 package com.spaceboy.ridebuddy.data
 
-import com.spaceboy.ridebuddy.core.location.needsPlaceName
 import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.data.db.Destination
 import com.spaceboy.ridebuddy.data.db.DestinationDao
@@ -8,8 +7,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
@@ -30,67 +27,58 @@ class DestinationRepository(
     private val addressFirstLine: suspend (latitude: Double, longitude: Double) -> String?,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    private val writes = Mutex()
-
     val destinations: StateFlow<List<Destination>> =
         dao.observeAll().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     suspend fun recordTrip(destination: NavigationDestination) {
-        val name = nameIfNew(destination)
-        writes.withLock {
-            val known = dao.all().nearest(destination.latitude, destination.longitude)
-            if (known != null) {
-                dao.update(known.copy(tripCount = known.tripCount + 1, lastTripAtMillis = now()))
-            } else {
-                dao.insert(Destination(
-                    latitude = destination.latitude,
-                    longitude = destination.longitude,
-                    placeName = name ?: destination.title,
-                    tripCount = 1,
-                    lastTripAtMillis = now(),
-                ))
-            }
-            prunable(dao.all()).takeIf { it.isNotEmpty() }?.let { dao.delete(it.map(Destination::id)) }
+        val known = dao.all().nearest(destination.latitude, destination.longitude)
+        if (known != null) {
+            dao.update(known.copy(tripCount = known.tripCount + 1, lastTripAtMillis = now()))
+        } else {
+            dao.insert(Destination(
+                latitude = destination.latitude,
+                longitude = destination.longitude,
+                placeName = placeName(destination),
+                tripCount = 1,
+                lastTripAtMillis = now(),
+            ))
         }
+        prunable(dao.all()).takeIf { it.isNotEmpty() }?.let { dao.delete(it.map(Destination::id)) }
     }
 
     /** Saves [destination] under [name], keeping any trips already counted to it. */
     suspend fun save(destination: NavigationDestination, name: String) {
-        val placeName = nameIfNew(destination)
-        writes.withLock {
-            val known = dao.all().nearest(destination.latitude, destination.longitude)
-            if (known != null) {
-                dao.rename(known.id, name.trim())
-            } else {
-                dao.insert(Destination(
-                    latitude = destination.latitude,
-                    longitude = destination.longitude,
-                    placeName = placeName ?: destination.title,
-                    savedName = name.trim(),
-                ))
-            }
+        val known = dao.all().nearest(destination.latitude, destination.longitude)
+        if (known != null) {
+            dao.rename(known.id, name.trim())
+        } else {
+            dao.insert(Destination(
+                latitude = destination.latitude,
+                longitude = destination.longitude,
+                placeName = placeName(destination),
+                savedName = name.trim(),
+            ))
         }
     }
 
-    suspend fun rename(id: Long, name: String) = writes.withLock { dao.rename(id, name.trim()) }
+    suspend fun rename(id: Long, name: String) = dao.rename(id, name.trim())
 
-    suspend fun delete(id: Long) = writes.withLock { dao.delete(id) }
+    suspend fun delete(id: Long) = dao.delete(id)
 
     /** Clears trip history. Saved places stay, without their counts. */
-    suspend fun clearRecents() = writes.withLock {
+    suspend fun clearRecents() {
         dao.deleteUnsaved()
         dao.resetTrips()
     }
 
     /**
-     * The name for a place not yet known, looked up before taking the write lock: an address
-     * lookup can take seconds, and nothing else should wait on it. Null for a known place.
+     * A share whose address lookup timed out while the rider waited arrives as [GenericTitle];
+     * by the time guidance starts the lookup has more time, so it is tried once more.
      */
-    private suspend fun nameIfNew(destination: NavigationDestination): String? {
-        if (dao.all().nearest(destination.latitude, destination.longitude) != null) return null
-        return destination.title.takeUnless { it == GenericTitle || needsPlaceName(it) }
+    private suspend fun placeName(destination: NavigationDestination): String =
+        destination.title.takeUnless { it == GenericTitle }
             ?: addressFirstLine(destination.latitude, destination.longitude)
-    }
+            ?: destination.title
 
     internal companion object {
         const val RecentCount = 3
