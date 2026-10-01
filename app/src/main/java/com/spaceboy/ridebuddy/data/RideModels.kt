@@ -38,16 +38,15 @@ data class Ride(
     val peakAccelerationG: Double? = null,
     val peakBrakingG: Double? = null,
 ) {
-    /** Clamped at zero, so a clock adjustment mid-ride cannot produce a negative duration. */
-    val durationMillis: Long get() = (endedAtMillis - startedAtMillis).coerceAtLeast(0)
+    val durationMillis: Long get() = endedAtMillis - startedAtMillis
 
-    val averagingDurationMillis: Long get() = telemetryDurationMillis?.coerceAtLeast(0L) ?: durationMillis
+    val averagingDurationMillis: Long get() = telemetryDurationMillis ?: durationMillis
 
-    /** Distance over fuel, or null when either is missing or zero. */
+    /** Distance over fuel, or null when the ride covered no distance or had no mileage readings. */
     val averageMileageKilometresPerLitre: Double?
         get() {
-            val distance = distanceKilometres.takeIf { it.isFinite() && it > 0.0 } ?: return null
-            val fuel = estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+            val distance = distanceKilometres.takeIf { it > 0.0 } ?: return null
+            val fuel = estimatedFuelLitres ?: return null
             return distance / fuel
         }
 }
@@ -59,10 +58,8 @@ data class Ride(
  */
 fun Iterable<Ride>.combinedMileageKilometresPerLitre(): Double? {
     val distanceAndFuel = mapNotNull { ride ->
-        val distance = ride.distanceKilometres.takeIf { it.isFinite() && it > 0.0 }
-            ?: return@mapNotNull null
-        val fuel = ride.estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 }
-            ?: return@mapNotNull null
+        val distance = ride.distanceKilometres.takeIf { it > 0.0 } ?: return@mapNotNull null
+        val fuel = ride.estimatedFuelLitres ?: return@mapNotNull null
         distance to fuel
     }
     if (distanceAndFuel.isEmpty()) return null
@@ -70,10 +67,7 @@ fun Iterable<Ride>.combinedMileageKilometresPerLitre(): Double? {
 }
 
 /** One point of a stored route trace, thinned for the history preview map. */
-data class RoutePoint(val latitude: Double, val longitude: Double) {
-    val isValid: Boolean get() = latitude.isFinite() && latitude in -90.0..90.0 &&
-        longitude.isFinite() && longitude in -180.0..180.0
-}
+data class RoutePoint(val latitude: Double, val longitude: Double)
 
 /** Shared by everything that turns a number of days into a cutoff. */
 internal const val MillisPerDay = 86_400_000L

@@ -38,16 +38,12 @@ internal fun calculateLiveRideMetrics(samples: List<RideSample>): LiveRideMetric
 private fun estimatePacketGapPercent(samples: List<RideSample>): Int? {
     if (samples.size < MinimumPacketGapSamples) return null
     val intervals = LongArray(samples.lastIndex) { index ->
-        (samples[index + 1].timestampMillis - samples[index].timestampMillis).coerceAtLeast(1L)
+        samples[index + 1].timestampMillis - samples[index].timestampMillis
     }
-    if (samples.zipWithNext().any { (first, second) -> second.timestampMillis <= first.timestampMillis }) return null
     intervals.sort()
-    val baseline = intervals[intervals.size / 2].coerceAtLeast(1L)
-    val expected = ((samples.last().timestampMillis - samples.first().timestampMillis) / baseline + 1L)
-        .coerceAtLeast(1L)
-    return (((expected - samples.size).coerceAtLeast(0L) * 100.0) / expected)
-        .roundToInt()
-        .coerceIn(0, 100)
+    val baseline = intervals[intervals.size / 2]
+    val expected = (samples.last().timestampMillis - samples.first().timestampMillis) / baseline + 1L
+    return ((expected - samples.size).coerceAtLeast(0L) * 100.0 / expected).roundToInt()
 }
 
 /** Below this, the median interval is not a meaningful baseline. */
@@ -88,7 +84,7 @@ internal fun List<RideSample>.accelerationPeaks(): Pair<Double?, Double?> {
 internal data class LiveTelemetry(val frame: TelemetryFrame? = null, val averageMileage: Double? = null) {
     fun next(reading: TelemetryReading?): LiveTelemetry {
         val frame = reading?.frame ?: return LiveTelemetry()
-        val sample = frame.instantaneousMileageKilometresPerLitre?.takeIf { it.isFinite() && it > 0.0 }
+        val sample = frame.instantaneousMileageKilometresPerLitre
             ?: return copy(frame = frame.copy(instantaneousMileageKilometresPerLitre = null))
         val average = averageMileage?.let { it + MileageSmoothing * (sample - it) } ?: sample
         return LiveTelemetry(frame.copy(instantaneousMileageKilometresPerLitre = average), average)

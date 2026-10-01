@@ -378,12 +378,8 @@ class MainActivity : ComponentActivity() {
 
     private fun forgetBike() {
         BikeConnectionService.disconnect(this)
-        val manager = appContainer.bikeCompanionManager
-        if (manager.forget()) {
-            viewModel.showMessage("Bike association removed")
-        } else {
-            viewModel.showMessage(manager.state.value.errorMessage ?: "Could not remove the motorcycle association")
-        }
+        appContainer.bikeCompanionManager.forget()
+        viewModel.showMessage("Bike association removed")
     }
 
     private fun openAppPermissionSettings() {

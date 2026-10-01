@@ -17,13 +17,5 @@ class RideLocationFreshnessTest {
 
         assertTrue(location.isFreshAt(nowElapsedRealtimeMillis = 40_000L))
         assertFalse(location.isFreshAt(nowElapsedRealtimeMillis = 40_001L))
-        assertFalse(location.isFreshAt(nowElapsedRealtimeMillis = 9_999L))
-    }
-
-    @Test
-    fun rejectsFixesWithoutAValidMonotonicTimestamp() {
-        val location = RideLocation(0.0, 0.0, 10f, null, fixElapsedRealtimeMillis = 0L)
-
-        assertFalse(location.isFreshAt(nowElapsedRealtimeMillis = 1L))
     }
 }

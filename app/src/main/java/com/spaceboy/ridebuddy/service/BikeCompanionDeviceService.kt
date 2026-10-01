@@ -132,8 +132,6 @@ internal fun companionPresenceEventLabel(event: Int): String = when (event) {
     DevicePresenceEvent.EVENT_BLE_DISAPPEARED -> "BLE disappeared"
     DevicePresenceEvent.EVENT_BT_CONNECTED -> "Bluetooth connected"
     DevicePresenceEvent.EVENT_BT_DISCONNECTED -> "Bluetooth disconnected"
-    DevicePresenceEvent.EVENT_SELF_MANAGED_APPEARED -> "self-managed device appeared"
-    DevicePresenceEvent.EVENT_SELF_MANAGED_DISAPPEARED -> "self-managed device disappeared"
     DevicePresenceEvent.EVENT_ASSOCIATION_REMOVED -> "association removed"
     else -> "unknown presence event $event"
 }

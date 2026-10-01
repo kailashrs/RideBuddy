@@ -50,10 +50,8 @@ internal class ConnectionEventJournal(
     val events: StateFlow<List<String>> = mutableEvents.asStateFlow()
 
     init {
-        require(persistenceDebounceMillis >= 0L) { "Persistence debounce must not be negative" }
         // One long-lived writer owns all storage access, so recording never touches disk.
-        // collectLatest means turning persistence off cancels an in-progress load rather
-        // than letting it finish and repopulate the list the rider just asked to stop keeping.
+        // collectLatest stops the writer as soon as persistence is turned off.
         scope.launch(ioDispatcher) {
             var persistedEventsLoaded = false
             persistenceEnabled.collectLatest { enabled ->
@@ -64,7 +62,6 @@ internal class ConnectionEventJournal(
                 // rather than replacing them.
                 if (!persistedEventsLoaded) {
                     val persistedEvents = store.read().take(ConnectionEventLimit)
-                    if (!persistenceEnabled.value) return@collectLatest
                     mutableEvents.update { currentEvents ->
                         mergeConnectionEvents(currentEvents, persistedEvents)
                     }
@@ -76,7 +73,6 @@ internal class ConnectionEventJournal(
                 if (hasUnpersistedEvents.get()) persistenceSignals.trySend(Unit)
                 for (ignored in persistenceSignals) {
                     awaitQuietPeriod()
-                    if (!persistenceEnabled.value) continue
                     if (hasUnpersistedEvents.getAndSet(false)) {
                         if (!store.write(mutableEvents.value)) {
                             // Retry after the next event or after persistence is re-enabled.

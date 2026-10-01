@@ -32,8 +32,6 @@ internal fun diagnosticsReport(
     appendLine("Services: ${diagnostics.servicesDiscovered}")
     appendLine("Notifications: ${diagnostics.notificationsReceived}")
     appendLine("Characteristic writes: ${diagnostics.writesCompleted}")
-    appendLine("Malformed frames: ${diagnostics.malformedTelemetryFrames}")
-    appendLine("Dropped ride frames: ${diagnostics.droppedRawTelemetryFrames}")
     appendLine("VIN: ${identity.vin ?: Unknown}")
     appendLine("Cluster software: ${identity.clusterSoftwareVersion ?: Unknown}")
     appendLine(

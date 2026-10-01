@@ -46,9 +46,7 @@ object InsightsCalculator {
         }
 
         val totalDuration = current.sumOf(Ride::durationMillis)
-        val fuelEstimates = current.mapNotNull { ride ->
-            ride.estimatedFuelLitres?.takeIf { it.isFinite() && it > 0.0 }
-        }
+        val fuelEstimates = current.mapNotNull(Ride::estimatedFuelLitres)
         // Duration-weighted, not a plain mean of the per-ride averages: a five-minute
         // commute would otherwise pull the average speed as hard as a three-hour tour.
         val weightedSeconds = current.sumOf { it.averagingDurationMillis / 1_000.0 }.takeIf { it > 0.0 }

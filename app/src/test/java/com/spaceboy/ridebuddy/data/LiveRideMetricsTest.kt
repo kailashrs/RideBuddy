@@ -32,11 +32,6 @@ class LiveRideMetricsTest {
         assertEquals(1, metrics.hardAccelerationEvents)
     }
 
-    @Test
-    fun wallClockReversalCannotInventPacketLoss() {
-        assertNull(calculateLiveRideMetrics(listOf(sample(0, 0.0), sample(250, 0.0), sample(100, 0.0), sample(500, 0.0))).estimatedPacketGapPercent)
-    }
-
     private fun sample(timestampMillis: Long, acceleration: Double) = RideSample(
         timestampMillis = timestampMillis,
         speedKph = 0.0,

@@ -158,8 +158,6 @@ data class BleDiagnostics(
     val servicesDiscovered: Int = 0,
     val notificationsReceived: Long = 0,
     val writesCompleted: Long = 0,
-    val malformedTelemetryFrames: Long = 0,
-    val droppedRawTelemetryFrames: Long = 0,
     val lastFrameAtMillis: Long? = null,
     val rssi: Int? = null,
     val telemetryHz: Double = 0.0,
@@ -190,14 +188,12 @@ sealed interface BikeControlEvent {
     /**
      * The rider pressed the handlebar control while the cluster showed **GO**.
      *
-     * One physical button produces all three navigation events. What separates them is
-     * which screen the cluster is on: **GO** is drawn only while a route is staged, and
-     * [SkipManeuver] and [ExitNavigation] only while guidance is running.
+     * One physical button produces both navigation events. What separates them is which
+     * screen the cluster is on: **GO** is drawn only while a route is staged, and
+     * [ExitNavigation] only while guidance is running. The cluster's third event, skipping a
+     * waypoint, has nothing to act on: routes here have a single waypoint.
      */
     data object StartNavigation : BikeControlEvent
-
-    /** Drop the current waypoint and advance to the next. Guidance screen only. */
-    data object SkipManeuver : BikeControlEvent
 
     /** End navigation. Guidance screen only. */
     data object ExitNavigation : BikeControlEvent

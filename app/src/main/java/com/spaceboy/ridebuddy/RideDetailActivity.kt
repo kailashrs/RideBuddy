@@ -406,15 +406,13 @@ private fun buildRideDetailUiData(
     units: DistanceUnits,
 ): RideDetailUiData {
     val routePoints = samples.mapNotNull { sample ->
-        sample.latitude?.let { latitude ->
-            sample.longitude?.takeIf { latitude.isFinite() && latitude in -90.0..90.0 && it.isFinite() && it in -180.0..180.0 }?.let { longitude -> latitude to longitude }
-        }
+        sample.latitude?.let { latitude -> sample.longitude?.let { longitude -> latitude to longitude } }
     }
     return RideDetailUiData(
         ride = ride,
         hasSamples = samples.isNotEmpty(),
         hasLocations = routePoints.isNotEmpty(),
-        routePoints = routePoints.ifEmpty { ride.routePreview.filter { it.isValid }.map { it.latitude to it.longitude } }.downsampled(MaxRoutePoints),
+        routePoints = routePoints.ifEmpty { ride.routePreview.map { it.latitude to it.longitude } }.downsampled(MaxRoutePoints),
         speedValues = telemetryChartData(samples, MaxChartPoints) { UnitFormatter.chartSpeed(it.speedKph, units) },
         rpmValues = telemetryChartData(samples, MaxChartPoints) { it.rpm.toDouble() },
         throttleValues = telemetryChartData(samples, MaxChartPoints) { it.throttlePercent.toDouble() },
@@ -429,7 +427,6 @@ private fun buildRideDetailUiData(
  * and the target index overflows `Int` for a long ride's sample count.
  */
 private fun <T> List<T>.downsampled(maxPoints: Int): List<T> {
-    require(maxPoints >= 2)
     if (size <= maxPoints) return this
     val sourceLastIndex = lastIndex.toLong()
     val targetLastIndex = maxPoints - 1L

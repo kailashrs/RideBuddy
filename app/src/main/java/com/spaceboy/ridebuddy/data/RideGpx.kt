@@ -35,12 +35,10 @@ internal fun Writer.writeGpx(ride: Ride, samples: List<RideSample>) {
     samples.forEach { sample ->
         val latitude = sample.latitude ?: return@forEach
         val longitude = sample.longitude ?: return@forEach
-        if (!latitude.isFinite() || latitude !in -90.0..90.0) return@forEach
-        if (!longitude.isFinite() || longitude !in -180.0..180.0) return@forEach
         gpx.startTag(Namespace, "trkpt")
         gpx.attribute(null, "lat", String.format(Locale.US, "%.7f", latitude))
         gpx.attribute(null, "lon", String.format(Locale.US, "%.7f", longitude))
-        sample.altitudeMetres?.takeIf(Double::isFinite)?.let {
+        sample.altitudeMetres?.let {
             gpx.tag("ele", String.format(Locale.US, "%.2f", it))
         }
         gpx.tag("time", Instant.ofEpochMilli(sample.timestampMillis).toString())

@@ -41,7 +41,6 @@ import kotlinx.coroutines.launch
 class BikeConnectionService : LifecycleService() {
     private val container get() = appContainer
     private val notifications by lazy { BikeConnectionNotifications(this) }
-    private var promoted = false
     private var stateJob: Job? = null
     private var shutdownJob: Job? = null
     private var latestStartId = 0
@@ -51,24 +50,17 @@ class BikeConnectionService : LifecycleService() {
 
     /**
      * Promotes to the foreground before any command is processed: a started service that has not
-     * promoted within the platform's window is killed. A refused promotion is terminal.
+     * promoted within the platform's window is killed.
      */
     override fun onCreate() {
         super.onCreate()
         notifications.createChannel()
-        promoted = runCatching {
-            ServiceCompat.startForeground(
-                this,
-                NotificationId,
-                notifications.build("Preparing bike connection"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        }.onFailure { error ->
-            Log.e("BikeConnectionService", "Unable to promote bike connection service", error)
-            container.bikeConnection.notifyStartFailed("Unable to keep the bike connection active")
-            stopSelf()
-        }.isSuccess
-        if (!promoted) return
+        ServiceCompat.startForeground(
+            this,
+            NotificationId,
+            notifications.build("Preparing bike connection"),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        )
         // GPS runs only while a ride or navigation needs it.
         lifecycleScope.launch {
             combine(container.rideRecorder.activeRide, container.navigationController.guidance) { ride, guidance ->
@@ -78,24 +70,18 @@ class BikeConnectionService : LifecycleService() {
     }
 
     /**
-     * `START_NOT_STICKY` throughout, and an unknown or null intent stops the service: a sticky
-     * restart cannot tell whether the rider still wants a connection, and presence observation
-     * is what reconnects when the motorcycle is actually there.
+     * `START_NOT_STICKY` throughout: a sticky restart cannot tell whether the rider still wants a
+     * connection, and presence observation is what reconnects when the motorcycle is actually there.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        if (!promoted) {
-            stopSelfResult(startId)
-            return START_NOT_STICKY
-        }
         latestStartId = startId
         // A new command supersedes a shutdown still waiting on a ride save.
         shutdownJob?.cancel()
         shutdownJob = null
         when (intent?.action) {
             ActionEnableLocation -> enableLocationIfAllowed(launchedFromVisibleActivity = true)
-            ActionRestartConnect -> if (!startConnection(intent)) return START_NOT_STICKY.also { stop() }
-            else -> return START_NOT_STICKY.also { stop() }
+            ActionRestartConnect -> startConnection(intent)
         }
         if (stateJob == null) {
             stateJob = lifecycleScope.launch {
@@ -111,34 +97,19 @@ class BikeConnectionService : LifecycleService() {
         return START_NOT_STICKY
     }
 
-    private fun startConnection(intent: Intent): Boolean {
-        val trigger = intent.getStringExtra(ExtraTrigger)
-            ?.let { name -> ConnectionAttemptTrigger.entries.firstOrNull { it.name == name } }
-            ?: ConnectionAttemptTrigger.UserRequest
-        val automatic = trigger != ConnectionAttemptTrigger.UserRequest
-        if (automatic && !container.bikeConnectionDemand.canStartAutomaticConnection()) {
-            container.connectionEventJournal.record("Automatic connection request ignored while paused")
-            return false
-        }
-        val address = intent.getParcelableExtra(ExtraAddress, MacAddress::class.java)
-        val name = intent.getStringExtra(ExtraName)
-        if (address == null || name.isNullOrBlank()) {
-            container.bikeConnection.notifyStartFailed("The saved motorcycle address is invalid")
-            return false
-        }
-        if (!automatic) container.bikeConnectionDemand.allowExplicitConnection()
+    /** Automatic requests were already checked against the rider's suppression in [reconnect]. */
+    private fun startConnection(intent: Intent) {
+        val trigger = ConnectionAttemptTrigger.valueOf(intent.getStringExtra(ExtraTrigger)!!)
+        val address = intent.getParcelableExtra(ExtraAddress, MacAddress::class.java)!!
+        val name = intent.getStringExtra(ExtraName)!!
+        if (trigger == ConnectionAttemptTrigger.UserRequest) container.bikeConnectionDemand.allowExplicitConnection()
         enableLocationIfAllowed(launchedFromVisibleActivity = intent.getBooleanExtra(ExtraVisibleActivityLaunch, false))
         container.bikeConnection.connect(BikeConnectionTarget(address, name, trigger))
-        return true
     }
 
     override fun onDestroy() {
         if (locationTracking) container.rideLocationTracker.stop()
         removeForegroundNotification()
-        val state = container.bikeConnection.connectionState.value
-        if (promoted && state !is BikeConnectionState.Disconnected && state !is BikeConnectionState.Failed) {
-            container.bikeConnection.disconnect()
-        }
         super.onDestroy()
     }
 
@@ -195,7 +166,7 @@ class BikeConnectionService : LifecycleService() {
     }
 
     private fun removeForegroundNotification() {
-        if (promoted) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         notifications.cancel()
     }
 
@@ -243,10 +214,9 @@ class BikeConnectionService : LifecycleService() {
         /**
          * Requests a connection, returning whether the service was started.
          *
-         * Automatic requests are checked against the rider's suppression *here* as well as
-         * in `onStartCommand`, so a suppressed request never starts a foreground service at
-         * all — and reports success, because nothing failed: the request was correctly
-         * declined.
+         * Automatic requests are checked against the rider's suppression here, so a suppressed
+         * request never starts a foreground service at all — and reports success, because
+         * nothing failed: the request was correctly declined.
          */
         fun reconnect(
             context: Context,

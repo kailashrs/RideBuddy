@@ -174,11 +174,10 @@ fun SettingsScreen(
                     title = "Pair your motorcycle",
                     supportingText = when {
                         state.bikeAssociation.associationInProgress -> "Waiting for permission"
-                        !state.bikeAssociation.supported -> "Pairing isn't supported on this phone"
                         else -> "Choose your bike from the list"
                     },
                     icon = Icons.Outlined.Bluetooth,
-                    enabled = state.bikeAssociation.supported && !state.bikeAssociation.associationInProgress,
+                    enabled = !state.bikeAssociation.associationInProgress,
                     onClick = actions.onAssociateBike,
                 )
             } else {

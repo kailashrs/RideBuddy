@@ -9,7 +9,6 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.location.LocationRequest
 import android.os.SystemClock
-import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,7 +40,6 @@ class RideLocationTracker(context: Context) : LocationListener {
     private val appContext = context.applicationContext
     private val mutableLocation = MutableStateFlow<RideLocation?>(null)
     val location: StateFlow<RideLocation?> = mutableLocation.asStateFlow()
-    private var registered = false
 
     /**
      * Route recording only accepts GPS fixes; a network fix is far too coarse to integrate into a
@@ -56,30 +54,18 @@ class RideLocationTracker(context: Context) : LocationListener {
         ) {
             return false
         }
-        return runCatching {
-            val request = LocationRequest.Builder(LocationUpdateIntervalMillis)
-                .setMinUpdateDistanceMeters(MinimumLocationDistanceMetres)
-                .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
-                .build()
-            manager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                request,
-                appContext.mainExecutor,
-                this,
-            )
-            registered = true
-            manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let(::onLocationChanged)
-            true
-        }.onFailure { error ->
-            Log.w(LogTag, "Could not start ride location updates", error)
-            registered = false
-        }.getOrDefault(false)
+        val request = LocationRequest.Builder(LocationUpdateIntervalMillis)
+            .setMinUpdateDistanceMeters(MinimumLocationDistanceMetres)
+            .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+            .build()
+        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, request, appContext.mainExecutor, this)
+        manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let(::onLocationChanged)
+        return true
     }
 
     /** Unregisters and clears the published fix, so nothing reads a stale position. */
     fun stop() {
         manager.removeUpdates(this)
-        registered = false
         mutableLocation.value = null
     }
 
@@ -92,27 +78,20 @@ class RideLocationTracker(context: Context) : LocationListener {
 
     override fun onLocationChanged(location: Location) {
         mutableLocation.value = RideLocation(
-            // Prefer the fix's own timestamp; fall back to now only when the platform did
-            // not supply one, which is the only case where treating it as current is safe.
             latitude = location.latitude,
             longitude = location.longitude,
             accuracyMetres = location.accuracy,
             altitudeMetres = location.altitude.takeIf { location.hasAltitude() },
-            fixElapsedRealtimeMillis = location.elapsedRealtimeNanos
-                .takeIf { it > 0L }
-                ?.div(NanosecondsPerMillisecond)
-                ?: SystemClock.elapsedRealtime(),
+            fixElapsedRealtimeMillis = location.elapsedRealtimeNanos / NanosecondsPerMillisecond,
         )
     }
 
     /** A disabled provider invalidates the fix but keeps the registration for when it returns. */
     override fun onProviderDisabled(provider: String) {
-        if (registered && provider == LocationManager.GPS_PROVIDER) mutableLocation.value = null
+        mutableLocation.value = null
     }
 
     private companion object {
-        const val LogTag = "RideLocationTracker"
-
         /** Fast enough for a usable route trace without pinning the GPS at maximum rate. */
         const val LocationUpdateIntervalMillis = 2_000L
 
@@ -123,17 +102,11 @@ class RideLocationTracker(context: Context) : LocationListener {
     }
 }
 
-/**
- * Whether a fix is recent enough to act on. A negative age means the fix is stamped in the
- * future, so the clocks disagree and the age cannot be trusted in either direction.
- */
+/** Whether a fix is recent enough to act on. */
 internal fun RideLocation.isFreshAt(
     nowElapsedRealtimeMillis: Long,
     maximumAgeMillis: Long = MaximumRideLocationAgeMillis,
-): Boolean {
-    val ageMillis = nowElapsedRealtimeMillis - fixElapsedRealtimeMillis
-    return fixElapsedRealtimeMillis > 0L && ageMillis in 0..maximumAgeMillis
-}
+): Boolean = nowElapsedRealtimeMillis - fixElapsedRealtimeMillis <= maximumAgeMillis
 
 /** Generous, because the consumers are weather and labelling rather than live positioning. */
 internal const val MaximumRideLocationAgeMillis = 30_000L

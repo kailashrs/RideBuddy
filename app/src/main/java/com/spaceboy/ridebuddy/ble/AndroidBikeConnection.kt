@@ -73,7 +73,7 @@ internal class AndroidBikeConnection(
     private val onAttemptsExhausted: () -> Unit,
 ) : BikeConnection {
     private val appContext = context.applicationContext
-    private val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
+    private val adapter = appContext.getSystemService(BluetoothManager::class.java).adapter
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val manager = BikeBleManager(appContext)
     private val telemetryStream = BikeTelemetryStream()
@@ -199,7 +199,6 @@ internal class AndroidBikeConnection(
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             return AttemptOutcome.Stop("Allow Nearby devices to connect to the motorcycle", "Allow Nearby devices access.")
         }
-        val adapter = adapter ?: return AttemptOutcome.Stop("Bluetooth is unavailable on this phone", "Bluetooth isn't available on this phone.")
         if (!adapter.isEnabled) return AttemptOutcome.Stop("Turn on Bluetooth to connect to the motorcycle", "Turn on Bluetooth.")
         val device = adapter.getRemoteDevice(target.address.toByteArray())
 
@@ -220,14 +219,8 @@ internal class AndroidBikeConnection(
             AttemptOutcome.Retry("Timed out connecting to the motorcycle after ${ConnectionTimeoutMillis}ms")
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
-            // A peer that is not this vehicle, or a discovery that returned nothing usable, is
-            // deterministic: retrying cannot help.
-            if (manager.profileIncomplete) {
-                AttemptOutcome.Stop("Motorcycle companion profile is incomplete", "Couldn't connect.")
-            } else {
-                val reason = (error as? RequestFailedException)?.let { statusName(it.status) } ?: error.javaClass.simpleName
-                AttemptOutcome.Retry("Connection failed: $reason")
-            }
+            val reason = (error as? RequestFailedException)?.let { statusName(it.status) } ?: error.javaClass.simpleName
+            AttemptOutcome.Retry("Connection failed: $reason")
         }
         if (failed != null) {
             closeLink()
@@ -326,15 +319,9 @@ internal class AndroidBikeConnection(
             BleCharacteristics.ProtectionChallenge -> answerChallenge(value)
 
             BleCharacteristics.Telemetry -> {
-                val acceptance = telemetryStream.accept(value, now, SystemClock::elapsedRealtime)
-                mutableDiagnostics.update {
-                    it.withFrame(frameLine, now).copy(
-                        telemetryHz = acceptance.telemetryHz,
-                        droppedRawTelemetryFrames = acceptance.droppedRawTelemetryFrames,
-                        malformedTelemetryFrames = it.malformedTelemetryFrames + if (acceptance.valid) 0 else 1,
-                    )
-                }
-                if (acceptance.valid) sessionEvidence.value = true
+                val telemetryHz = telemetryStream.accept(value, now, SystemClock::elapsedRealtime)
+                mutableDiagnostics.update { it.withFrame(frameLine, now).copy(telemetryHz = telemetryHz) }
+                sessionEvidence.value = true
                 return
             }
 
@@ -351,7 +338,6 @@ internal class AndroidBikeConnection(
             // The command is byte 1 of a three-byte event, not byte 0.
             BleCharacteristics.NavigationControl -> when (value.takeIf { it.size >= 3 }?.get(1)?.toInt()?.and(0xFF)) {
                 1 -> BikeControlEvent.StartNavigation
-                2 -> BikeControlEvent.SkipManeuver
                 3 -> BikeControlEvent.ExitNavigation
                 else -> null.also { journal.record("Unhandled navigation control ${value.toSpacedHex()}") }
             }?.let(mutableControls::tryEmit)
@@ -436,7 +422,6 @@ internal class AndroidBikeConnection(
     }
 
     private fun resetLinkDiagnostics(bonded: Boolean) {
-        manager.beginAttempt()
         sessionEvidence.value = false
         challengeAnswered = null
         lastChallenge = null
@@ -543,15 +528,9 @@ internal class AndroidBikeConnection(
     /** Nordic's manager, with this profile's characteristics indexed and its values routed to [onValue]. */
     private inner class BikeBleManager(context: Context) : BleManager(context) {
         private val characteristics = mutableMapOf<UUID, BluetoothGattCharacteristic>()
-        var profileIncomplete = false
-            private set
         val currentMtu: Int get() = mtu
 
         fun characteristic(uuid: UUID): BluetoothGattCharacteristic? = characteristics[uuid]
-
-        fun beginAttempt() {
-            profileIncomplete = false
-        }
 
         /**
          * Looked up across every service rather than under one: the vendor service UUID is not
@@ -568,10 +547,7 @@ internal class AndroidBikeConnection(
                     },
                 )
             }
-            val missing = RequiredCharacteristics.filterNot(characteristics::containsKey)
-            profileIncomplete = missing.isNotEmpty()
-            if (profileIncomplete) journal.record("Motorcycle companion profile is incomplete (missing ${missing.joinToString { it.shortName() }})")
-            return !profileIncomplete
+            return characteristics.keys.containsAll(RequiredCharacteristics)
         }
 
         override fun onServicesInvalidated() {

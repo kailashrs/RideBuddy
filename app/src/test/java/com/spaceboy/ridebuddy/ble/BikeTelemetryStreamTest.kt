@@ -1,36 +1,17 @@
 package com.spaceboy.ridebuddy.ble
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BikeTelemetryStreamTest {
     @Test
-    fun `publishes valid readings and rejects malformed payloads`() {
+    fun `publishes each reading with both clocks`() {
         val stream = BikeTelemetryStream()
-        var elapsedRealtimeCalls = 0
-        val malformed = stream.accept(ByteArray(8), 1_000L) {
-            elapsedRealtimeCalls++
-            2_000L
-        }
 
-        assertFalse(malformed.valid)
-        assertEquals(1, elapsedRealtimeCalls)
-        assertNull(stream.latestReading.value)
+        stream.accept(validTelemetryPayload(), 1_100L) { 2_100L }
 
-        val valid = stream.accept(validTelemetryPayload(), 1_100L) {
-            elapsedRealtimeCalls++
-            2_100L
-        }
-
-        assertTrue(valid.valid)
-        assertEquals(2, elapsedRealtimeCalls)
         assertEquals(1_100L, stream.latestReading.value?.receivedAtMillis)
         assertEquals(2_100L, stream.latestReading.value?.receivedAtElapsedRealtime)
-        // The OEM-rate diagnostic counts every telemetry notification, including malformed ones.
-        assertEquals(0.4, valid.telemetryHz, 0.0001)
     }
 
     @Test
@@ -39,40 +20,18 @@ class BikeTelemetryStreamTest {
         stream.accept(validTelemetryPayload(), 10_000L) { 20_000L }
 
         stream.reset()
-        val next = stream.accept(validTelemetryPayload(), 11_000L) { 21_000L }
+        val telemetryHz = stream.accept(validTelemetryPayload(), 11_000L) { 21_000L }
 
-        assertEquals(0.2, next.telemetryHz, 0.0001)
+        assertEquals(0.2, telemetryHz, 0.0001)
         assertEquals(11_000L, stream.latestReading.value?.receivedAtMillis)
     }
 
     @Test
-    fun `reports no dropped frames while the consumer keeps up`() {
-        val stream = BikeTelemetryStream()
-
-        val first = stream.accept(validTelemetryPayload(), 1_000L) { 2_000L }
-        val second = stream.accept(validTelemetryPayload(), 1_250L) { 2_250L }
-
-        assertEquals(0L, first.droppedRawTelemetryFrames)
-        assertEquals(0L, second.droppedRawTelemetryFrames)
-    }
-
-    @Test
-    fun `a malformed frame reports the running drop count rather than resetting it`() {
-        val stream = BikeTelemetryStream()
-        stream.accept(validTelemetryPayload(), 1_000L) { 2_000L }
-
-        val malformed = stream.accept(ByteArray(8), 1_250L) { 2_250L }
-
-        assertFalse(malformed.valid)
-        assertEquals(0L, malformed.droppedRawTelemetryFrames)
-    }
-
-    @Test
-    fun `wall clock changes do not retain old rate samples or affect freshness`() {
+    fun `the rate window runs on the monotonic clock`() {
         val stream = BikeTelemetryStream()
         stream.accept(validTelemetryPayload(), 100_000L) { 10_000L }
-        val next = stream.accept(validTelemetryPayload(), 1_000L) { 16_000L }
-        assertEquals(0.2, next.telemetryHz, 0.0001)
+        val telemetryHz = stream.accept(validTelemetryPayload(), 1_000L) { 16_000L }
+        assertEquals(0.2, telemetryHz, 0.0001)
         assertEquals(16_000L, stream.latestReading.value?.receivedAtElapsedRealtime)
     }
 

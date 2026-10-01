@@ -12,9 +12,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Ride history: summaries in one database, each ride's samples as one blob in another.
- *
- * The split exists for backup, not for queries — see [RawTelemetryDatabase]. It costs atomicity
- * across the two files, so an insert that fails on the samples side removes the summary again.
+ * The split exists for backup, not for queries — see [RawTelemetryDatabase].
  */
 class RideRepository(
     private val history: RideBuddyDatabase,
@@ -30,13 +28,8 @@ class RideRepository(
     suspend fun insert(ride: Ride, samples: List<RideSample> = emptyList()): Long {
         val id = history.rides().insert(ride.copy(id = 0))
         if (samples.isEmpty()) return id
-        try {
-            val data = withContext(Dispatchers.Default) { encodeSampleSeries(ride.startedAtMillis, samples) }
-            sampleStore.samples().upsert(RideSampleSeries(id, ride.startedAtMillis, data))
-        } catch (error: Exception) {
-            history.rides().delete(id)
-            throw error
-        }
+        val data = withContext(Dispatchers.Default) { encodeSampleSeries(ride.startedAtMillis, samples) }
+        sampleStore.samples().upsert(RideSampleSeries(id, ride.startedAtMillis, data))
         return id
     }
 
@@ -70,10 +63,7 @@ class RideRepository(
 
 internal fun List<RoutePoint>.encode(): String = joinToString(";") { "${it.latitude},${it.longitude}" }
 
-/** Skips any malformed point rather than failing: a bad preview must not hide the ride. */
-internal fun String?.decodeRoute(): List<RoutePoint> = this?.split(';').orEmpty().mapNotNull { encoded ->
-    val values = encoded.split(',', limit = 2)
-    val latitude = values.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
-    val longitude = values.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-    RoutePoint(latitude, longitude).takeIf(RoutePoint::isValid)
+internal fun String.decodeRoute(): List<RoutePoint> = if (isEmpty()) emptyList() else split(';').map { encoded ->
+    val (latitude, longitude) = encoded.split(',')
+    RoutePoint(latitude.toDouble(), longitude.toDouble())
 }

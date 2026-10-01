@@ -51,8 +51,6 @@ internal class BikeConnectionActions(
         val bike = manager.state.value.bike
         if (bike != null) {
             connectAssociatedBike(bike)
-        } else if (!manager.state.value.supported) {
-            onMessage("This phone doesn't support motorcycle pairing.")
         } else {
             manager.associate(
                 launchApproval = {

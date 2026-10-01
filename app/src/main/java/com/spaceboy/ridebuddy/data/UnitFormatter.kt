@@ -21,15 +21,11 @@ import kotlin.math.roundToInt
 object UnitFormatter {
     /** One decimal: a rider reads tenths of a kilometre, and nothing finer survives wheel speed. */
     fun distance(kilometres: Double, units: DistanceUnits, locale: Locale): String =
-        kilometres.takeIf { it.isFinite() && it >= 0.0 }?.let {
-            "%.1f %s".format(locale, distanceValue(it, units), distanceUnit(units))
-        } ?: "— ${distanceUnit(units)}"
+        "%.1f %s".format(locale, distanceValue(kilometres, units), distanceUnit(units))
 
     /** Whole units: the cluster itself reports speed to the nearest km/h. */
     fun speed(kph: Double, units: DistanceUnits, locale: Locale): String =
-        kph.takeIf { it.isFinite() && it >= 0.0 }?.let {
-            "%.0f %s".format(locale, chartSpeed(it, units), speedUnit(units))
-        } ?: "— ${speedUnit(units)}"
+        "%.0f %s".format(locale, chartSpeed(kph, units), speedUnit(units))
 
     /** The numeric distance in the rider's units, for charts that format their own labels. */
     fun distanceValue(kilometres: Double, units: DistanceUnits): Double =
@@ -50,7 +46,7 @@ object UnitFormatter {
         kilometresPerLitre: Double?,
         units: DistanceUnits,
         locale: Locale = Locale.getDefault(),
-    ): Double? = kilometresPerLitre?.takeIf { it.isFinite() && it > 0.0 }?.let { value ->
+    ): Double? = kilometresPerLitre?.let { value ->
         if (units == DistanceUnits.Metric) value
         else if (DistanceUnits.usesUsGallons(locale)) value * KilometresPerLitreToUsMpg
         else value * KilometresPerLitreToImperialMpg
@@ -65,7 +61,7 @@ object UnitFormatter {
     fun speedFromChart(value: Double, units: DistanceUnits): Double =
         if (units == DistanceUnits.Metric) value else value / KmToMiles
     fun fuel(litres: Double?, units: DistanceUnits, locale: Locale): String =
-        litres?.takeIf { it.isFinite() && it >= 0.0 }?.let { value ->
+        litres?.let { value ->
             if (units == DistanceUnits.Metric) "%.1f L".format(locale, value)
             else "%.1f gal".format(locale, value * gallonsPerLitre(locale))
         } ?: if (units == DistanceUnits.Metric) "— L" else "— gal"
@@ -75,14 +71,13 @@ object UnitFormatter {
      * kilometre and feet below a tenth of a mile, switching to the larger unit above.
      */
     fun maneuverDistance(metres: Int, units: DistanceUnits, locale: Locale): String {
-        val safeMetres = metres.coerceAtLeast(0)
         return if (units == DistanceUnits.Metric) {
-            if (safeMetres < MetresPerKilometre) "$safeMetres m"
-            else "%.1f km".format(locale, safeMetres / MetresPerKilometre.toDouble())
+            if (metres < MetresPerKilometre) "$metres m"
+            else "%.1f km".format(locale, metres / MetresPerKilometre.toDouble())
         } else {
-            val miles = safeMetres / MetresPerMile
+            val miles = metres / MetresPerMile
             if (miles < MinimumDisplayedMiles) {
-                "%d ft".format(locale, (safeMetres * FeetPerMetre).roundToInt())
+                "%d ft".format(locale, (metres * FeetPerMetre).roundToInt())
             } else "%.1f mi".format(locale, miles)
         }
     }

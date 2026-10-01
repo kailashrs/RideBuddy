@@ -189,8 +189,8 @@ section headings, settings, dialogs and onboarding copy.
 “Telemetry” survives in three places, all deliberate:
 
 - Developer tools — the diagnostics screen, its shared report and the stationary TFT test.
-  That audience wants the precise word, and the figures there (frame rate, malformed frames,
-  packet-gap estimate) are not ride data in any useful sense.
+  That audience wants the precise word, and the figures there (frame rate, packet-gap
+  estimate) are not ride data in any useful sense.
 - Code identifiers, log output and Compose list keys, which no rider reads.
 - The stored backup key `telemetryDurationMillis` and the SQLite column `telemetry_duration`.
   Renaming either breaks every existing backup and would need a schema migration to buy
