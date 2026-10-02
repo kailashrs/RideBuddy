@@ -72,20 +72,17 @@ data class RoutePoint(val latitude: Double, val longitude: Double)
 /** Shared by everything that turns a number of days into a cutoff. */
 internal const val MillisPerDay = 86_400_000L
 
-/** Window the insights screen aggregates over. A null [days] means no lower bound. */
 /**
- * The insight tabs' windows, each a rolling span back from now.
- *
- * Rolling rather than calendar, because the tabs are labelled "1D", "7D", "30D" and a tab
- * labelled with a length should cover that length. A calendar "today" made the first tab
- * shrink towards nothing as midnight approached and empty itself just after.
+ * The insight tabs' windows: calendar ranges in the phone's zone, ending now. "This week" and
+ * "This month" mean what the History filters of the same name mean. Last 3 months starts on
+ * this day three months ago rather than on a month boundary, so it always spans three months.
  */
-enum class InsightPeriod(val days: Int?) {
-    OneDay(1),
-    SevenDays(7),
-    ThirtyDays(30),
-    NinetyDays(90),
-    AllTime(null),
+enum class InsightPeriod {
+    Today,
+    ThisWeek,
+    ThisMonth,
+    LastThreeMonths,
+    AllTime,
 }
 
 /**

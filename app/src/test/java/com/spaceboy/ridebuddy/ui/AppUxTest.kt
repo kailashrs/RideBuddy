@@ -60,7 +60,7 @@ class AppUxTest {
     @Config(qualifiers = "en-rGB-w320dp-h740dp-xxhdpi")
     fun insightsLargeTextHasReadablePeriodChoicesAndMetrics() {
         RuntimeEnvironment.setFontScale(2f)
-        val period = mutableStateOf(InsightPeriod.ThirtyDays)
+        val period = mutableStateOf(InsightPeriod.ThisMonth)
         compose.setContent {
             Rs457Theme(themeMode = ThemeMode.Light, dynamicColor = false) {
                 Surface(Modifier.fillMaxSize()) {
@@ -69,9 +69,9 @@ class AppUxTest {
                 }
             }
         }
-        compose.onNodeWithContentDescription("Last 7 days").assertIsDisplayed().performClick()
-        assertEquals(InsightPeriod.SevenDays, period.value)
-        compose.onNodeWithContentDescription("Last 7 days").assertIsSelected()
+        compose.onNodeWithText("Last 3 months").performScrollTo().assertIsDisplayed().performClick()
+        assertEquals(InsightPeriod.LastThreeMonths, period.value)
+        compose.onNodeWithText("Last 3 months").assertIsSelected()
         capture("insights-large-text")
         compose.onNodeWithText("Duration").performScrollTo().assertIsDisplayed()
         capture("insights-metrics-large-text")
@@ -82,7 +82,7 @@ class AppUxTest {
     fun insightsKeepsTwoMetricsPerRowOnANormalPhone() {
         compose.setContent { Rs457Theme(dynamicColor = false) {
             InsightsScreen(insights = AppUiFixture.state(MainUiState()).insights, units = DistanceUnits.Metric,
-                selectedPeriod = InsightPeriod.ThirtyDays, onPeriodSelected = {})
+                selectedPeriod = InsightPeriod.ThisMonth, onPeriodSelected = {})
         } }
         compose.onNodeWithText("Rides").performScrollTo()
         val rides = compose.onNodeWithText("Rides").getUnclippedBoundsInRoot()
@@ -112,11 +112,11 @@ class AppUxTest {
     @Test fun insightsEmptyPeriodShowsOneClearState() {
         compose.setContent { Rs457Theme(dynamicColor = false) {
             InsightsScreen(insights = RideInsights(), units = DistanceUnits.Metric,
-                selectedPeriod = InsightPeriod.SevenDays, onPeriodSelected = {})
+                selectedPeriod = InsightPeriod.ThisWeek, onPeriodSelected = {})
         } }
         compose.onNodeWithText("No rides in this period").assertIsDisplayed()
         compose.onNodeWithText("Averages").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Last 7 days").assertExists()
+        compose.onNodeWithText("This week").assertIsSelected()
     }
 
     @Test fun settingsCarryTheMotorcycleIdentityAndSetupRows() {

@@ -109,7 +109,7 @@ class MainViewModel internal constructor(
     val rides = rideRepository.rides
     val guidance = navigationController.guidance
     val settings = appSettings.settings
-    private val insightPeriod = MutableStateFlow(InsightPeriod.ThirtyDays)
+    private val insightPeriod = MutableStateFlow(InsightPeriod.ThisMonth)
     val selectedInsightPeriod: StateFlow<InsightPeriod> = insightPeriod.asStateFlow()
     val insights: StateFlow<RideInsights> = combine(rides, insightPeriod) { currentRides, period ->
         InsightsCalculator.calculate(currentRides, period)

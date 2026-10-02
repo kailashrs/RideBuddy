@@ -57,7 +57,10 @@ internal fun filterRideHistory(
 
 internal fun HistoryFilter.dateRange(today: LocalDate, locale: Locale): HistoryFilter.Dates? = when (this) {
     HistoryFilter.All -> null
-    HistoryFilter.ThisWeek -> HistoryFilter.Dates(today.with(WeekFields.of(locale).dayOfWeek(), 1), today)
+    HistoryFilter.ThisWeek -> HistoryFilter.Dates(today.startOfWeek(locale), today)
     HistoryFilter.ThisMonth -> HistoryFilter.Dates(today.withDayOfMonth(1), today)
     is HistoryFilter.Dates -> this
 }
+
+/** The first day of [this] date's week, on the day [locale] starts its weeks. */
+internal fun LocalDate.startOfWeek(locale: Locale): LocalDate = with(WeekFields.of(locale).dayOfWeek(), 1)

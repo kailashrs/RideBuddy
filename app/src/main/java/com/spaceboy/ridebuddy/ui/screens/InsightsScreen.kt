@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,16 +28,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.InsightPeriod
@@ -61,12 +58,11 @@ fun InsightsScreen(
     selectedPeriod: InsightPeriod,
     onPeriodSelected: (InsightPeriod) -> Unit,
 ) {
-    val locale = LocalConfiguration.current.locales[0]
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PeriodSelector(selectedPeriod, onPeriodSelected)
@@ -75,11 +71,19 @@ fun InsightsScreen(
                 icon = Icons.Outlined.Route,
                 title = if (selectedPeriod == InsightPeriod.AllTime) "Your rides will appear here" else "No rides in this period",
                 body = null,
-                modifier = Modifier.heightIn(min = 320.dp),
+                modifier = Modifier.heightIn(min = 320.dp).padding(horizontal = 16.dp),
             )
             return@Column
         }
+        InsightFigures(insights, units)
+    }
+}
 
+/** The period's total, its distance trend, then totals, averages and records. */
+@Composable
+private fun InsightFigures(insights: RideInsights, units: DistanceUnits) {
+    val locale = LocalConfiguration.current.locales[0]
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Total distance", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -208,36 +212,23 @@ private fun DistanceTrend(distancesKilometres: List<Double>, units: DistanceUnit
     }
 }
 
+/** Filter chips, as on History, scrolling sideways rather than squeezing five labels into a row. */
 @Composable
 private fun PeriodSelector(selectedPeriod: InsightPeriod, onSelected: (InsightPeriod) -> Unit) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        Periods.forEachIndexed { index, (period, label) ->
-            SegmentedButton(
-                selected = period == selectedPeriod,
-                onClick = { onSelected(period) },
-                shape = SegmentedButtonDefaults.itemShape(index, Periods.size),
-                modifier = Modifier.semantics { contentDescription = period.periodLabel() },
-                // The check icon would not fit five segments at phone width; colour marks the choice.
-                icon = {},
-                label = { Text(label, maxLines = 1, softWrap = false) },
-            )
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Periods.forEach { (period, label) ->
+            FilterChip(selected = period == selectedPeriod, onClick = { onSelected(period) }, label = { Text(label) })
         }
     }
 }
 
-private fun InsightPeriod.periodLabel(): String = when (this) {
-    InsightPeriod.OneDay -> "Last 24 hours"
-    InsightPeriod.SevenDays -> "Last 7 days"
-    InsightPeriod.ThirtyDays -> "Last 30 days"
-    InsightPeriod.NinetyDays -> "Last 90 days"
-    InsightPeriod.AllTime -> "All time"
-}
-
-/** Period selector, with the short labels the segmented buttons show. */
 private val Periods = listOf(
-    InsightPeriod.OneDay to "1D",
-    InsightPeriod.SevenDays to "7D",
-    InsightPeriod.ThirtyDays to "30D",
-    InsightPeriod.NinetyDays to "90D",
+    InsightPeriod.Today to "Today",
+    InsightPeriod.ThisWeek to "This week",
+    InsightPeriod.ThisMonth to "This month",
+    InsightPeriod.LastThreeMonths to "Last 3 months",
     InsightPeriod.AllTime to "All",
 )

@@ -1,74 +1,101 @@
 package com.spaceboy.ridebuddy.data
 
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class InsightsCalculatorTest {
-    private val fixedZone: ZoneOffset = ZoneOffset.UTC
+    private val zone = ZoneId.of("Asia/Kolkata")
 
-    private fun clockAt(millis: Long): Clock = Clock.fixed(Instant.ofEpochMilli(millis), fixedZone)
+    /** Thursday 20 August 2026, 18:00 in the rider's zone. */
+    private val now = ZonedDateTime.of(2026, 8, 20, 18, 0, 0, 0, zone)
+
+    private fun at(text: String): Long = LocalDateTime.parse(text).atZone(zone).toInstant().toEpochMilli()
+
+    private fun calculate(rides: List<Ride>, period: InsightPeriod, locale: Locale = Locale.UK) =
+        InsightsCalculator.calculate(rides, period, now, locale)
 
     @Test
-    fun aggregatesCurrentPeriodAndComparesPreviousDistance() {
-        val day = 86_400_000L
-        val now = 100 * day
+    fun todayStartsAtLocalMidnightAndComparesWithYesterdayUpToTheSameTime() {
         val rides = listOf(
-            ride(start = now - day, distance = 30.0, durationHours = 1, speed = 30.0),
-            ride(start = now - 2 * day, distance = 20.0, durationHours = 1, speed = 20.0),
-            ride(start = now - 8 * day, distance = 25.0, durationHours = 1, speed = 25.0),
+            ride(start = at("2026-08-20T07:00"), distance = 30.0, durationHours = 1, speed = 30.0),
+            // Late last night: yesterday on the calendar, so not today.
+            ride(start = at("2026-08-19T23:30"), distance = 50.0, durationHours = 1, speed = 50.0),
+            // Yesterday before 18:00 is the comparison; yesterday's late ride is not.
+            ride(start = at("2026-08-19T09:00"), distance = 20.0, durationHours = 1, speed = 20.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.SevenDays, clockAt(now))
+        val result = calculate(rides, InsightPeriod.Today)
+
+        assertEquals(1, result.rideCount)
+        assertEquals(30.0, result.totalDistanceKilometres, 0.001)
+        assertEquals(50.0, requireNotNull(result.distanceChangePercent), 0.001)
+    }
+
+    @Test
+    fun thisWeekStartsOnTheLocalesFirstDayOfTheWeek() {
+        // Sunday 16 August: this week in the US, last week in the UK, whose weeks start on Monday.
+        val sunday = listOf(ride(start = at("2026-08-16T10:00"), distance = 40.0, durationHours = 1, speed = 40.0))
+
+        assertEquals(1, calculate(sunday, InsightPeriod.ThisWeek, Locale.US).rideCount)
+        assertEquals(0, calculate(sunday, InsightPeriod.ThisWeek, Locale.UK).rideCount)
+    }
+
+    @Test
+    fun thisMonthIsTheCalendarMonthComparedWithLastMonthToTheSameDay() {
+        val rides = listOf(
+            ride(start = at("2026-08-01T08:00"), distance = 30.0, durationHours = 1, speed = 30.0),
+            ride(start = at("2026-08-20T08:00"), distance = 30.0, durationHours = 1, speed = 30.0),
+            ride(start = at("2026-07-31T08:00"), distance = 90.0, durationHours = 1, speed = 30.0),
+            ride(start = at("2026-07-10T08:00"), distance = 40.0, durationHours = 1, speed = 30.0),
+        )
+
+        val result = calculate(rides, InsightPeriod.ThisMonth)
 
         assertEquals(2, result.rideCount)
-        assertEquals(50.0, result.totalDistanceKilometres, 0.001)
-        assertEquals(25.0, result.averageSpeedKph, 0.001)
-        assertEquals(100.0, result.distanceChangePercent ?: 0.0, 0.001)
+        assertEquals(60.0, result.totalDistanceKilometres, 0.001)
+        // Only 1–20 July compares with 1–20 August, so the end-of-July ride is left out.
+        assertEquals(50.0, requireNotNull(result.distanceChangePercent), 0.001)
     }
 
     @Test
-    fun theOneDayPeriodCoversARollingTwentyFourHours() {
-        val now = Instant.parse("2026-08-24T12:00:00Z").toEpochMilli()
+    fun lastThreeMonthsReachesBackToThisDayThreeMonthsAgo() {
         val rides = listOf(
-            // 23 hours ago: inside the day, even though it is "yesterday" on the calendar.
-            ride(start = now - 23 * 3_600_000L, distance = 40.0, durationHours = 1, speed = 40.0),
-            // 25 hours ago: outside it, and so counts as the preceding window instead.
-            ride(start = now - 25 * 3_600_000L, distance = 20.0, durationHours = 1, speed = 20.0),
+            ride(start = at("2026-05-20T08:00"), distance = 25.0, durationHours = 1, speed = 25.0),
+            ride(start = at("2026-05-19T08:00"), distance = 25.0, durationHours = 1, speed = 25.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.OneDay, now)
+        val result = calculate(rides, InsightPeriod.LastThreeMonths)
 
         assertEquals(1, result.rideCount)
-        assertEquals(40.0, result.totalDistanceKilometres, 0.001)
-        assertEquals(100.0, result.distanceChangePercent ?: 0.0, 0.001)
+        assertEquals(0.0, requireNotNull(result.distanceChangePercent), 0.001)
     }
 
     @Test
-    fun theOneDayPeriodDoesNotEmptyItselfJustAfterMidnight() {
-        // The calendar version made this tab useless around midnight: a ride from the
-        // evening fell out of "today" the moment the date turned over, so a rider checking
-        // their numbers at 00:30 saw nothing.
-        val justAfterMidnight = Instant.parse("2026-08-25T00:30:00Z").toEpochMilli()
-        val eveningRide = ride(
-            start = Instant.parse("2026-08-24T19:00:00Z").toEpochMilli(),
-            distance = 40.0,
-            durationHours = 1,
-            speed = 40.0,
+    fun theDistanceTrendFollowsThePeriodOldestRideFirst() {
+        val rides = listOf(
+            ride(start = at("2026-08-19T08:00"), distance = 30.0, durationHours = 1, speed = 30.0),
+            ride(start = at("2026-08-18T08:00"), distance = 20.0, durationHours = 1, speed = 20.0),
+            // Last week, so it must not reach the chart.
+            ride(start = at("2026-08-14T08:00"), distance = 25.0, durationHours = 1, speed = 25.0),
         )
 
-        val result = InsightsCalculator.calculate(listOf(eveningRide), InsightPeriod.OneDay, justAfterMidnight)
+        assertEquals(listOf(20.0, 30.0), calculate(rides, InsightPeriod.ThisWeek).distanceTrendKilometres)
+    }
 
-        assertEquals(1, result.rideCount)
-        assertEquals(40.0, result.totalDistanceKilometres, 0.001)
+    @Test
+    fun aPeriodWithNoRidesCanStillHaveADecline() {
+        val lastWeek = listOf(ride(start = at("2026-08-12T08:00"), distance = 10.0, durationHours = 1, speed = 10.0))
+        assertEquals(-100.0, requireNotNull(calculate(lastWeek, InsightPeriod.ThisWeek).distanceChangePercent), 0.0)
     }
 
     @Test
     fun emptyInputProducesZeroesAndNoTrend() {
-        val result = InsightsCalculator.calculate(emptyList(), InsightPeriod.ThirtyDays, 1_000L)
+        val result = calculate(emptyList(), InsightPeriod.ThisMonth)
 
         assertEquals(0, result.rideCount)
         assertEquals(0.0, result.totalDistanceKilometres, 0.0)
@@ -77,13 +104,12 @@ class InsightsCalculatorTest {
 
     @Test
     fun mileageIsDerivedFromCombinedDistanceAndFuel() {
-        val now = 10_000L
         val rides = listOf(
             ride(start = 8_000L, distance = 1.0, durationHours = 1, speed = 10.0, fuelLitres = 0.1),
             ride(start = 9_000L, distance = 100.0, durationHours = 1, speed = 20.0, fuelLitres = 5.0),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, now)
+        val result = calculate(rides, InsightPeriod.AllTime)
 
         assertEquals(5.1, requireNotNull(result.estimatedFuelLitres), 0.000_001)
         assertEquals(101.0 / 5.1, requireNotNull(result.averageMileageKilometresPerLitre), 0.000_001)
@@ -96,7 +122,7 @@ class InsightsCalculatorTest {
             ride(start = 9_000L, distance = 100.0, durationHours = 1, speed = 20.0, fuelLitres = null),
         )
 
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
+        val result = calculate(rides, InsightPeriod.AllTime)
 
         // The ride that did report fuel still counts; requiring every ride to report meant one
         // gap hid the whole period's figure.
@@ -105,39 +131,14 @@ class InsightsCalculatorTest {
     }
 
     @Test
-    fun `the distance trend follows the period, oldest ride first`() {
-        val day = 86_400_000L
-        val now = 100 * day
-        val rides = listOf(
-            ride(start = now - day, distance = 30.0, durationHours = 1, speed = 30.0),
-            ride(start = now - 2 * day, distance = 20.0, durationHours = 1, speed = 20.0),
-            // Outside the seven-day window, so it must not reach the chart.
-            ride(start = now - 8 * day, distance = 25.0, durationHours = 1, speed = 25.0),
-        )
-
-        val trend = InsightsCalculator
-            .calculate(rides, InsightPeriod.SevenDays, clockAt(now))
-            .distanceTrendKilometres
-
-        assertEquals(listOf(20.0, 30.0), trend)
-    }
-
-    @Test
     fun telemetryCoverageWeightsAveragesWithoutIncludingReconnectGaps() {
         val rides = listOf(
             ride(0, 36.0, 2, 36.0).copy(telemetryDurationMillis = 3_600_000L, averageRpm = 3_000.0),
             ride(1, 72.0, 1, 72.0).copy(telemetryDurationMillis = 3_600_000L, averageRpm = 6_000.0),
         )
-        val result = InsightsCalculator.calculate(rides, InsightPeriod.AllTime, 10_000L)
+        val result = calculate(rides, InsightPeriod.AllTime)
         assertEquals(54.0, result.averageSpeedKph, 0.001)
         assertEquals(4_500.0, result.averageRpm, 0.001)
-    }
-
-    @Test
-    fun aPeriodWithNoRidesCanStillHaveADecline() {
-        val day = 86_400_000L
-        val result = InsightsCalculator.calculate(listOf(ride(10 * day, 10.0, 1, 10.0)), InsightPeriod.SevenDays, 20 * day)
-        assertEquals(-100.0, requireNotNull(result.distanceChangePercent), 0.0)
     }
 
     private fun ride(

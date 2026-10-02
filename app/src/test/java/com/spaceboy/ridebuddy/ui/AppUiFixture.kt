@@ -42,7 +42,7 @@ internal object AppUiFixture {
         insights = RideInsights(rideCount = 3, totalDistanceKilometres = 142.6, totalDurationMillis = 14_520_000,
             averageSpeedKph = 35.4, averageRpm = 4560.0, averageThrottlePercent = 29.8,
             distanceTrendKilometres = listOf(28.6, 48.0, 66.0)),
-        insightPeriod = InsightPeriod.ThirtyDays,
+        insightPeriod = InsightPeriod.ThisMonth,
         guidance = GuidanceState(),
         destinations = destinations,
         settings = AppSettings(distanceUnits = DistanceUnits.Metric, dynamicColor = false, onboardingComplete = true),
