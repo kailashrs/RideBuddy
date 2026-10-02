@@ -1,5 +1,6 @@
 package com.spaceboy.ridebuddy.data
 
+import com.spaceboy.ridebuddy.core.location.needsPlaceName
 import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.data.db.Destination
 import com.spaceboy.ridebuddy.data.db.DestinationDao
@@ -33,7 +34,9 @@ class DestinationRepository(
     suspend fun recordTrip(destination: NavigationDestination) {
         val known = dao.all().nearest(destination.latitude, destination.longitude)
         if (known != null) {
-            dao.update(known.copy(tripCount = known.tripCount + 1, lastTripAtMillis = now()))
+            // A place first recorded without a name gets another lookup each time it is visited.
+            val name = if (isUnnamed(known.placeName)) placeName(destination) else known.placeName
+            dao.update(known.copy(placeName = name, tripCount = known.tripCount + 1, lastTripAtMillis = now()))
         } else {
             dao.insert(Destination(
                 latitude = destination.latitude,
@@ -72,13 +75,16 @@ class DestinationRepository(
     }
 
     /**
-     * A share whose address lookup timed out while the rider waited arrives as [GenericTitle];
-     * by the time guidance starts the lookup has more time, so it is tried once more.
+     * A share whose address lookup timed out while the rider waited arrives as [GenericTitle], and
+     * some shares name a place only by its coordinates. By the time guidance starts the lookup
+     * has more time, so either is looked up once more.
      */
     private suspend fun placeName(destination: NavigationDestination): String =
-        destination.title.takeUnless { it == GenericTitle }
+        destination.title.takeUnless(::isUnnamed)
             ?: addressFirstLine(destination.latitude, destination.longitude)
             ?: destination.title
+
+    private fun isUnnamed(title: String) = title == GenericTitle || needsPlaceName(title)
 
     internal companion object {
         const val RecentCount = 3

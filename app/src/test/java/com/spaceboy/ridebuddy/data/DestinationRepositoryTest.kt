@@ -63,10 +63,21 @@ class DestinationRepositoryTest {
 
     @Test fun a_place_without_a_name_is_called_by_its_address() = runBlocking {
         repository.recordTrip(NavigationDestination(13.0, 80.0, DestinationRepository.GenericTitle))
+        repository.recordTrip(NavigationDestination(14.0, 80.0, "13.0827, 80.2707"))
         repository.recordTrip(NavigationDestination(15.0, 80.0, "Phoenix Marketcity"))
 
-        assertEquals(listOf("12 Anna Salai", "Phoenix Marketcity"), all().sortedBy { it.latitude }.map { it.placeName })
-        assertEquals(1, addressLookups)
+        assertEquals(listOf("12 Anna Salai", "12 Anna Salai", "Phoenix Marketcity"), all().sortedBy { it.latitude }.map { it.placeName })
+        assertEquals(2, addressLookups)
+    }
+
+    @Test fun a_place_recorded_by_its_coordinates_is_named_on_the_next_trip() = runBlocking {
+        // As 1.2.0 stored a share that named the place only by its coordinates.
+        database.destinations().insert(Destination(latitude = 13.0, longitude = 80.0, placeName = "13.0000, 80.0000", tripCount = 1))
+
+        repository.recordTrip(NavigationDestination(13.0001, 80.0, "13.0001, 80.0000"))
+
+        assertEquals("12 Anna Salai", all().single().placeName)
+        assertEquals(2, all().single().tripCount)
     }
 
     @Test fun saving_a_recent_place_keeps_its_trips_and_renaming_changes_only_the_name() = runBlocking {
