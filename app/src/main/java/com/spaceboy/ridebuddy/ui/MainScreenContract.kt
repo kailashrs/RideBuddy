@@ -16,6 +16,7 @@ import com.spaceboy.ridebuddy.data.LiveRideMetrics
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideInsights
 import com.spaceboy.ridebuddy.data.RideSample
+import com.spaceboy.ridebuddy.data.TripSummary
 import com.spaceboy.ridebuddy.domain.BikeConnectionState
 import com.spaceboy.ridebuddy.domain.BikeIdentity
 import com.spaceboy.ridebuddy.domain.BleDiagnostics
@@ -57,6 +58,7 @@ data class MainScreenState(
     val bleCapture: BleCaptureState,
     val live: LiveTelemetryStreams,
     val rides: List<Ride>,
+    val trips: List<TripSummary>,
     val insights: RideInsights,
     val insightPeriod: InsightPeriod,
     val guidance: GuidanceState,
@@ -100,6 +102,9 @@ data class MainScreenActions(
     val onAssociateBike: () -> Unit,
     val onForgetBike: () -> Unit,
     val onRideSelected: (Ride) -> Unit,
+    val onTripSelected: (TripSummary) -> Unit,
+    /** Creates a trip when the id is null, otherwise renames it and replaces its rides. */
+    val onSaveTrip: (id: Long?, name: String, rideIds: Set<Long>) -> Unit,
     val onDistanceUnitsChanged: (DistanceUnits) -> Unit,
     val onVoiceGuidanceChanged: (Boolean) -> Unit,
     val onAvoidTollsChanged: (Boolean) -> Unit,

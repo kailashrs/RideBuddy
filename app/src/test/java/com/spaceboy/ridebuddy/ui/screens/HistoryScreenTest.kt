@@ -138,7 +138,7 @@ class HistoryScreenTest {
         RuntimeEnvironment.setFontScale(2f)
         show(fontScale = 2f)
         awaitText("4 rides · 65.0 km · 2h 0m")
-        compose.onNodeWithText("All rides").assertIsDisplayed()
+        compose.onNodeWithText("This week").assertIsDisplayed()
         capture("history-large-text")
         choose("Choose dates")
         compose.onNodeWithText("Apply").assertIsDisplayed()

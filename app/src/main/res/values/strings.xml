@@ -32,6 +32,8 @@
     <string name="tft_test_confirm_yes">Looks correct</string>
     <string name="tft_test_confirm_no">Did not appear</string>
     <string name="history_all_rides">All rides</string>
+    <string name="history_tab_rides">Rides</string>
+    <string name="history_tab_trips">Trips</string>
     <string name="history_this_week">This week</string>
     <string name="history_this_month">This month</string>
     <string name="history_choose_dates">Choose dates</string>

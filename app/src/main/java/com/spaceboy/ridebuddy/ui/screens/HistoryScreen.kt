@@ -31,10 +31,13 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,6 +61,7 @@ import com.spaceboy.ridebuddy.data.DistanceUnits
 import com.spaceboy.ridebuddy.data.HistoryFilter
 import com.spaceboy.ridebuddy.data.Ride
 import com.spaceboy.ridebuddy.data.RideHistory
+import com.spaceboy.ridebuddy.data.TripSummary
 import com.spaceboy.ridebuddy.data.UnitFormatter
 import com.spaceboy.ridebuddy.data.dateRange
 import com.spaceboy.ridebuddy.data.filterRideHistory
@@ -75,13 +79,19 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Filter state is saved by the existing per-tab SaveableStateProvider. */
+/**
+ * Rides and the trips they are grouped into, as two tabs. Filter and tab state are saved by the
+ * existing per-tab SaveableStateProvider.
+ */
 @Composable
 fun HistoryScreen(
     modifier: Modifier = Modifier,
     rides: List<Ride>,
     units: DistanceUnits,
     onRideSelected: (Ride) -> Unit,
+    trips: List<TripSummary> = emptyList(),
+    onTripSelected: (TripSummary) -> Unit = {},
+    onSaveTrip: (id: Long?, name: String, rideIds: Set<Long>) -> Unit = { _, _, _ -> },
     clock: Clock? = null,
 ) {
     val locale = LocalConfiguration.current.locales[0]
@@ -131,14 +141,31 @@ fun HistoryScreen(
         return
     }
 
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = tab) {
+            HistoryTabs.forEachIndexed { index, label ->
+                // Per the M3 tab spec the inactive label is onSurfaceVariant; the default draws both in primary.
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(stringResource(label)) },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (tab == TripsTabIndex) {
+            TripsTab(trips, rides, units, onTripSelected, onSaveTrip, Modifier.weight(1f))
+            return@Column
+        }
         // Filter chips, per Material: the presets are one tap, and the date chip opens the picker
         // and then carries the chosen range as its label.
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, top = 12.dp, end = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(HistoryFilter.All, HistoryFilter.ThisWeek, HistoryFilter.ThisMonth).forEach { option ->
+            listOf(HistoryFilter.ThisWeek, HistoryFilter.ThisMonth, HistoryFilter.All).forEach { option ->
                 FilterChip(
                     selected = filter == option,
                     onClick = { selectFilter(option) },
@@ -196,7 +223,7 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun historyDayLabel(date: LocalDate, today: LocalDate, locale: Locale): String = when (date) {
+internal fun historyDayLabel(date: LocalDate, today: LocalDate, locale: Locale): String = when (date) {
     today -> stringResource(R.string.history_today)
     today.minusDays(1) -> stringResource(R.string.history_yesterday)
     else -> date.format(DateTimeFormatter.ofPattern(
@@ -208,15 +235,20 @@ private fun historyFilterLabel(filter: HistoryFilter, today: LocalDate, locale: 
     HistoryFilter.All -> stringResource(R.string.history_all_rides)
     HistoryFilter.ThisWeek -> stringResource(R.string.history_this_week)
     HistoryFilter.ThisMonth -> stringResource(R.string.history_this_month)
-    is HistoryFilter.Dates -> remember(filter, today.year, locale) {
+    is HistoryFilter.Dates -> dateRangeLabel(filter.start, filter.endInclusive, today, locale)
+}
+
+/** "3–5 Oct", with the year only when the range leaves this one; a single day reads as that day. */
+@Composable
+internal fun dateRangeLabel(start: LocalDate, endInclusive: LocalDate, today: LocalDate, locale: Locale): String =
+    remember(start, endInclusive, today.year, locale) {
         // The interval is made from calendar dates, so format it in UTC without shifting a day.
         val formatter = DateIntervalFormat.getInstance(
-            if (filter.start.year == today.year && filter.endInclusive.year == today.year) "MMMd" else "yMMMd", locale)
+            if (start.year == today.year && endInclusive.year == today.year) "MMMd" else "yMMMd", locale)
         formatter.timeZone = TimeZone.getTimeZone("UTC")
-        formatter.format(DateInterval(filter.start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-            filter.endInclusive.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()))
+        formatter.format(DateInterval(start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            endInclusive.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()))
     }
-}
 
 private val HistoryFilterSaver = listSaver<HistoryFilter, String>(
     save = { when (it) {
@@ -237,15 +269,12 @@ private val HistoryFilterSaver = listSaver<HistoryFilter, String>(
 
 /** One ride: where it went and the headline figures, with the route inside its details. */
 @Composable
-private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) -> Unit) {
+internal fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) -> Unit) {
     val locale = LocalConfiguration.current.locales[0]
     OutlinedCard(onClick = { onRideSelected(ride) }, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column {
-                Text(
-                    if (ride.startArea != null || ride.endArea != null) ride.routeLabel() else "Ride",
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Text(ride.title(), style = MaterialTheme.typography.titleMedium)
                 Text(
                     android.text.format.DateFormat.getTimeFormat(LocalContext.current).format(Date(ride.startedAtMillis)),
                     style = MaterialTheme.typography.bodyMedium,
@@ -266,6 +295,12 @@ private fun RideCard(ride: Ride, units: DistanceUnits, onRideSelected: (Ride) ->
         }
     }
 }
+
+/** Where a ride went, or just "Ride" when it was recorded without a location. */
+internal fun Ride.title(): String = if (startArea != null || endArea != null) routeLabel() else "Ride"
+
+private const val TripsTabIndex = 1
+private val HistoryTabs = listOf(R.string.history_tab_rides, R.string.history_tab_trips)
 
 /** Compact duration: minutes alone under an hour, hours and minutes above it. */
 internal fun formatDuration(millis: Long): String {

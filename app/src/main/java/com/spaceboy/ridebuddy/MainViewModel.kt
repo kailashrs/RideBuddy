@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.data.DestinationRepository
+import com.spaceboy.ridebuddy.data.TripRepository
 import com.spaceboy.ridebuddy.ble.BleCaptureRecorder
 import com.spaceboy.ridebuddy.core.navigation.NavigationApiKey
 import com.spaceboy.ridebuddy.core.navigation.NavigationController
@@ -71,6 +72,7 @@ class MainViewModel internal constructor(
     navigationController: NavigationController,
     private val appSettings: AppSettingsRepository,
     private val destinationRepository: DestinationRepository,
+    private val tripRepository: TripRepository,
 ) : ViewModel() {
     private val sharedDestinationStateStore = SharedDestinationStateStore(savedStateHandle)
     private val restoredSharedDestinationState = sharedDestinationStateStore.restore()
@@ -281,6 +283,16 @@ class MainViewModel internal constructor(
         }
     }
 
+    val trips = tripRepository.trips
+
+    /** Creates a trip when [id] is null, otherwise renames it and replaces its rides. */
+    fun saveTrip(id: Long?, name: String, rideIds: Set<Long>) {
+        viewModelScope.launch {
+            tripRepository.save(id, name, rideIds)
+            if (id == null) showMessage("Trip created")
+        }
+    }
+
     fun clearTransientMessage() {
         mutableUiState.update { it.copy(transientMessage = null, failedShare = null) }
     }
@@ -333,6 +345,7 @@ class MainViewModel internal constructor(
                     navigationController = container.navigationController,
                     appSettings = container.appSettings,
                     destinationRepository = container.destinationRepository,
+                    tripRepository = container.tripRepository,
                 )
             }
         }

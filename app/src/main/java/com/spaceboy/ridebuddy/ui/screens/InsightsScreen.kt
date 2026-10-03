@@ -81,7 +81,7 @@ fun InsightsScreen(
 
 /** The period's total, its distance trend, then totals, averages and records. */
 @Composable
-private fun InsightFigures(insights: RideInsights, units: DistanceUnits) {
+internal fun InsightFigures(insights: RideInsights, units: DistanceUnits) {
     val locale = LocalConfiguration.current.locales[0]
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Card(Modifier.fillMaxWidth()) {

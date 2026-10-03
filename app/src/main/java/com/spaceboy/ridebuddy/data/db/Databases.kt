@@ -1,6 +1,7 @@
 package com.spaceboy.ridebuddy.data.db
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -77,15 +78,21 @@ internal class RouteConverter {
 }
 
 /**
- * The rider's own records: ride summaries and their recent and saved destinations. Small, and
+ * The rider's own records: ride summaries, the trips they are grouped into, and recent and saved
+ * destinations. Version 2 added the trips; it only adds tables, so Room migrates it. Small, and
  * the file Android's backup service carries — which copies the file itself, so it is kept out of
  * WAL mode where recent writes would sit in a separate log.
  */
-@Database(entities = [Ride::class, Destination::class], version = 1)
+@Database(
+    entities = [Ride::class, Destination::class, Trip::class, TripRide::class],
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 @TypeConverters(RouteConverter::class)
 abstract class RideBuddyDatabase : RoomDatabase() {
     abstract fun rides(): RideDao
     abstract fun destinations(): DestinationDao
+    abstract fun trips(): TripDao
 
     companion object {
         const val FileName = "ridebuddy.db"

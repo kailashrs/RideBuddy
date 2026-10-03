@@ -26,6 +26,7 @@ import com.spaceboy.ridebuddy.data.RideHistoryMaintenance
 import com.spaceboy.ridebuddy.data.db.RideBuddyDatabase
 import com.spaceboy.ridebuddy.core.navigation.NavigationDestination
 import com.spaceboy.ridebuddy.data.DestinationRepository
+import com.spaceboy.ridebuddy.data.TripRepository
 import com.spaceboy.ridebuddy.data.db.RawTelemetryDatabase
 import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
@@ -90,6 +91,7 @@ class AppContainer(context: Context) {
     private val rideHistoryMaintenance = RideHistoryMaintenance(rideRepository, appSettings, applicationScope)
     val navigationApiKey = NavigationApiKey(SecureNavigationApiKeyStore(context), applicationScope)
     val destinationParser = DestinationParser(rideLocationLabeler)
+    val tripRepository = TripRepository(database.trips(), applicationScope)
     val destinationRepository = DestinationRepository(
         database.destinations(),
         applicationScope,
