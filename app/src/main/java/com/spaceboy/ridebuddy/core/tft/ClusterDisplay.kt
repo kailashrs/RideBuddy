@@ -158,10 +158,12 @@ internal fun callScreen(call: TrackedCall?, settings: AppSettings): Map<ClusterF
         TftCallState.Outgoing -> TftCallEncoder.outgoing()
     }
     // The OEM's order: the state first, then who is calling. The fields are written in this
-    // order, and a name sent before the cluster knows a call is up can go unshown.
+    // order, and a name sent before the cluster knows a call is up can go unshown. Only an
+    // incoming call names its caller, as with the OEM: the cluster takes a caller's name as an
+    // incoming call, so naming an outgoing one turned it into a ringing call, then a missed one.
     return buildMap {
         put(ClusterField(BleCharacteristics.CallState), state)
-        if (settings.callerDisplay) {
+        if (settings.callerDisplay && call.state != TftCallState.Outgoing) {
             put(ClusterField(BleCharacteristics.CallerName), TftCallEncoder.callerName(call.callerName ?: call.callerNumber ?: "Unknown caller"))
             put(ClusterField(BleCharacteristics.CallerNumber), TftCallEncoder.callerNumber(call.callerNumber.orEmpty()))
         }

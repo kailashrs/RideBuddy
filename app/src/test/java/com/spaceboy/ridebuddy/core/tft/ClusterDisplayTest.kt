@@ -165,6 +165,18 @@ class ClusterDisplayTest {
     }
 
     @Test
+    fun `an outgoing call sends only its state, never a caller, as the OEM does`() {
+        val outgoing = callScreen(call.copy(state = TftCallState.Outgoing), AppSettings(callerDisplay = true))!!
+        assertEquals(mapOf(ClusterField(BleCharacteristics.CallState) to TftCallEncoder.outgoing().toList()),
+            outgoing.mapValues { it.value.toList() })
+        val answered = callScreen(call.copy(state = TftCallState.Answered), AppSettings(callerDisplay = true))!!
+        assertEquals(
+            setOf(BleCharacteristics.CallState, BleCharacteristics.CallerName, BleCharacteristics.CallerNumber),
+            answered.keys.map { it.characteristic }.toSet(),
+        )
+    }
+
+    @Test
     fun `an ended call is written once, and never for a call that was not shown`() {
         val (_, ringing) = drive(DesiredDisplay(null, callScreen(call, AppSettings(callerDisplay = true)), callReady = true))
 

@@ -319,7 +319,13 @@ blocking 200 ms (`looper.a.b`) after each group; it then writes the number twice
 gap. Accepting a call writes the state three times. All of these go through `BleServerHelper`'s one
 write queue as **acknowledged** writes (type `2`), so they reach the cluster in exactly that order.
 
-RideBuddy keeps the order — state, name, number — and writes each once: `writeAndAwait` already
+An outgoing call (`b(true, …)`) writes only the state, three times: the OEM never names the other
+party of a call the rider placed. That matters — the cluster takes a caller name as an incoming
+call, so a name sent after the outgoing state turns the call into a ringing one, and into a missed
+call if it never connects.
+
+RideBuddy keeps the order — state, name, number, the last two only for an incoming call — and writes
+each once: `writeAndAwait` already
 confirms delivery, so the repetition looks like belt-and-braces rather than a protocol requirement.
 Unverified — see the call section of the validation checklist.
 
@@ -331,7 +337,7 @@ Unverified — see the call section of the validation checklist.
 | --- | --- | --- |
 | Incoming, ringing | `01 00 00 01` | `a(true, …)` |
 | Answered | `01 01 00 00` | `c(true, …)`, and the `8740` accept path |
-| Outgoing | `01 00 00 02` | `b(true, …)`, held for the whole call |
+| Outgoing | `01 00 00 02` | `b(true, …)`, held for the whole call; never followed by a name or number |
 | Ended | `01 00 01 00` | `a(false, …)` / `b(false, …)` |
 
 The OEM never marks an outgoing call answered; direction `2` stands until it ends. A missed call
