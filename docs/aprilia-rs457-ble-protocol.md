@@ -312,12 +312,16 @@ This is deliberate OEM behavior rather than a decompiler artifact.
 RideBuddy does not reproduce the second pass. That divergence, its rationale and the evidence that
 would reverse it are recorded in [cluster-link-decisions.md](cluster-link-decisions.md#d1).
 
-The OEM repeats parts of the call path too, and RideBuddy does not: caller state (`8730`) plus name
-(`8710`) and number (`8760`) go out three times on an incoming call, the number (`8760`) twice more,
-and the state (`8730`) twice when a call is accepted. Unlike the navigation fields these are all
-**acknowledged** writes (type `2`), so `writeAndAwait` already confirms delivery and the repetition
-looks like belt-and-braces rather than a protocol requirement. Unverified — see the call section of
-the validation checklist.
+The OEM repeats parts of the call path too, and RideBuddy does not. On an incoming call
+`DashboardActivity`'s ringing handler (`u.a(true, number)`) runs, three times over, the state
+(`A0()` → `8730`), then the name (`N0()` → `8710`), then the number (`N0()` calls `O0()` → `8760`),
+blocking 200 ms (`looper.a.b`) after each group; it then writes the number twice more with the same
+gap. Accepting a call writes the state three times. All of these go through `BleServerHelper`'s one
+write queue as **acknowledged** writes (type `2`), so they reach the cluster in exactly that order.
+
+RideBuddy keeps the order — state, name, number — and writes each once: `writeAndAwait` already
+confirms delivery, so the repetition looks like belt-and-braces rather than a protocol requirement.
+Unverified — see the call section of the validation checklist.
 
 ### Call state and caller fields
 
@@ -335,9 +339,11 @@ The OEM never marks an outgoing call answered; direction `2` stands until it end
 
 `8710` caller name is `[0x0A, up to 19 characters, zero-padded to 20]`, filtered to
 `[A-Za-z0-9 ]` with `Unknown Number` as the fallback. The OEM resolves the name by looking the
-number up in Contacts (`ContactsContract.PhoneLookup`, hence its `READ_CONTACTS`); RideBuddy takes
-`Call.Details.getCallerDisplayName()`, which Telecom has already resolved, and falls back to the
-number from the `tel:` handle. Neither needs `READ_CONTACTS` here.
+number up in Contacts (`ContactsContract.PhoneLookup`, hence its `READ_CONTACTS`). RideBuddy takes
+Telecom's `Call.Details.getContactDisplayName()`, then looks the number up in Contacts itself, then
+falls back to the network-supplied `getCallerDisplayName()` and finally the number from the `tel:`
+handle. Both contact routes need `READ_CONTACTS`, which RideBuddy asks for when Caller display is
+turned on.
 
 `8760` caller number is unheadered: up to 20 bytes, zero-padded. The OEM writes `takeLast(10)` of
 the raw number, so an international number reaches the cluster without its country code. RideBuddy
