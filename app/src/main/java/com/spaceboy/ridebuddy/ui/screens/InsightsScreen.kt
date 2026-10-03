@@ -62,7 +62,7 @@ fun InsightsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(vertical = 16.dp),
+            .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PeriodSelector(selectedPeriod, onPeriodSelected)
