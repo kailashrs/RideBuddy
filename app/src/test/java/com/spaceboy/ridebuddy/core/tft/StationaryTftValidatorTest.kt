@@ -79,9 +79,9 @@ class StationaryTftValidatorTest {
         assertEquals(StationaryTftTestResult.Succeeded(7), result)
         assertEquals(
             listOf(
+                BleCharacteristics.CallState,
                 BleCharacteristics.CallerName,
                 BleCharacteristics.CallerNumber,
-                BleCharacteristics.CallState,
                 BleCharacteristics.CallState,
                 BleCharacteristics.CallState,
                 BleCharacteristics.CallState,

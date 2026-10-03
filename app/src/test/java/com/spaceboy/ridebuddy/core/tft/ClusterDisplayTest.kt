@@ -152,11 +152,11 @@ class ClusterDisplayTest {
     private val call = TrackedCall("1", "Asha", "+919876543210", TftCallState.Ringing)
 
     @Test
-    fun `a call goes first, with name and number only when callers are shown`() {
+    fun `a call goes first, state before the caller as the OEM sends it, with the caller only when shown`() {
         val shownCallers = callScreen(call, AppSettings(callerDisplay = true))
         val (sent, _) = drive(DesiredDisplay(screen(RouteDisplay.Guiding(title, guidance())), shownCallers, callReady = true))
         assertEquals(
-            listOf(BleCharacteristics.CallerName, BleCharacteristics.CallerNumber, BleCharacteristics.CallState),
+            listOf(BleCharacteristics.CallState, BleCharacteristics.CallerName, BleCharacteristics.CallerNumber),
             sent.take(3).characteristics(),
         )
 

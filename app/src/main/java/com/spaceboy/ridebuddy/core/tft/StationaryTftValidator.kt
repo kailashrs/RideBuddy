@@ -128,10 +128,11 @@ class StationaryTftValidator(
      * before the next one is sent.
      */
     private fun callFrames(): List<Frame> = listOf(
-        // Caller identity draws nothing on its own; it is the state that puts a screen up.
+        // The OEM's order, as a real call sends it: the state puts the call screen up, then
+        // the caller's name and number fill it in.
+        Frame(BleCharacteristics.CallState, TftCallEncoder.ringing()),
         Frame(BleCharacteristics.CallerName, TftCallEncoder.callerName(TestCallerName)),
-        Frame(BleCharacteristics.CallerNumber, TftCallEncoder.callerNumber(TestCallerNumber)),
-        Frame(BleCharacteristics.CallState, TftCallEncoder.ringing(), hold = DisplayHold),
+        Frame(BleCharacteristics.CallerNumber, TftCallEncoder.callerNumber(TestCallerNumber), hold = DisplayHold),
         Frame(BleCharacteristics.CallState, TftCallEncoder.accepted(), hold = DisplayHold),
         Frame(BleCharacteristics.CallState, TftCallEncoder.ended(), hold = DisplayHold),
         Frame(BleCharacteristics.CallState, TftCallEncoder.outgoing(), hold = DisplayHold),
