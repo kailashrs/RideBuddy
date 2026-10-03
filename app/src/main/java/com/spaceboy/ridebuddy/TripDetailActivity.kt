@@ -28,6 +28,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.spaceboy.ridebuddy.data.rides
+import com.spaceboy.ridebuddy.data.tripRoutes
 import com.spaceboy.ridebuddy.ui.screens.TripDetailContent
 import com.spaceboy.ridebuddy.ui.screens.TripEditorDialog
 import com.spaceboy.ridebuddy.ui.theme.Rs457Theme
@@ -64,6 +66,10 @@ class TripDetailActivity : ComponentActivity() {
                 val allRides by container.rideRepository.rides.collectAsStateWithLifecycle()
                 val trip = trips.firstOrNull { it.trip.id == tripId }
                 val rides = remember(trip, allRides) { trip?.rides(allRides).orEmpty() }
+                // Each ride's samples are a separate blob, so the routes load after the figures.
+                val routes by produceState(emptyList<List<Pair<Double, Double>>>(), rides) {
+                    value = tripRoutes(rides) { container.rideRepository.samples(it) }
+                }
                 var loaded by remember { mutableStateOf(false) }
                 var editing by rememberSaveable { mutableStateOf(false) }
                 var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -137,6 +143,7 @@ class TripDetailActivity : ComponentActivity() {
                             units = appSettings.distanceUnits,
                             onRideSelected = { startActivity(RideDetailActivity.intent(this, it.id)) },
                             modifier = Modifier.padding(padding),
+                            routes = routes,
                         )
                     }
                 }

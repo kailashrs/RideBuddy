@@ -125,7 +125,8 @@ class TripsScreenTest {
         compose.setContent {
             Theme {
                 Scaffold(topBar = { TopAppBar(title = { Text("East coast weekend") }) }) { padding ->
-                    TripDetailContent(rides.take(3), DistanceUnits.Metric, { opened = it.id }, Modifier.padding(padding))
+                    TripDetailContent(rides.take(3), DistanceUnits.Metric, { opened = it.id }, Modifier.padding(padding),
+                        routes = listOf(listOf(11.9 to 79.8, 12.0 to 79.9), listOf(12.0 to 79.9, 12.2 to 79.1)))
                 }
             }
         }
@@ -133,6 +134,8 @@ class TripsScreenTest {
             compose.runOnIdle { dark = night }
             compose.onNodeWithText("256.5 km").assertIsDisplayed()
             compose.onNodeWithText("28–29 Sept · 3 rides", substring = true).assertIsDisplayed()
+            // Robolectric cannot draw map tiles; the card, its map slot and its action still render.
+            compose.onNodeWithText("Full map", useUnmergedTree = true).assertIsDisplayed()
             capture("trip-detail-${if (night) "dark" else "light"}")
         }
         compose.onNodeWithText("Auroville → Tiruvannamalai").performScrollTo().assertIsDisplayed().performClick()

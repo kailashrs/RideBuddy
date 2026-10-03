@@ -7,10 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.CircularProgressIndicator
-import com.google.android.gms.maps.MapsInitializer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,7 +17,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,11 +39,13 @@ import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import com.spaceboy.ridebuddy.ui.components.Metric
+import com.spaceboy.ridebuddy.ui.components.RouteCard
+import com.spaceboy.ridebuddy.data.MaxRoutePoints
+import com.spaceboy.ridebuddy.data.rideRoute
 import com.spaceboy.ridebuddy.ui.components.SectionHeader
 import com.spaceboy.ridebuddy.ui.screens.routeLabel
 import androidx.compose.material3.Button
@@ -67,18 +65,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.remember
 import androidx.lifecycle.lifecycleScope
 import androidx.core.net.toUri
@@ -101,18 +93,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.Polyline
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberMarkerState
-import androidx.compose.runtime.rememberCoroutineScope
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
 
 /**
  * One ride in detail: summary, route map, telemetry charts, and export.
@@ -405,14 +385,11 @@ private fun buildRideDetailUiData(
     samples: List<RideSample>,
     units: DistanceUnits,
 ): RideDetailUiData {
-    val routePoints = samples.mapNotNull { sample ->
-        sample.latitude?.let { latitude -> sample.longitude?.let { longitude -> latitude to longitude } }
-    }
     return RideDetailUiData(
         ride = ride,
         hasSamples = samples.isNotEmpty(),
-        hasLocations = routePoints.isNotEmpty(),
-        routePoints = routePoints.ifEmpty { ride.routePreview.map { it.latitude to it.longitude } }.downsampled(MaxRoutePoints),
+        hasLocations = samples.any { it.latitude != null && it.longitude != null },
+        routePoints = rideRoute(ride, samples, MaxRoutePoints),
         speedValues = telemetryChartData(samples, MaxChartPoints) { UnitFormatter.chartSpeed(it.speedKph, units) },
         rpmValues = telemetryChartData(samples, MaxChartPoints) { it.rpm.toDouble() },
         throttleValues = telemetryChartData(samples, MaxChartPoints) { it.throttlePercent.toDouble() },
@@ -420,26 +397,9 @@ private fun buildRideDetailUiData(
     )
 }
 
-/**
- * Evenly spaced subset of at most [maxPoints], preserving the first and last elements.
- *
- * Index arithmetic is done in `Long` because the intermediate product of the source index
- * and the target index overflows `Int` for a long ride's sample count.
- */
-private fun <T> List<T>.downsampled(maxPoints: Int): List<T> {
-    if (size <= maxPoints) return this
-    val sourceLastIndex = lastIndex.toLong()
-    val targetLastIndex = maxPoints - 1L
-    return List(maxPoints) { targetIndex ->
-        this[(targetIndex.toLong() * sourceLastIndex / targetLastIndex).toInt()]
-    }
-}
-
 /** Roughly one point per pixel of chart width; more cannot be seen. */
 private const val MaxChartPoints = 600
 
-/** A route tolerates more detail than a chart before its shape stops improving. */
-private const val MaxRoutePoints = 1_000
 
 /** Events listed. A long ride can produce hundreds, which is not a readable list. */
 private const val MaxVisibleEvents = 20
@@ -495,7 +455,13 @@ internal fun RideDetailContent(
         }
         if (data.routePoints.size > 1) {
             item(key = "route_card", contentType = "route_map") {
-                RouteCard(data.routePoints, hasParking, onOpenParking)
+                RouteCard(
+                    routes = listOf(data.routePoints),
+                    fullMapTitle = "Recorded route",
+                    finishLabel = "Parking location",
+                    mapDescription = "Recorded ride map with start and parking markers",
+                    onOpenParking = onOpenParking.takeIf { hasParking },
+                )
             }
         }
         item(key = "ride_summary", contentType = "summary_card") {
@@ -566,121 +532,6 @@ internal fun RideDetailContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun RouteCard(points: List<Pair<Double, Double>>, hasParking: Boolean, onOpenParking: () -> Unit) {
-    var exploring by rememberSaveable { mutableStateOf(false) }
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        if (!exploring) RecordedRouteMap(points, Modifier.fillMaxWidth().height(220.dp), interactive = false)
-        // An even pair across the card's width, so neither action reads as an afterthought.
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (hasParking) {
-                OutlinedButton(onClick = onOpenParking, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Outlined.LocalParking, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Parking", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            FilledTonalButton(onClick = { exploring = true }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Outlined.Map, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                Text(stringResource(R.string.navigation_full_map), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-    if (exploring) {
-        Dialog(onDismissRequest = { exploring = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Recorded route") },
-                        navigationIcon = {
-                            IconButton(onClick = { exploring = false }) {
-                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back to ride details")
-                            }
-                        },
-                    )
-                },
-            ) { padding ->
-                RecordedRouteMap(points, Modifier.fillMaxSize().padding(padding), interactive = true)
-            }
-        }
-    }
-}
-
-/** The full-screen map owns gestures, so panning never competes with the details list. */
-@Composable
-private fun RecordedRouteMap(points: List<Pair<Double, Double>>, modifier: Modifier, interactive: Boolean) {
-    val context = LocalContext.current
-    var initialized by remember(context) { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(context) {
-        // This Activity can be restored directly after process death; wait for the key load.
-        val key = context.appContainer.navigationApiKey
-        key.awaitLoaded()
-        initialized = key.isApplied && runCatching {
-            MapsInitializer.initialize(context.applicationContext) == 0
-        }.getOrDefault(false)
-    }
-    if (initialized != true) {
-        Box(modifier, contentAlignment = Alignment.Center) {
-            if (initialized == null) CircularProgressIndicator() else Text("Map unavailable")
-        }
-        return
-    }
-    val routeColor = MaterialTheme.colorScheme.primary
-    val cameraPaddingPx = with(LocalDensity.current) { 48.dp.toPx().toInt() }
-    val route = remember(points) { points.map { LatLng(it.first, it.second) } }
-    val bounds = remember(route) { LatLngBounds.builder().apply { route.forEach(::include) }.build() }
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(bounds.center, 12f)
-    }
-    val scope = rememberCoroutineScope()
-    var loaded by remember { mutableStateOf(false) }
-    val fitRoute: () -> Unit = {
-        scope.launch {
-            cameraPositionState.move(
-                if (bounds.southwest == bounds.northeast) CameraUpdateFactory.newLatLngZoom(bounds.center, 15f)
-                else CameraUpdateFactory.newLatLngBounds(bounds, cameraPaddingPx),
-            )
-        }
-    }
-    Box(modifier) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize().semantics { contentDescription = "Recorded ride map with start and parking markers" },
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = false),
-            uiSettings = MapUiSettings(
-                zoomControlsEnabled = interactive,
-                mapToolbarEnabled = interactive,
-                compassEnabled = interactive,
-                myLocationButtonEnabled = false,
-                scrollGesturesEnabled = interactive,
-                zoomGesturesEnabled = interactive,
-                rotationGesturesEnabled = interactive,
-                tiltGesturesEnabled = false,
-            ),
-            onMapLoaded = { loaded = true; fitRoute() },
-        ) {
-            Polyline(points = route, color = routeColor, width = 7f)
-            @Suppress("DEPRECATION")
-            Marker(state = rememberMarkerState(position = route.first()), title = "Start")
-            @Suppress("DEPRECATION")
-            Marker(state = rememberMarkerState(position = route.last()), title = "Parking location")
-        }
-        if (interactive) {
-            Button(
-                onClick = fitRoute,
-                enabled = loaded,
-                modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
-            ) { Text("Show whole route") }
         }
     }
 }

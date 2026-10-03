@@ -67,6 +67,8 @@ import com.spaceboy.ridebuddy.data.rides
 import com.spaceboy.ridebuddy.data.sortedByLatestRide
 import com.spaceboy.ridebuddy.ui.components.EmptyState
 import com.spaceboy.ridebuddy.ui.components.Metric
+import com.spaceboy.ridebuddy.ui.components.RouteCard
+import com.spaceboy.ridebuddy.ui.components.Routes
 import com.spaceboy.ridebuddy.ui.components.SectionHeader
 import java.time.Instant
 import java.time.LocalDate
@@ -165,8 +167,8 @@ internal fun tripDates(rides: List<Ride>): String {
 }
 
 /**
- * A trip's figures: when it was ridden, the same totals, averages and records Insights shows
- * for a period, then the rides themselves.
+ * A trip's figures: when it was ridden, every ride on one map, the same totals, averages and
+ * records Insights shows for a period, then the rides themselves.
  */
 @Composable
 internal fun TripDetailContent(
@@ -174,6 +176,8 @@ internal fun TripDetailContent(
     units: DistanceUnits,
     onRideSelected: (Ride) -> Unit,
     modifier: Modifier = Modifier,
+    /** One route per ride that has one; empty until loaded or when no ride was located. */
+    routes: Routes = emptyList(),
 ) {
     if (rides.isEmpty()) {
         EmptyState(Icons.Outlined.Route, "No rides in this trip", "Edit the trip to add rides to it.", modifier)
@@ -190,6 +194,16 @@ internal fun TripDetailContent(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (routes.isNotEmpty()) {
+            Box(Modifier.padding(horizontal = 16.dp)) {
+                RouteCard(
+                    routes = routes,
+                    fullMapTitle = "Trip route",
+                    finishLabel = "Finish",
+                    mapDescription = "Map of every ride in this trip, with start and finish markers",
+                )
+            }
+        }
         InsightFigures(insights, units)
         // A trip runs over days and a ride card shows only its time, so the rides sit under the
         // same day headings History uses.
