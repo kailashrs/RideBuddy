@@ -565,8 +565,8 @@ data class ActiveRide(
             throttleMillis = throttleMillis + (lastThrottlePercent / 2.0 + frame.throttlePercent / 2.0) * elapsed,
             lastMileageKilometresPerLitre = currentMileage,
             // An interval without a mileage reading contributes nothing rather than voiding
-            // the total. The bike encodes 0 km/L on every closed-throttle overrun, which parses
-            // to "no reading", so demanding unbroken coverage threw the estimate away on every
+            // the total. The bike sends 0 km/L, which parses to "no reading", on some closed-
+            // throttle frames, so demanding unbroken coverage threw the estimate away on every
             // real ride -- and those are the intervals burning least fuel anyway.
             estimatedFuelLitres = fuelDelta?.let { (estimatedFuelLitres ?: 0.0) + it }
                 ?: estimatedFuelLitres,

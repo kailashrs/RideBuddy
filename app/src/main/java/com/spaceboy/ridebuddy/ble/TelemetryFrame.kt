@@ -18,7 +18,8 @@ private val Byte.unsigned: Int
  * byte  0      0x10 header
  * bytes 1..2   front-wheel speed, raw * 0.01 km/h
  * byte  3      throttle opening, percentage-like
- * byte  4      instantaneous mileage, raw * 0.2 km/L
+ * byte  4      instantaneous mileage, raw * 0.2 km/L; tops out at 254 (50.8 km/L), which
+ *              the bike sends mostly with the throttle closed
  * bytes 5..8   engine RPM, unsigned
  * bytes 9..n   firmware-specific trailer, ignored
  * ```

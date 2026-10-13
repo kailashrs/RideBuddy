@@ -43,9 +43,9 @@ class RideDistanceIntegrationTest {
     }
 
     /**
-     * The bike encodes 0 km/L on every closed-throttle overrun, which parses to "no reading".
-     * Voiding the ride on that threw the estimate away on every real ride, so an unmeasured
-     * interval now contributes nothing instead.
+     * The bike sends 0 km/L, which parses to "no reading", for about 5% of moving frames, nearly
+     * all of them with the throttle closed. Voiding the ride on that threw the estimate away on
+     * every real ride, so an unmeasured interval now contributes nothing instead.
      */
     @Test fun `a missing mileage interval contributes nothing but keeps the fuel estimate`() {
         val withGap = ActiveRide.started(0L, 0L, frame())
