@@ -40,6 +40,7 @@ internal object LiveCardFixture {
         ActiveRide.started(startedAtMillis = 0L, receivedAtElapsedRealtime = 0L, frame = Frame)
             .copy(
                 distanceKilometres = 3.0,
+                estimatedFuelLitres = 0.1,
                 telemetryDurationMillis = RideMillis,
                 lastSampleAtElapsedRealtime = RideMillis,
             )

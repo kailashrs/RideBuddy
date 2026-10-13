@@ -474,11 +474,6 @@ private fun LiveDetailsSheet(
             Metric("RPM", frame?.engineRpm?.toString() ?: "—")
             Metric("Throttle", frame?.let { "${it.throttlePercent}%" } ?: "—")
         }
-        DetailRow(
-            "Mileage",
-            frame?.let { UnitFormatter.mileage(it.instantaneousMileageKilometresPerLitre, units, locale) }
-                ?: "— ${UnitFormatter.mileageUnit(units)}",
-        )
 
         SectionHeader("This ride")
         if (activeRide == null) {
@@ -486,6 +481,9 @@ private fun LiveDetailsSheet(
         } else {
             DetailRow("Distance", UnitFormatter.distance(activeRide.distanceKilometres, units, locale))
             DetailRow("Time", formatDuration(activeRide.lastSampleAtElapsedRealtime - activeRide.startedAtElapsedRealtime))
+            // The ride's average so far, the figure it will be saved with. The bike's own reading
+            // swings with every throttle movement and is not worth reading as a live number.
+            DetailRow("Mileage", UnitFormatter.mileage(activeRide.toRide().averageMileageKilometresPerLitre, units, locale))
         }
         // Shown whether or not a ride is running: the detector works on the recent telemetry
         // window, not on the ride, so these are real counts even before recording starts.

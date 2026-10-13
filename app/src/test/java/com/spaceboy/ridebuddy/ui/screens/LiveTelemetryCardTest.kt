@@ -100,6 +100,17 @@ class LiveTelemetryCardTest {
         assertEquals(0, endedRide)
     }
 
+    @Test
+    fun theSheetShowsTheRidesAverageMileageRatherThanTheBikesReading() {
+        show(ride = LiveCardFixture.recording())
+
+        composeRule.onNodeWithText("Details").performClick()
+
+        // 3 km on 0.1 L; the frame's own reading is 22.4 km/L.
+        composeRule.onNodeWithText("30.0 km/L").assertExists()
+        composeRule.onNodeWithText("22.4 km/L").assertDoesNotExist()
+    }
+
     private fun show(ride: ActiveRide?) {
         composeRule.setContent {
             MaterialTheme {

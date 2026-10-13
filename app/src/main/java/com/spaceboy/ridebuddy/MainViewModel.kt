@@ -28,7 +28,6 @@ import com.spaceboy.ridebuddy.data.RideRecorder
 import com.spaceboy.ridebuddy.data.RideRepository
 import com.spaceboy.ridebuddy.data.calculateLiveRideMetrics
 import com.spaceboy.ridebuddy.data.nextAccelerationG
-import com.spaceboy.ridebuddy.data.LiveTelemetry
 import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import com.spaceboy.ridebuddy.domain.BikeConnection
 import kotlinx.coroutines.CancellationException
@@ -90,8 +89,7 @@ class MainViewModel internal constructor(
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
     val connectionState = bikeConnection.connectionState
     val telemetry: StateFlow<TelemetryFrame?> = bikeConnection.latestReading
-        .runningFold(LiveTelemetry()) { live, reading -> live.next(reading) }
-        .map { it.frame }
+        .map { it?.frame }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val identity = bikeConnection.identity
     val diagnostics = bikeConnection.diagnostics
