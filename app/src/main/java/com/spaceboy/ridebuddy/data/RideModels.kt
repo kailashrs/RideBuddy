@@ -42,14 +42,21 @@ data class Ride(
 
     val averagingDurationMillis: Long get() = telemetryDurationMillis ?: durationMillis
 
-    /** Distance over fuel, or null when the ride covered no distance or had no mileage readings. */
+    /**
+     * Distance over fuel, or null before [MinimumMileageDistanceKilometres] or when the ride had
+     * no mileage readings. Over the first kilometres the figure swings by a third or more, and
+     * most rides that never get further are the bike being moved, not ridden.
+     */
     val averageMileageKilometresPerLitre: Double?
         get() {
-            val distance = distanceKilometres.takeIf { it > 0.0 } ?: return null
+            val distance = distanceKilometres.takeIf { it >= MinimumMileageDistanceKilometres } ?: return null
             val fuel = estimatedFuelLitres ?: return null
             return distance / fuel
         }
 }
+
+/** A ride's own mileage is shown from here on; short rides still count towards [combinedMileageKilometresPerLitre]. */
+internal const val MinimumMileageDistanceKilometres = 2.0
 
 /**
  * Fleet mileage across several rides: total distance over total fuel, not the mean of the

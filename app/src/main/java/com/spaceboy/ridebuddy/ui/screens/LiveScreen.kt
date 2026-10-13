@@ -481,8 +481,9 @@ private fun LiveDetailsSheet(
         } else {
             DetailRow("Distance", UnitFormatter.distance(activeRide.distanceKilometres, units, locale))
             DetailRow("Time", formatDuration(activeRide.lastSampleAtElapsedRealtime - activeRide.startedAtElapsedRealtime))
-            // The ride's average so far, the figure it will be saved with. The bike's own reading
-            // swings with every throttle movement and is not worth reading as a live number.
+            // The ride's average so far, the figure it will be saved with, and a dash for its first
+            // two kilometres. The bike's own reading swings with every throttle movement and is
+            // not worth reading as a live number.
             DetailRow("Mileage", UnitFormatter.mileage(activeRide.toRide().averageMileageKilometresPerLitre, units, locale))
         }
         // Shown whether or not a ride is running: the detector works on the recent telemetry

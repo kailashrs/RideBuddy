@@ -3,7 +3,7 @@ package com.spaceboy.ridebuddy.data
 import com.spaceboy.ridebuddy.ble.parseTelemetryFrame
 import com.spaceboy.ridebuddy.domain.TelemetryFrame
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -29,7 +29,12 @@ class RideDistanceIntegrationTest {
         val ride = ActiveRide.started(0L, 0L, frame).add(frame, 1_000L).toRide()
         assertEquals(25.0, requireNotNull(frame.instantaneousMileageKilometresPerLitre), 0.000_001)
         assertEquals(0.0004, requireNotNull(ride.estimatedFuelLitres), 0.000_001)
-        assertEquals(25.0, requireNotNull(ride.averageMileageKilometresPerLitre), 0.000_001)
+    }
+
+    @Test fun `a ride's mileage is shown only from two kilometres`() {
+        val ride = ActiveRide.started(0L, 0L, frame()).add(frame(), 1_000L).toRide()
+        assertNull(ride.copy(distanceKilometres = 1.9, estimatedFuelLitres = 0.1).averageMileageKilometresPerLitre)
+        assertEquals(20.0, requireNotNull(ride.copy(distanceKilometres = 2.0, estimatedFuelLitres = 0.1).averageMileageKilometresPerLitre), 0.000_001)
     }
 
     @Test fun `fuel integration weights the endpoint consumption by speed`() {
@@ -57,7 +62,6 @@ class RideDistanceIntegrationTest {
             .toRide()
         val gapFuel = requireNotNull(withGap.estimatedFuelLitres)
         val fullFuel = requireNotNull(unbroken.estimatedFuelLitres)
-        assertNotNull(withGap.averageMileageKilometresPerLitre)
         // Two of the four intervals had no reading on one endpoint, so the total is lower.
         assertTrue(gapFuel > 0.0 && gapFuel < fullFuel)
     }
